@@ -57,11 +57,13 @@ export async function getInitConfig() {
 }
 
 const defaultFeConfigs: FastGPTFeConfigsType = {
+
   show_emptyChat: false,
   show_git: false,
   docUrl: '',
   openAPIDocUrl: '',
   systemTitle: 'AI Agent',
+
   concatMd:
     '',
   limit: {
