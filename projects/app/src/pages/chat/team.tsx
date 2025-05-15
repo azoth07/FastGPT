@@ -18,7 +18,7 @@ import SliderApps from '@/pageComponents/chat/SliderApps';
 import { GPTMessages2Chats } from '@fastgpt/global/core/chat/adapt';
 import { useRequest2 } from '@fastgpt/web/hooks/useRequest';
 import ChatContextProvider, { ChatContext } from '@/web/core/chat/context/chatContext';
-import { AppListItemType } from '@fastgpt/global/core/app/type';
+import { type AppListItemType } from '@fastgpt/global/core/app/type';
 import { useContextSelector } from 'use-context-selector';
 import { GetChatTypeEnum } from '@/global/core/chat/constants';
 import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
@@ -112,7 +112,7 @@ const Chat = ({ myApps }: { myApps: AppListItemType[] }) => {
       // Just send a user prompt
       const histories = messages.slice(-1);
 
-      const { responseText, responseData } = await streamFetch({
+      const { responseText } = await streamFetch({
         data: {
           messages: histories,
           variables: {
@@ -144,7 +144,7 @@ const Chat = ({ myApps }: { myApps: AppListItemType[] }) => {
         title: newTitle
       }));
 
-      return { responseText, responseData, isNewChat: forbidLoadChat.current };
+      return { responseText, isNewChat: forbidLoadChat.current };
     },
     [
       chatId,
@@ -192,13 +192,7 @@ const Chat = ({ myApps }: { myApps: AppListItemType[] }) => {
       )}
 
       {(!quoteData || isPc) && (
-        <PageContainer
-          isLoading={loading}
-          flex={'1 0 0'}
-          w={0}
-          p={[0, '16px']}
-          position={'relative'}
-        >
+        <PageContainer flex={'1 0 0'} w={0} p={[0, '16px']} position={'relative'}>
           <Flex h={'100%'} flexDirection={['column', 'row']} bg={'white'}>
             {RenderHistoryList}
             {/* chat container */}
@@ -320,6 +314,7 @@ const Render = (props: Props) => {
         showRouteToAppDetail={false}
         showRouteToDatasetDetail={false}
         isShowReadRawSource={true}
+        isResponseDetail={true}
         // isShowFullText={true}
         showNodeStatus
       >

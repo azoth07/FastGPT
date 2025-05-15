@@ -10,9 +10,9 @@ import { NextAPI } from '@/service/middleware/entry';
 import { ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
 import { readFromSecondary } from '@fastgpt/service/common/mongo/utils';
 import { collectionTagsToTagLabel } from '@fastgpt/service/core/dataset/collection/utils';
-import { PaginationResponse } from '@fastgpt/web/common/fetch/type';
+import { type PaginationResponse } from '@fastgpt/web/common/fetch/type';
 import { parsePaginationRequest } from '@fastgpt/service/common/api/pagination';
-import { DatasetCollectionSchemaType } from '@fastgpt/global/core/dataset/type';
+import { type DatasetCollectionSchemaType } from '@fastgpt/global/core/dataset/type';
 import { MongoDatasetData } from '@fastgpt/service/core/dataset/data/schema';
 import { MongoDatasetTraining } from '@fastgpt/service/core/dataset/training/schema';
 
@@ -93,6 +93,7 @@ async function handler(
           dataAmount: 0,
           indexAmount: 0,
           trainingAmount: 0,
+          hasError: false,
           permission
         }))
       ),
@@ -113,7 +114,7 @@ async function handler(
 
   // Compute data amount
   const [trainingAmount, dataAmount]: [
-    { _id: string; count: number }[],
+    { _id: string; count: number; hasError: boolean }[],
     { _id: string; count: number }[]
   ] = await Promise.all([
     MongoDatasetTraining.aggregate(
@@ -128,7 +129,8 @@ async function handler(
         {
           $group: {
             _id: '$collectionId',
-            count: { $sum: 1 }
+            count: { $sum: 1 },
+            hasError: { $max: { $cond: [{ $ifNull: ['$errorMsg', false] }, true, false] } }
           }
         }
       ],
@@ -168,6 +170,7 @@ async function handler(
       trainingAmount:
         trainingAmount.find((amount) => String(amount._id) === String(item._id))?.count || 0,
       dataAmount: dataAmount.find((amount) => String(amount._id) === String(item._id))?.count || 0,
+      hasError: trainingAmount.find((amount) => String(amount._id) === String(item._id))?.hasError,
       permission
     }))
   );

@@ -1,12 +1,12 @@
-import { DatasetDataIndexItemType, DatasetSchemaType } from './type';
-import {
+import type { DatasetDataIndexItemType, DatasetSchemaType } from './type';
+import type {
   DatasetCollectionTypeEnum,
   DatasetCollectionDataProcessModeEnum,
   ChunkSettingModeEnum,
   DataChunkSplitModeEnum
 } from './constants';
 import type { LLMModelItemType } from '../ai/model.d';
-import { ParentIdType } from 'common/parentFolder/type';
+import type { ParentIdType } from 'common/parentFolder/type';
 
 /* ================= dataset ===================== */
 export type DatasetUpdateBody = {
@@ -15,7 +15,6 @@ export type DatasetUpdateBody = {
   name?: string;
   avatar?: string;
   intro?: string;
-  status?: DatasetSchemaType['status'];
 
   agentModel?: string;
   vlmModel?: string;
@@ -26,6 +25,7 @@ export type DatasetUpdateBody = {
   apiServer?: DatasetSchemaType['apiServer'];
   yuqueServer?: DatasetSchemaType['yuqueServer'];
   feishuServer?: DatasetSchemaType['feishuServer'];
+  chunkSettings?: DatasetSchemaType['chunkSettings'];
 
   // sync schedule
   autoSync?: boolean;
@@ -141,7 +141,6 @@ export type PushDatasetDataChunkProps = {
 
 export type PostWebsiteSyncParams = {
   datasetId: string;
-  billId: string;
 };
 
 export type PushDatasetDataProps = {

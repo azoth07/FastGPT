@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import NextHead from '@/components/common/NextHead';
 import { useRouter } from 'next/router';
 import { getInitChatInfo } from '@/web/core/chat/api';
@@ -26,7 +26,7 @@ import { getNanoid } from '@fastgpt/global/common/string/tools';
 
 import { GetChatTypeEnum } from '@/global/core/chat/constants';
 import ChatContextProvider, { ChatContext } from '@/web/core/chat/context/chatContext';
-import { AppListItemType } from '@fastgpt/global/core/app/type';
+import { type AppListItemType } from '@fastgpt/global/core/app/type';
 import { useContextSelector } from 'use-context-selector';
 import dynamic from 'next/dynamic';
 import ChatBox from '@/components/core/chat/ChatContainer/ChatBox';
@@ -89,7 +89,7 @@ const Chat = ({ myApps }: { myApps: AppListItemType[] }) => {
         // reset all chat tore
         if (e?.code === 501) {
           setLastChatAppId('');
-          router.replace('/app/list');
+          router.replace('/dashboard/apps');
         } else {
           router.replace({
             query: {
@@ -115,7 +115,7 @@ const Chat = ({ myApps }: { myApps: AppListItemType[] }) => {
     }: StartChatFnProps) => {
       // Just send a user prompt
       const histories = messages.slice(-1);
-      const { responseText, responseData } = await streamFetch({
+      const { responseText } = await streamFetch({
         data: {
           messages: histories,
           variables,
@@ -137,7 +137,7 @@ const Chat = ({ myApps }: { myApps: AppListItemType[] }) => {
         title: newTitle
       }));
 
-      return { responseText, responseData, isNewChat: forbidLoadChat.current };
+      return { responseText, isNewChat: forbidLoadChat.current };
     },
     [appId, chatId, onUpdateHistoryTitle, setChatBoxData, forbidLoadChat]
   );
@@ -174,13 +174,7 @@ const Chat = ({ myApps }: { myApps: AppListItemType[] }) => {
       )}
 
       {(!quoteData || isPc) && (
-        <PageContainer
-          isLoading={loading}
-          flex={'1 0 0'}
-          w={0}
-          p={[0, '16px']}
-          position={'relative'}
-        >
+        <PageContainer flex={'1 0 0'} w={0} p={[0, '16px']} position={'relative'}>
           <Flex h={'100%'} flexDirection={['column', 'row']}>
             {/* pc always show history. */}
             {RenderHistorySlider}
@@ -265,7 +259,7 @@ const Render = (props: { appId: string; isStandalone?: string }) => {
           status: 'error',
           title: t('common:core.chat.You need to a chat app')
         });
-        router.replace('/app/list');
+        router.replace('/dashboard/apps');
       } else {
         router.replace({
           query: {
@@ -300,6 +294,7 @@ const Render = (props: { appId: string; isStandalone?: string }) => {
         showRouteToAppDetail={isStandalone !== '1'}
         showRouteToDatasetDetail={isStandalone !== '1'}
         isShowReadRawSource={true}
+        isResponseDetail={true}
         // isShowFullText={true}
         showNodeStatus
       >

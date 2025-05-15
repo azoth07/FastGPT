@@ -24,7 +24,7 @@ import MultipleSelect, {
 import QuestionTip from '@fastgpt/web/components/common/MyTooltip/QuestionTip';
 import JsonEditor from '@fastgpt/web/components/common/Textarea/JsonEditor';
 import React, { useMemo } from 'react';
-import { useFieldArray, UseFormReturn } from 'react-hook-form';
+import { useFieldArray, type UseFormReturn } from 'react-hook-form';
 import { useTranslation } from 'next-i18next';
 import MyIcon from '@fastgpt/web/components/common/Icon';
 import DndDrag, { Draggable } from '@fastgpt/web/components/common/DndDrag';
@@ -144,6 +144,7 @@ const InputTypeConfig = ({
       FlowNodeInputTypeEnum.numberInput,
       FlowNodeInputTypeEnum.switch,
       FlowNodeInputTypeEnum.select,
+      FlowNodeInputTypeEnum.multipleSelect,
       VariableInputEnum.custom
     ];
 
@@ -157,7 +158,8 @@ const InputTypeConfig = ({
       FlowNodeInputTypeEnum.input,
       FlowNodeInputTypeEnum.numberInput,
       FlowNodeInputTypeEnum.switch,
-      FlowNodeInputTypeEnum.select
+      FlowNodeInputTypeEnum.select,
+      FlowNodeInputTypeEnum.multipleSelect
     ];
     return type === 'plugin' && list.includes(inputType as FlowNodeInputTypeEnum);
   }, [inputType, type]);
@@ -297,7 +299,7 @@ const InputTypeConfig = ({
             <FormLabel flex={'0 0 132px'} fontWeight={'medium'}>
               {t('common:core.module.Default Value')}
             </FormLabel>
-            <Flex alignItems={'center'} flex={1} h={10}>
+            <Flex flex={1} h={10}>
               {(inputType === FlowNodeInputTypeEnum.numberInput ||
                 (inputType === VariableInputEnum.custom &&
                   valueType === WorkflowIOValueTypeEnum.number)) && (
@@ -363,6 +365,27 @@ const InputTypeConfig = ({
                   w={'200px'}
                 />
               )}
+              {inputType === FlowNodeInputTypeEnum.multipleSelect && (
+                <MultipleSelect<string>
+                  flex={'1 0 0'}
+                  itemWrap={true}
+                  bg={'myGray.50'}
+                  list={listValue
+                    .filter((item: any) => item.label !== '')
+                    .map((item: any) => ({
+                      label: item.label,
+                      value: item.value
+                    }))}
+                  placeholder={t('workflow:select_default_option')}
+                  value={defaultValue || []}
+                  onSelect={(val) => setValue('defaultValue', val)}
+                  isSelectAll={
+                    defaultValue &&
+                    defaultValue.length ===
+                      listValue.filter((item: any) => item.label !== '').length
+                  }
+                />
+              )}
             </Flex>
           </Flex>
         )}
@@ -390,7 +413,8 @@ const InputTypeConfig = ({
           </>
         )}
 
-        {inputType === FlowNodeInputTypeEnum.select && (
+        {(inputType === FlowNodeInputTypeEnum.select ||
+          inputType == FlowNodeInputTypeEnum.multipleSelect) && (
           <>
             <DndDrag<{ id: string; value: string }>
               onDragEndCb={(list) => {
@@ -564,7 +588,7 @@ const InputTypeConfig = ({
 
       <Flex justify={'flex-end'} gap={3} pb={8} pr={8}>
         <Button variant={'whiteBase'} fontWeight={'medium'} onClick={onClose} w={20}>
-          {t('common:common.Close')}
+          {t('common:Close')}
         </Button>
         <Button
           variant={'primaryOutline'}
@@ -572,7 +596,7 @@ const InputTypeConfig = ({
           onClick={handleSubmit((data) => onSubmitSuccess(data, 'confirm'), onSubmitError)}
           w={20}
         >
-          {t('common:common.Confirm')}
+          {t('common:Confirm')}
         </Button>
         {!isEdit && (
           <Button
@@ -580,7 +604,7 @@ const InputTypeConfig = ({
             onClick={handleSubmit((data) => onSubmitSuccess(data, 'continue'), onSubmitError)}
             w={20}
           >
-            {t('common:common.Continue_Adding')}
+            {t('common:Continue_Adding')}
           </Button>
         )}
       </Flex>

@@ -8,8 +8,8 @@ import type {
 import { getLLMModel } from '../../../../ai/model';
 import { filterToolNodeIdByEdges, getHistories } from '../../utils';
 import { runToolWithToolChoice } from './toolChoice';
-import { DispatchToolModuleProps, ToolNodeItemType } from './type.d';
-import { ChatItemType, UserChatItemValueItemType } from '@fastgpt/global/core/chat/type';
+import { type DispatchToolModuleProps, type ToolNodeItemType } from './type.d';
+import { type ChatItemType, type UserChatItemValueItemType } from '@fastgpt/global/core/chat/type';
 import { ChatItemValueTypeEnum, ChatRoleEnum } from '@fastgpt/global/core/chat/constants';
 import {
   GPTMessages2Chats,
@@ -22,16 +22,16 @@ import { formatModelChars2Points } from '../../../../../support/wallet/usage/uti
 import { getHistoryPreview } from '@fastgpt/global/core/chat/utils';
 import { runToolWithFunctionCall } from './functionCall';
 import { runToolWithPromptCall } from './promptCall';
-import { replaceVariable } from '@fastgpt/global/common/string/tools';
+import { getNanoid, replaceVariable } from '@fastgpt/global/common/string/tools';
 import { getMultiplePrompt, Prompt_Tool_Call } from './constants';
 import { filterToolResponseToPreview } from './utils';
-import { InteractiveNodeResponseType } from '@fastgpt/global/core/workflow/template/system/interactive/type';
+import { type InteractiveNodeResponseType } from '@fastgpt/global/core/workflow/template/system/interactive/type';
 import { getFileContentFromLinks, getHistoryFileLinks } from '../../tools/readFiles';
 import { parseUrlToFileType } from '@fastgpt/global/common/file/tools';
 import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
-import { postTextCensor } from '../../../../../common/api/requestPlusApi';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/model';
 import { getDocumentQuotePrompt } from '@fastgpt/global/core/ai/prompt/AIChat';
+import { postTextCensor } from '../../../../chat/postTextCensor';
 
 type Response = DispatchNodeResultType<{
   [NodeOutputKeyEnum.answerText]: string;
@@ -47,6 +47,7 @@ export const dispatchRunTools = async (props: DispatchToolModuleProps): Promise<
     query,
     requestOrigin,
     chatConfig,
+    lastInteractive,
     runningUserInfo,
     externalProvider,
     params: {
@@ -85,18 +86,7 @@ export const dispatchRunTools = async (props: DispatchToolModuleProps): Promise<
     });
 
   // Check interactive entry
-  const interactiveResponse = (() => {
-    const lastHistory = chatHistories[chatHistories.length - 1];
-    if (isEntry && lastHistory?.obj === ChatRoleEnum.AI) {
-      const lastValue = lastHistory.value[lastHistory.value.length - 1];
-      if (
-        lastValue?.type === ChatItemValueTypeEnum.interactive &&
-        lastValue.interactive?.toolParams
-      ) {
-        return lastValue.interactive;
-      }
-    }
-  })();
+  const interactiveResponse = lastInteractive;
   props.node.isEntry = false;
   const hasReadFilesTool = toolNodes.some(
     (item) => item.flowNodeType === FlowNodeTypeEnum.readFiles
@@ -171,12 +161,12 @@ export const dispatchRunTools = async (props: DispatchToolModuleProps): Promise<
   const {
     toolWorkflowInteractiveResponse,
     dispatchFlowResponse, // tool flow response
-    toolNodeTokens,
     toolNodeInputTokens,
     toolNodeOutputTokens,
     completeMessages = [], // The actual message sent to AI(just save text)
     assistantResponses = [], // FastGPT system store assistant.value response
-    runTimes
+    runTimes,
+    finish_reason
   } = await (async () => {
     const adaptMessages = chats2GPTMessages({
       messages,
@@ -187,6 +177,8 @@ export const dispatchRunTools = async (props: DispatchToolModuleProps): Promise<
     if (toolModel.toolChoice) {
       return runToolWithToolChoice({
         ...props,
+        runtimeNodes,
+        runtimeEdges,
         toolNodes,
         toolModel,
         maxRunToolTimes: 30,
@@ -197,6 +189,8 @@ export const dispatchRunTools = async (props: DispatchToolModuleProps): Promise<
     if (toolModel.functionCall) {
       return runToolWithFunctionCall({
         ...props,
+        runtimeNodes,
+        runtimeEdges,
         toolNodes,
         toolModel,
         messages: adaptMessages,
@@ -225,6 +219,8 @@ export const dispatchRunTools = async (props: DispatchToolModuleProps): Promise<
 
     return runToolWithPromptCall({
       ...props,
+      runtimeNodes,
+      runtimeEdges,
       toolNodes,
       toolModel,
       messages: adaptMessages,
@@ -264,7 +260,6 @@ export const dispatchRunTools = async (props: DispatchToolModuleProps): Promise<
     [DispatchNodeResponseKeyEnum.nodeResponse]: {
       // 展示的积分消耗
       totalPoints: totalPointsUsage,
-      toolCallTokens: toolNodeTokens,
       toolCallInputTokens: toolNodeInputTokens,
       toolCallOutputTokens: toolNodeOutputTokens,
       childTotalPoints: flatUsages.reduce((sum, item) => sum + item.totalPoints, 0),
@@ -276,7 +271,8 @@ export const dispatchRunTools = async (props: DispatchToolModuleProps): Promise<
         useVision
       ),
       toolDetail: childToolResponse,
-      mergeSignId: nodeId
+      mergeSignId: nodeId,
+      finishReason: finish_reason
     },
     [DispatchNodeResponseKeyEnum.nodeDispatchUsages]: [
       // 工具调用本身的积分消耗

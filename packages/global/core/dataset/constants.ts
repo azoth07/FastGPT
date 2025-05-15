@@ -19,38 +19,40 @@ export const DatasetTypeMap = {
   [DatasetTypeEnum.dataset]: {
     icon: 'core/dataset/commonDatasetOutline',
     label: i18nT('dataset:common_dataset'),
-    collectionLabel: i18nT('common:common.File')
+    collectionLabel: i18nT('common:File')
   },
   [DatasetTypeEnum.websiteDataset]: {
     icon: 'core/dataset/websiteDatasetOutline',
     label: i18nT('dataset:website_dataset'),
-    collectionLabel: i18nT('common:common.Website')
+    collectionLabel: i18nT('common:Website')
   },
   [DatasetTypeEnum.externalFile]: {
     icon: 'core/dataset/externalDatasetOutline',
     label: i18nT('dataset:external_file'),
-    collectionLabel: i18nT('common:common.File')
+    collectionLabel: i18nT('common:File')
   },
   [DatasetTypeEnum.apiDataset]: {
     icon: 'core/dataset/externalDatasetOutline',
     label: i18nT('dataset:api_file'),
-    collectionLabel: i18nT('common:common.File')
+    collectionLabel: i18nT('common:File')
   },
   [DatasetTypeEnum.feishu]: {
     icon: 'core/dataset/feishuDatasetOutline',
     label: i18nT('dataset:feishu_dataset'),
-    collectionLabel: i18nT('common:common.File')
+    collectionLabel: i18nT('common:File')
   },
   [DatasetTypeEnum.yuque]: {
     icon: 'core/dataset/yuqueDatasetOutline',
     label: i18nT('dataset:yuque_dataset'),
-    collectionLabel: i18nT('common:common.File')
+    collectionLabel: i18nT('common:File')
   }
 };
 
 export enum DatasetStatusEnum {
   active = 'active',
-  syncing = 'syncing'
+  syncing = 'syncing',
+  waiting = 'waiting',
+  error = 'error'
 }
 export const DatasetStatusMap = {
   [DatasetStatusEnum.active]: {
@@ -58,6 +60,12 @@ export const DatasetStatusMap = {
   },
   [DatasetStatusEnum.syncing]: {
     label: i18nT('common:core.dataset.status.syncing')
+  },
+  [DatasetStatusEnum.waiting]: {
+    label: i18nT('common:core.dataset.status.waiting')
+  },
+  [DatasetStatusEnum.error]: {
+    label: i18nT('dataset:status_error')
   }
 };
 

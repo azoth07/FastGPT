@@ -1,17 +1,21 @@
 import {
   DatasetCollectionTypeEnum,
-  DatasetCollectionDataProcessModeEnum
+  DatasetCollectionDataProcessModeEnum,
+  DatasetTypeEnum
 } from '@fastgpt/global/core/dataset/constants';
 import type { CreateDatasetCollectionParams } from '@fastgpt/global/core/dataset/api.d';
 import { MongoDatasetCollection } from './schema';
-import { DatasetCollectionSchemaType, DatasetSchemaType } from '@fastgpt/global/core/dataset/type';
+import {
+  type DatasetCollectionSchemaType,
+  type DatasetSchemaType
+} from '@fastgpt/global/core/dataset/type';
 import { MongoDatasetTraining } from '../training/schema';
 import { MongoDatasetData } from '../data/schema';
 import { delImgByRelatedId } from '../../../common/file/image/controller';
-import { deleteDatasetDataVector } from '../../../common/vectorStore/controller';
+import { deleteDatasetDataVector } from '../../../common/vectorDB/controller';
 import { delFileByFileIdList } from '../../../common/file/gridfs/controller';
 import { BucketNameEnum } from '@fastgpt/global/common/file/constants';
-import { ClientSession } from '../../../common/mongo';
+import { type ClientSession } from '../../../common/mongo';
 import { createOrGetCollectionTags } from './utils';
 import { rawText2Chunks } from '../read';
 import { checkDatasetLimit } from '../../../support/permission/teamLimit';
@@ -104,7 +108,8 @@ export const createCollectionAndInsertData = async ({
       hashRawText: hashStr(rawText),
       rawTextLength: rawText.length,
       nextSyncTime: (() => {
-        if (!dataset.autoSync) return undefined;
+        // ignore auto collections sync for website datasets
+        if (!dataset.autoSync && dataset.type === DatasetTypeEnum.websiteDataset) return undefined;
         if (
           [DatasetCollectionTypeEnum.link, DatasetCollectionTypeEnum.apiFile].includes(
             createCollectionParams.type

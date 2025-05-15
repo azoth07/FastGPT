@@ -7,6 +7,7 @@ export enum FlowNodeInputTypeEnum { // render ui
   numberInput = 'numberInput',
   switch = 'switch', // true/false
   select = 'select',
+  multipleSelect = 'multipleSelect',
 
   // editor
   JSONEditor = 'JSONEditor',
@@ -44,6 +45,9 @@ export const FlowNodeInputMap: Record<
     icon: 'core/workflow/inputType/numberInput'
   },
   [FlowNodeInputTypeEnum.select]: {
+    icon: 'core/workflow/inputType/option'
+  },
+  [FlowNodeInputTypeEnum.multipleSelect]: {
     icon: 'core/workflow/inputType/option'
   },
   [FlowNodeInputTypeEnum.switch]: {
@@ -136,7 +140,9 @@ export enum FlowNodeTypeEnum {
   loopStart = 'loopStart',
   loopEnd = 'loopEnd',
   formInput = 'formInput',
-  comment = 'comment'
+  comment = 'comment',
+  tool = 'tool',
+  toolSet = 'toolSet'
 }
 
 // node IO value type
@@ -212,7 +218,6 @@ export const FlowValueTypeMap: Record<
 };
 
 export const EDGE_TYPE = 'default';
-export const defaultNodeVersion = '481';
 
 export const chatHistoryValueDesc = `{
   obj: System | Human | AI;
@@ -230,3 +235,10 @@ export const datasetQuoteValueDesc = `{
 export const datasetSelectValueDesc = `{
   datasetId: string;
 }[]`;
+
+export const AppNodeFlowNodeTypeMap: Record<any, boolean> = {
+  [FlowNodeTypeEnum.pluginModule]: true,
+  [FlowNodeTypeEnum.appModule]: true,
+  [FlowNodeTypeEnum.tool]: true,
+  [FlowNodeTypeEnum.toolSet]: true
+};

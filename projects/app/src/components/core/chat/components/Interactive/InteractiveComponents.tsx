@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { Box, Button, Flex, Textarea } from '@chakra-ui/react';
-import { Controller, useForm, UseFormHandleSubmit } from 'react-hook-form';
+import { Controller, useForm, type UseFormHandleSubmit } from 'react-hook-form';
 import Markdown from '@/components/Markdown';
 import FormLabel from '@fastgpt/web/components/common/MyBox/FormLabel';
 import QuestionTip from '@fastgpt/web/components/common/MyTooltip/QuestionTip';
@@ -9,11 +9,12 @@ import MyTextarea from '@/components/common/Textarea/MyTextarea';
 import MyNumberInput from '@fastgpt/web/components/common/Input/NumberInput';
 import { FlowNodeInputTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
 import {
-  UserInputFormItemType,
-  UserInputInteractive,
-  UserSelectInteractive,
-  UserSelectOptionItemType
+  type UserInputFormItemType,
+  type UserInputInteractive,
+  type UserSelectInteractive,
+  type UserSelectOptionItemType
 } from '@fastgpt/global/core/workflow/template/system/interactive/type';
+import MultipleSelect from '@fastgpt/web/components/common/MySelect/MultipleSelect';
 
 const DescriptionBox = React.memo(function DescriptionBox({
   description
@@ -168,6 +169,30 @@ export const FormInputComponent = React.memo(function FormInputComponent({
                     value={value}
                     isDisabled={submitted}
                     onChange={(e) => setValue(label, e)}
+                  />
+                );
+              }}
+            />
+          );
+        case FlowNodeInputTypeEnum.multipleSelect:
+          return (
+            <Controller
+              key={label}
+              control={control}
+              name={label}
+              rules={{ required: required }}
+              render={({ field: { ref, value } }) => {
+                if (!list) return <></>;
+                return (
+                  <MultipleSelect<string>
+                    width={'100%'}
+                    bg={'white'}
+                    py={2}
+                    list={list}
+                    value={value}
+                    isDisabled={submitted}
+                    onSelect={(e) => setValue(label, e)}
+                    isSelectAll={value.length === list.length}
                   />
                 );
               }}

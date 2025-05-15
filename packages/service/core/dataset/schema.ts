@@ -1,7 +1,8 @@
 import { getMongoModel, Schema } from '../../common/mongo';
 import {
-  DatasetStatusEnum,
-  DatasetStatusMap,
+  ChunkSettingModeEnum,
+  DataChunkSplitModeEnum,
+  DatasetCollectionDataProcessModeEnum,
   DatasetTypeEnum,
   DatasetTypeMap
 } from '@fastgpt/global/core/dataset/constants';
@@ -12,6 +13,28 @@ import {
 import type { DatasetSchemaType } from '@fastgpt/global/core/dataset/type.d';
 
 export const DatasetCollectionName = 'datasets';
+
+export const ChunkSettings = {
+  imageIndex: Boolean,
+  autoIndexes: Boolean,
+  trainingType: {
+    type: String,
+    enum: Object.values(DatasetCollectionDataProcessModeEnum)
+  },
+  chunkSettingMode: {
+    type: String,
+    enum: Object.values(ChunkSettingModeEnum)
+  },
+  chunkSplitMode: {
+    type: String,
+    enum: Object.values(DataChunkSplitModeEnum)
+  },
+  chunkSize: Number,
+  chunkSplitter: String,
+
+  indexSize: Number,
+  qaPrompt: String
+};
 
 const DatasetSchema = new Schema({
   parentId: {
@@ -39,11 +62,6 @@ const DatasetSchema = new Schema({
     enum: Object.keys(DatasetTypeMap),
     required: true,
     default: DatasetTypeEnum.dataset
-  },
-  status: {
-    type: String,
-    enum: Object.keys(DatasetStatusMap),
-    default: DatasetStatusEnum.active
   },
   avatar: {
     type: String,
@@ -84,23 +102,19 @@ const DatasetSchema = new Schema({
       }
     }
   },
+  chunkSettings: {
+    type: ChunkSettings
+  },
   inheritPermission: {
     type: Boolean,
     default: true
   },
-  apiServer: {
-    type: Object
-  },
-  feishuServer: {
-    type: Object
-  },
-  yuqueServer: {
-    type: Object
-  },
-
-  autoSync: Boolean,
+  apiServer: Object,
+  feishuServer: Object,
+  yuqueServer: Object,
 
   // abandoned
+  autoSync: Boolean,
   externalReadUrl: {
     type: String
   },
@@ -109,6 +123,7 @@ const DatasetSchema = new Schema({
 
 try {
   DatasetSchema.index({ teamId: 1 });
+  DatasetSchema.index({ type: 1 });
 } catch (error) {
   console.log(error);
 }
