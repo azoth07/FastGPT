@@ -59,6 +59,7 @@ export const checkTeamDatasetLimit = async (teamId: string) => {
     return Promise.reject(TeamErrEnum.datasetAmountNotEnough);
   }
 
+
   // System check
   if (global?.licenseData?.maxDatasets && typeof global?.licenseData?.maxDatasets === 'number') {
     const totalDatasets = await MongoDataset.countDocuments({
@@ -69,7 +70,8 @@ export const checkTeamDatasetLimit = async (teamId: string) => {
     }
   }
   // Open source check
-  if (!global.feConfigs.isPlus && datasetCount >= 30) {
+  if (!global.feConfigs.isPlus && datasetCount >= 3000) {
+
     return Promise.reject(SystemErrEnum.communityVersionNumLimit);
   }
 };
