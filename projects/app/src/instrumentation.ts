@@ -14,7 +14,6 @@ export async function register() {
         { initGlobalVariables, getInitConfig, initSystemPluginGroups, initAppTemplateTypes },
         { initVectorStore },
         { initRootUser },
-        { getSystemPluginCb },
         { startMongoWatch },
         { startCron },
         { startTrainingQueue },
@@ -27,7 +26,6 @@ export async function register() {
         import('@/service/common/system'),
         import('@fastgpt/service/common/vectorDB/controller'),
         import('@/service/mongo'),
-        import('@/service/core/app/plugin'),
         import('@/service/common/system/volumnMongoWatch'),
         import('@/service/common/system/cron'),
         import('@/service/core/dataset/training/utils'),
@@ -39,12 +37,6 @@ export async function register() {
       systemStartCb();
       initGlobalVariables();
 
-      try {
-        await preLoadWorker();
-      } catch (error) {
-        console.error('Preload worker error', error);
-      }
-
       // Connect to MongoDB
       await connectMongo(connectionMongo, MONGO_URL);
       connectMongo(connectionLogMongo, MONGO_LOG_URL);
@@ -52,10 +44,16 @@ export async function register() {
       //init system config；init vector database；init root user
       await Promise.all([getInitConfig(), initVectorStore(), initRootUser(), loadSystemModels()]);
 
+      try {
+        await preLoadWorker();
+      } catch (error) {
+        console.error('Preload worker error', error);
+      }
+
       // 异步加载
       initSystemPluginGroups();
       initAppTemplateTypes();
-      getSystemPluginCb();
+      // getSystemPlugins(true);
       startMongoWatch();
       startCron();
       startTrainingQueue(true);

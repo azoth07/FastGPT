@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { isProduction } from '@fastgpt/global/common/system/constants';
-import { PluginSourceEnum } from '@fastgpt/global/core/plugin/constants';
+import { PluginSourceEnum } from '@fastgpt/global/core/app/plugin/constants';
 import { MongoAppTemplate } from '@fastgpt/service/core/app/templates/templateSchema';
 import { type AppTemplateSchemaType } from '@fastgpt/global/core/app/type';
 
@@ -14,11 +14,11 @@ const getTemplateNameList = () => {
   );
   const templatesPath = path.join(path.dirname(filePath), 'src');
 
-  return fs.readdirSync(templatesPath) as string[];
+  return fs.promises.readdir(templatesPath);
 };
 
 const getFileTemplates = async (): Promise<AppTemplateSchemaType[]> => {
-  const templateNames = getTemplateNameList();
+  const templateNames = await getTemplateNameList();
 
   return Promise.all(
     templateNames.map<Promise<AppTemplateSchemaType>>(async (name) => {

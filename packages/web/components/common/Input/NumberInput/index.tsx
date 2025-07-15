@@ -4,7 +4,8 @@ import {
   NumberInputField,
   NumberInputStepper,
   NumberDecrementStepper,
-  type NumberInputProps
+  type NumberInputProps,
+  type NumberInputFieldProps
 } from '@chakra-ui/react';
 import React from 'react';
 import MyIcon from '../../Icon';
@@ -16,11 +17,11 @@ type Props = Omit<NumberInputProps, 'onChange' | 'onBlur'> & {
   placeholder?: string;
   register?: UseFormRegister<any>;
   name?: string;
-  bg?: string;
+  inputFieldProps?: NumberInputFieldProps;
 };
 
 const MyNumberInput = (props: Props) => {
-  const { register, name, onChange, onBlur, placeholder, bg, ...restProps } = props;
+  const { register, name, onChange, onBlur, placeholder, inputFieldProps, ...restProps } = props;
 
   return (
     <NumberInput
@@ -35,6 +36,14 @@ const MyNumberInput = (props: Props) => {
             onBlur(numE);
           }
         }
+        if (onChange) {
+          if (numE === '') {
+            // @ts-ignore
+            onChange('');
+          } else {
+            onChange(numE);
+          }
+        }
         if (register && name) {
           const event = {
             target: {
@@ -46,12 +55,13 @@ const MyNumberInput = (props: Props) => {
         }
       }}
       onChange={(e) => {
-        const numE = e === '' ? '' : Number(e);
+        const numE = e === '' ? '' : e.endsWith('.') ? e : Number(e);
         if (onChange) {
           if (numE === '') {
             // @ts-ignore
             onChange('');
           } else {
+            // @ts-ignore
             onChange(numE);
           }
         }
@@ -68,7 +78,6 @@ const MyNumberInput = (props: Props) => {
       }}
     >
       <NumberInputField
-        bg={bg}
         placeholder={placeholder}
         h={restProps.h}
         defaultValue={restProps.defaultValue}
@@ -80,6 +89,7 @@ const MyNumberInput = (props: Props) => {
               valueAsNumber: true
             })
           : {})}
+        {...inputFieldProps}
       />
       <NumberInputStepper>
         <NumberIncrementStepper>

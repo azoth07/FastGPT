@@ -1,7 +1,6 @@
 import type { ChatNodeUsageType } from '../../../support/wallet/bill/type';
 import type {
   ChatItemType,
-  UserChatItemValueItemType,
   ToolRunResponseItemType,
   AIChatItemValueItemType
 } from '../../chat/type';
@@ -96,15 +95,15 @@ export type RuntimeNodeItemType = {
   flowNodeType: StoreNodeItemType['flowNodeType'];
   showStatus?: StoreNodeItemType['showStatus'];
   isEntry?: boolean;
+  version?: string;
 
   inputs: FlowNodeInputItemType[];
   outputs: FlowNodeOutputItemType[];
 
   pluginId?: string; // workflow id / plugin id
-  version?: string;
 
-  // tool
-  toolConfig?: NodeToolConfigType;
+  // Tool
+  toolConfig?: StoreNodeItemType['toolConfig'];
 };
 
 export type RuntimeEdgeItemType = StoreEdgeItemType & {
@@ -246,6 +245,7 @@ export type DispatchNodeResultType<T = {}> = {
   [DispatchNodeResponseKeyEnum.rewriteHistories]?: ChatItemType[];
   [DispatchNodeResponseKeyEnum.runTimes]?: number;
   [DispatchNodeResponseKeyEnum.newVariables]?: Record<string, any>;
+  [DispatchNodeResponseKeyEnum.memories]?: Record<string, any>;
 } & T;
 
 /* Single node props */

@@ -11,14 +11,13 @@ import {
   FlowNodeTypeEnum
 } from '../../../node/constant';
 import { type FlowNodeTemplateType } from '../../../type/node';
-import { getHandleConfig } from '../../utils';
 
 export const IfElseNode: FlowNodeTemplateType = {
   id: FlowNodeTypeEnum.ifElseNode,
   templateType: FlowNodeTemplateTypeEnum.tools,
   flowNodeType: FlowNodeTypeEnum.ifElseNode,
-  sourceHandle: getHandleConfig(false, false, false, false),
-  targetHandle: getHandleConfig(true, false, true, true),
+  showSourceHandle: false,
+  showTargetHandle: true,
   avatar: 'core/workflow/template/ifelse',
   name: i18nT('workflow:condition_checker'),
   intro: i18nT('workflow:execute_different_branches_based_on_conditions'),
@@ -37,7 +36,8 @@ export const IfElseNode: FlowNodeTemplateType = {
             {
               variable: undefined,
               condition: undefined,
-              value: undefined
+              value: undefined,
+              valueType: 'input'
             }
           ]
         }

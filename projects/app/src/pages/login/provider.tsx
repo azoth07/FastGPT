@@ -15,6 +15,7 @@ import {
   getBdVId,
   getFastGPTSem,
   getInviterId,
+  getMsclkid,
   getSourceDomain,
   removeFastGPTSem
 } from '@/web/support/marketing/utils';
@@ -33,7 +34,7 @@ const provider = () => {
     (res: ResLogin) => {
       setUserInfo(res.user);
 
-      router.push(
+      router.replace(
         loginStore?.lastRoute ? decodeURIComponent(loginStore?.lastRoute) : '/dashboard/apps'
       );
     },
@@ -49,6 +50,7 @@ const provider = () => {
           callbackUrl: `${location.origin}/login/provider`,
           inviterId: getInviterId(),
           bd_vid: getBdVId(),
+          msclkid: getMsclkid(),
           fastgpt_sem: getFastGPTSem(),
           sourceDomain: getSourceDomain()
         });

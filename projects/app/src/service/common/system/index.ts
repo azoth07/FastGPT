@@ -73,7 +73,6 @@ export function initGlobalVariables() {
     };
   }
 
-  global.communityPlugins = [];
   global.qaQueueLen = global.qaQueueLen ?? 0;
   global.vectorQueueLen = global.vectorQueueLen ?? 0;
   initHttpAgent();
@@ -104,11 +103,13 @@ export async function getInitConfig() {
 }
 
 const defaultFeConfigs: FastGPTFeConfigsType = {
+
   show_emptyChat: false,
   show_git: false,
   docUrl: '',
   openAPIDocUrl: '',
   systemPluginCourseUrl: '',
+
   appTemplateCourse:
     '',
   systemTitle: 'AI Agent',

@@ -1,17 +1,27 @@
 import { i18nT } from '../../../web/i18n/utils';
+import type { JsonSchemaPropertiesItemType } from '../app/jsonschema';
 
 export enum FlowNodeTemplateTypeEnum {
   systemInput = 'systemInput',
   ai = 'ai',
   function = 'function',
-  tools = 'tools',
   interactive = 'interactive',
 
+  // System tool type
+  tools = 'tools',
   search = 'search',
   multimodal = 'multimodal',
   communication = 'communication',
-
+  finance = 'finance',
+  design = 'design',
+  productivity = 'productivity',
+  news = 'news',
+  entertainment = 'entertainment',
+  social = 'social',
+  scientific = 'scientific',
   other = 'other',
+
+  // Team app type
   teamApp = 'teamApp'
 }
 
@@ -40,7 +50,11 @@ export enum WorkflowIOValueTypeEnum {
   selectApp = 'selectApp'
 }
 
-export const toolValueTypeList = [
+export const toolValueTypeList: {
+  label: string;
+  value: WorkflowIOValueTypeEnum;
+  jsonSchema: JsonSchemaPropertiesItemType;
+}[] = [
   {
     label: WorkflowIOValueTypeEnum.string,
     value: WorkflowIOValueTypeEnum.string,
@@ -93,6 +107,14 @@ export const toolValueTypeList = [
     }
   }
 ];
+export const valueTypeJsonSchemaMap: Record<string, JsonSchemaPropertiesItemType> =
+  toolValueTypeList.reduce(
+    (acc, item) => {
+      acc[item.value] = item.jsonSchema;
+      return acc;
+    },
+    {} as Record<string, JsonSchemaPropertiesItemType>
+  );
 
 /* reg: modulename key */
 export enum NodeInputKeyEnum {
@@ -129,6 +151,8 @@ export enum NodeInputKeyEnum {
   textareaInput = 'system_textareaInput',
   addInputParam = 'system_addInputParam',
   forbidStream = 'system_forbid_stream',
+  headerSecret = 'system_header_secret',
+  systemInputConfig = 'system_input_config',
 
   // history
   historyMaxAmount = 'maxContext',
@@ -230,7 +254,11 @@ export enum NodeInputKeyEnum {
 
   // comment
   commentText = 'commentText',
-  commentSize = 'commentSize'
+  commentSize = 'commentSize',
+
+  // Tool
+  toolData = 'system_toolData',
+  toolSetData = 'system_toolSetData'
 }
 
 export enum NodeOutputKeyEnum {
@@ -245,6 +273,7 @@ export enum NodeOutputKeyEnum {
   text = 'system_text',
   addOutputParam = 'system_addOutputParam',
   rawResponse = 'system_rawResponse',
+  systemError = 'system_error',
 
   // start
   userFiles = 'userFiles',

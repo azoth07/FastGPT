@@ -3,7 +3,7 @@ import {
   type DispatchNodeResultType
 } from '@fastgpt/global/core/workflow/runtime/type.d';
 import { formatModelChars2Points } from '../../../../support/wallet/usage/utils';
-import type { SelectedDatasetType } from '@fastgpt/global/core/workflow/api.d';
+import type { SelectedDatasetType } from '@fastgpt/global/core/workflow/type/io';
 import type { SearchDataResponseItemType } from '@fastgpt/global/core/dataset/type';
 import type { ModuleDispatchProps } from '@fastgpt/global/core/workflow/runtime/type';
 import { getEmbeddingModel, getRerankModel } from '../../../ai/model';
@@ -16,7 +16,6 @@ import { MongoDataset } from '../../../dataset/schema';
 import { i18nT } from '../../../../../web/i18n/utils';
 import { filterDatasetsByTmbId } from '../../../dataset/utils';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/model';
-import { addEndpointToImageUrl } from '../../../../common/file/image/utils';
 import { getDatasetSearchToolResponsePrompt } from '../../../../../global/core/ai/prompt/dataset';
 
 type DatasetSearchProps = ModuleDispatchProps<{
@@ -272,7 +271,7 @@ export async function dispatchDatasetSearch(
         id: item.id,
         sourceName: item.sourceName,
         updateTime: item.updateTime,
-        content: addEndpointToImageUrl(`${item.q}\n${item.a}`.trim())
+        content: `${item.q}\n${item.a}`.trim()
       }))
     }
   };

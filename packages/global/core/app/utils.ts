@@ -7,9 +7,6 @@ import { type StoreNodeItemType } from '../workflow/type/node';
 import { DatasetSearchModeEnum } from '../dataset/constants';
 import { type WorkflowTemplateBasicType } from '../workflow/type';
 import { AppTypeEnum } from './constants';
-import { AppErrEnum } from '../../common/error/code/app';
-import { PluginErrEnum } from '../../common/error/code/plugin';
-import { i18nT } from '../../../web/i18n/utils';
 import appErrList from '../../common/error/code/app';
 import pluginErrList from '../../common/error/code/plugin';
 
@@ -56,7 +53,7 @@ export const appWorkflow2Form = ({
   nodes.forEach((node) => {
     if (
       node.flowNodeType === FlowNodeTypeEnum.chatNode ||
-      node.flowNodeType === FlowNodeTypeEnum.tools
+      node.flowNodeType === FlowNodeTypeEnum.agent
     ) {
       defaultAppForm.aiSettings.model = findInputValueByKey(node.inputs, NodeInputKeyEnum.aiModel);
       defaultAppForm.aiSettings.systemPrompt = findInputValueByKey(

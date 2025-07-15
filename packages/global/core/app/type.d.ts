@@ -6,7 +6,7 @@ import type {
   VariableInputEnum,
   WorkflowIOValueTypeEnum
 } from '../workflow/constants';
-import type { SelectedDatasetType } from '../workflow/api';
+import type { SelectedDatasetType } from '../workflow/type/io';
 import type { DatasetSearchModeEnum } from '../dataset/constants';
 import { TeamTagSchema as TeamTagsSchemaType } from '@fastgpt/global/support/user/team/type.d';
 import type { StoreEdgeItemType } from '../workflow/type/edge';
@@ -15,6 +15,7 @@ import type { ParentIdType } from '../../common/parentFolder/type';
 import { FlowNodeInputTypeEnum } from '../../core/workflow/node/constant';
 import type { WorkflowTemplateBasicType } from '@fastgpt/global/core/workflow/type';
 import type { SourceMemberType } from '../../support/user/type';
+import type { JSONSchemaInputType } from './jsonschema';
 
 export type AppSchema = {
   _id: string;
@@ -110,11 +111,7 @@ export type AppSimpleEditFormType = {
 export type McpToolConfigType = {
   name: string;
   description: string;
-  inputSchema: {
-    type: string;
-    properties?: Record<string, { type: string; description?: string }>;
-    required?: string[];
-  };
+  inputSchema: JSONSchemaInputType;
 };
 
 /* app chat config type */
