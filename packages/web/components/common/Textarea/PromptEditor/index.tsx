@@ -1,6 +1,6 @@
 import type { BoxProps } from '@chakra-ui/react';
 import { Box, Button, ModalBody, ModalFooter, useDisclosure } from '@chakra-ui/react';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { editorStateToText } from './utils';
 import Editor from './Editor';
 import MyModal from '../../MyModal';
@@ -58,6 +58,12 @@ const PromptEditor = ({
     },
     [onBlur]
   );
+  const formattedValue = useMemo(() => {
+    if (typeof value === 'object') {
+      return JSON.stringify(value);
+    }
+    return value;
+  }, [value]);
 
   return (
     <>
@@ -70,7 +76,7 @@ const PromptEditor = ({
           minH={minH}
           maxH={maxH}
           maxLength={maxLength}
-          value={value}
+          value={formattedValue}
           onChange={onChangeInput}
           onBlur={onBlurInput}
           placeholder={placeholder}
@@ -91,7 +97,13 @@ const PromptEditor = ({
           />
         )}
       </Box>
-      <MyModal isOpen={isOpen} onClose={onClose} iconSrc="modal/edit" title={title} w={'full'}>
+      <MyModal
+        isOpen={isOpen}
+        onClose={onClose}
+        iconSrc="modal/edit"
+        title={title || t('common:Edit')}
+        w={'full'}
+      >
         <ModalBody>
           <Editor
             minH={400}
