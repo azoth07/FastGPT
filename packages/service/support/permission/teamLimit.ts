@@ -104,6 +104,7 @@ export const checkTeamDatasetLimit = async (teamId: string) => {
     return Promise.reject(TeamErrEnum.datasetAmountNotEnough);
   }
 
+
   // System check
   if (global?.licenseData?.maxDatasets && typeof global?.licenseData?.maxDatasets === 'number') {
     const totalDatasets = await MongoDataset.countDocuments({
@@ -113,6 +114,7 @@ export const checkTeamDatasetLimit = async (teamId: string) => {
       return Promise.reject(SystemErrEnum.licenseDatasetAmountLimit);
     }
   }
+
 };
 
 export const checkTeamDatasetSyncPermission = async (teamId: string) => {
