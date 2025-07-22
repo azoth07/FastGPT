@@ -100,7 +100,7 @@ export const checkTeamDatasetLimit = async (teamId: string) => {
   ]);
 
   // User check
-  if (standardConstants && datasetCount >= 100000) {
+  if (standardConstants && datasetCount >= standardConstants.maxDatasetAmount) {
     return Promise.reject(TeamErrEnum.datasetAmountNotEnough);
   }
 
@@ -110,7 +110,7 @@ export const checkTeamDatasetLimit = async (teamId: string) => {
     const totalDatasets = await MongoDataset.countDocuments({
       type: { $ne: DatasetTypeEnum.folder }
     });
-    if (totalDatasets >= 100000) {
+    if (totalDatasets >= global.licenseData.maxDatasets) {
       return Promise.reject(SystemErrEnum.licenseDatasetAmountLimit);
     }
   }
