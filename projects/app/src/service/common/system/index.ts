@@ -109,7 +109,6 @@ const defaultFeConfigs: FastGPTFeConfigsType = {
   docUrl: '',
   openAPIDocUrl: '',
   systemPluginCourseUrl: '',
-
   appTemplateCourse:
     '',
   systemTitle: 'AI Agent',
