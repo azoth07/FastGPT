@@ -523,7 +523,7 @@ const SliderApps = ({ apps, activeAppId }: Props) => {
             overflow={'hidden'}
             textOverflow={'ellipsis'}
             pl={2}
-            flexGrow={1}
+
           >
             {t('common:core.chat.Recent use')}
           </Box>
