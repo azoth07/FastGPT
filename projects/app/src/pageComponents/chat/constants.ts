@@ -12,8 +12,8 @@ export enum ChatSidebarPaneEnum {
  * 0: expanded
  * 1: folded
  */
- export type CollapseStatusType = 0 | 1;
- export const defaultCollapseStatus: CollapseStatusType = 0; // default expanded
+  export type CollapseStatusType = 0 | 1;
+  export const defaultCollapseStatus: CollapseStatusType = 0; // default expanded
 
 export enum ChatSettingTabOptionEnum {
   HOME = 'home',
@@ -22,5 +22,5 @@ export enum ChatSettingTabOptionEnum {
   LOG_DETAILS = 'log_details'
 }
 
-export const DEFAULT_LOGO_BANNER_URL = 'imgs/chat/ai_banner.svg';
+export const DEFAULT_LOGO_BANNER_URL = '/imgs/chat/ai_banner.svg';
 export const DEFAULT_LOGO_BANNER_COLLAPSED_URL = '/imgs/chat/ai_banner_fold.svg';
