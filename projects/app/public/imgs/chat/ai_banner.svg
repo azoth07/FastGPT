@@ -1,19 +1,19 @@
 <svg width="147" height="36" xmlns="http://www.w3.org/2000/svg" fill="none">
  <defs>
-  <linearGradient y2="1" x2="0" y1="0" x1="0" id="svg_13">
+  <linearGradient id="svg_13" x1="0" y1="0" x2="0" y2="1">
    <stop stop-color="#326DFF"/>
-   <stop stop-color="#8EAEFF" offset="1"/>
+   <stop offset="1" stop-color="#8EAEFF"/>
   </linearGradient>
  </defs>
  <g>
   <title>background</title>
-  <rect fill="none" id="canvas_background" height="969" width="1889" y="-1" x="-1"/>
+  <rect x="-1" y="-1" width="149" height="38" id="canvas_background" fill="none"/>
  </g>
  <g>
   <title>Layer 1</title>
-  <rect id="svg_1" fill="white" rx="8.625" height="35.25" width="35.25" y="0.375" x="0.375"/>
-  <rect id="svg_2" stroke-width="0.75" stroke="#ECECEC" rx="8.625" height="35.25" width="35.25" y="0.375" x="0.375"/>
-  <text xml:space="preserve" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-size="24" id="svg_11" y="27.009407" x="44.739931" fill-opacity="null" stroke-opacity="null" stroke-width="0" stroke="null" fill="#000000">AI Agent</text>
-  <text xml:space="preserve" text-anchor="start" font-family="Helvetica, Arial, sans-serif" font-size="24" id="svg_12" y="26.74999" x="7.677475" stroke-opacity="null" stroke-width="0" stroke="null" fill="url(#svg_13)">AI</text>
+  <rect x="0.375" y="0.375" width="35.25" height="35.25" rx="8.625" fill="white" id="svg_1"/>
+  <rect x="0.375" y="0.375" width="35.25" height="35.25" rx="8.625" stroke="#ECECEC" stroke-width="0.75" id="svg_2"/>
+  <text style="cursor: move;" fill="#000000" stroke="null" stroke-width="0" stroke-opacity="null" fill-opacity="null" x="44.739931" y="27.009407" id="svg_11" font-size="24" font-family="Helvetica, Arial, sans-serif" text-anchor="start" xml:space="preserve">AI 打工人</text>
+  <text fill="url(#svg_13)" stroke="null" stroke-width="0" stroke-opacity="null" x="7.677475" y="26.74999" id="svg_12" font-size="24" font-family="Helvetica, Arial, sans-serif" text-anchor="start" xml:space="preserve">AI</text>
  </g>
 </svg>
