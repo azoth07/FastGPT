@@ -80,7 +80,7 @@ const ChatHeader = ({
           appId={chatData.appId}
           name={
             pane === ChatSidebarPaneEnum.HOME
-              ? chatSettings?.homeTabTitle || 'FastGPT'
+              ? chatSettings?.homeTabTitle || 'AI Agent'
               : chatData.app.name
           }
           avatar={
