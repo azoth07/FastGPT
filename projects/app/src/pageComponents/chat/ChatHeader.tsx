@@ -80,7 +80,7 @@ const ChatHeader = ({
           appId={chatData.appId}
           name={
             pane === ChatSidebarPaneEnum.HOME
-              ? chatSettings?.homeTabTitle || 'AI Agent'
+              ? chatSettings?.homeTabTitle || 'AI 打工人'
               : chatData.app.name
           }
           avatar={
@@ -94,7 +94,7 @@ const ChatHeader = ({
 
       <Flex gap={2} alignItems={'center'}>
         {!isVariableVisible && <VariablePopover showExternalVariables={isChat} />}
-
+    
         {/* control */}
         {!isPlugin && <ToolMenu history={history} />}
       </Flex>
@@ -270,7 +270,7 @@ const MobileHeader = ({
           <Box ml={1} className="textEllipsis">
             {name}
           </Box>
-
+    
           {isShareChat ? null : (
             <MyIcon
               name={'core/chat/chevronSelector'}
@@ -280,7 +280,7 @@ const MobileHeader = ({
           )}
         </Flex>
       </Flex>
-
+    
       {isOpenDrawer && !isShareChat && (
         <MobileDrawer apps={apps} appId={appId} onCloseDrawer={onCloseDrawer} />
       )}
