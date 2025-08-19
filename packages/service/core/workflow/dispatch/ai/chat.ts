@@ -76,17 +76,19 @@ export type ChatResponse = DispatchNodeResultType<
   }
 >;
 
-/* 将 citations（string 或 string[]）格式化为可直接拼接到内容末尾的文本块 */
-function formatCitationsForAppend(citations: unknown): string {
-  let items: string[] = [];
-  if (Array.isArray(citations)) {
-    items = citations.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim());
-  } else if (typeof citations === 'string' && citations.trim()) {
-    items = [citations.trim()];
-  }
-  if (items.length === 0) return '';
-  const lines = items.map((s, i) => `${i + 1}. ${s}`);
-  return `\n\nReferences:\n${lines.join('\n')}`;
+// Helper function to format citations with numbered format
+function formatCitations(citations?: string[]): string {
+  if (!citations || citations.length === 0) return '';
+  
+  // Remove duplicates while preserving order
+  const uniqueCitations = [...new Set(citations)];
+  
+  // Format with numbers [1][2]...
+  const formattedCitations = uniqueCitations
+    .map((citation, index) => `[${index + 1}] ${citation}`)
+    .join('\n');
+  
+  return `\n\n${formattedCitations}`;
 }
 
 /* request openai chat */
@@ -247,7 +249,7 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
             };
           }
           // sse response
-          const { answer, reasoning, finish_reason, usage } = await streamResponse({
+          const { answer, reasoning, finish_reason, usage, citations } = await streamResponse({
             res,
             stream: response,
             aiChatReasoning,
@@ -257,8 +259,12 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
             retainDatasetCite
           });
 
+          // Add formatted citations to the end of answer text if they exist
+          const citationsText = formatCitations(citations);
+          const finalAnswer = citationsText ? `${answer}${citationsText}` : answer;
+
           return {
-            answerText: answer,
+            answerText: finalAnswer,
             reasoningText: reasoning,
             finish_reason,
             inputTokens: usage?.prompt_tokens,
@@ -267,6 +273,8 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
         } else {
           const finish_reason = response.choices?.[0]?.finish_reason as CompletionFinishReason;
           const usage = response.usage;
+          // @ts-ignore
+          const citations = response.citations as string[] | undefined;
 
           const { content, reasoningContent } = (() => {
             const content = response.choices?.[0]?.message?.content || '';
@@ -289,13 +297,12 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
             };
           })();
 
-          // 先对内容做 retainDatasetCite 的清洗
-          const formatReasonContent = removeDatasetCiteText(reasoningContent, retainDatasetCite);
-          const cleanedContent = removeDatasetCiteText(content, retainDatasetCite);
+          // Add formatted citations to the end of content if they exist
+          const citationsText = formatCitations(citations);
+          const contentWithCitations = citationsText ? `${content}${citationsText}` : content;
 
-          // 从响应中读取 citations（string 或 string[]），转为可拼接文本
-          const citationsText = formatCitationsForAppend((response as any)?.citations);
-          const formatContent = cleanedContent + citationsText;
+          const formatReasonContent = removeDatasetCiteText(reasoningContent, retainDatasetCite);
+          const formatContent = removeDatasetCiteText(contentWithCitations, retainDatasetCite);
 
           // Some models do not support streaming
           if (aiChatReasoning && reasoningContent) {
@@ -306,7 +313,7 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
               })
             });
           }
-          if (isResponseAnswerText && formatContent) {
+          if (isResponseAnswerText && contentWithCitations) {
             workflowStreamResponse?.({
               event: SseResponseEventEnum.fastAnswer,
               data: textAdaptGptResponse({
@@ -601,6 +608,7 @@ async function streamResponse({
   });
 
   const { parsePart, getResponseData, updateFinishReason } = parseLLMStreamResponse();
+  let accumulatedCitations: string[] = [];
 
   for await (const part of stream) {
     if (res.closed) {
@@ -614,6 +622,13 @@ async function streamResponse({
       parseThinkTag,
       retainDatasetCite
     });
+
+    // Extract citations from streaming parts if they exist
+    // @ts-ignore
+    if (part.citations && Array.isArray(part.citations)) {
+      // @ts-ignore
+      accumulatedCitations = [...accumulatedCitations, ...part.citations];
+    }
 
     if (aiChatReasoning && reasoningContent) {
       workflowStreamResponse?.({
@@ -636,12 +651,9 @@ async function streamResponse({
     }
   }
 
-  const respData: any = getResponseData();
-  const { reasoningContent: reasoning, content: answer, finish_reason, usage } = respData;
-
-  // 从最终聚合或流对象上读取 citations，并在流式结束后追加一次
-  const citationsText = formatCitationsForAppend(respData?.citations ?? (stream as any)?.citations);
-  if (isResponseAnswerText && citationsText) {
+  // Send formatted citations at the end of streaming if they exist
+  const citationsText = formatCitations(accumulatedCitations);
+  if (citationsText && isResponseAnswerText) {
     workflowStreamResponse?.({
       write,
       event: SseResponseEventEnum.answer,
@@ -651,5 +663,7 @@ async function streamResponse({
     });
   }
 
-  return { answer: answer + (citationsText || ''), reasoning, finish_reason, usage };
+  const { reasoningContent: reasoning, content: answer, finish_reason, usage } = getResponseData();
+
+  return { answer, reasoning, finish_reason, usage, citations: accumulatedCitations };
 }
