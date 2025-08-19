@@ -76,6 +76,19 @@ export type ChatResponse = DispatchNodeResultType<
   }
 >;
 
+/* 将 citations（string 或 string[]）格式化为可直接拼接到内容末尾的文本块 */
+function formatCitationsForAppend(citations: unknown): string {
+  let items: string[] = [];
+  if (Array.isArray(citations)) {
+    items = citations.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim());
+  } else if (typeof citations === 'string' && citations.trim()) {
+    items = [citations.trim()];
+  }
+  if (items.length === 0) return '';
+  const lines = items.map((s, i) => `${i + 1}. ${s}`);
+  return `\n\nReferences:\n${lines.join('\n')}`;
+}
+
 /* request openai chat */
 export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResponse> => {
   let {
@@ -276,8 +289,13 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
             };
           })();
 
+          // 先对内容做 retainDatasetCite 的清洗
           const formatReasonContent = removeDatasetCiteText(reasoningContent, retainDatasetCite);
-          const formatContent = removeDatasetCiteText(content, retainDatasetCite);
+          const cleanedContent = removeDatasetCiteText(content, retainDatasetCite);
+
+          // 从响应中读取 citations（string 或 string[]），转为可拼接文本
+          const citationsText = formatCitationsForAppend((response as any)?.citations);
+          const formatContent = cleanedContent + citationsText;
 
           // Some models do not support streaming
           if (aiChatReasoning && reasoningContent) {
@@ -288,7 +306,7 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
               })
             });
           }
-          if (isResponseAnswerText && content) {
+          if (isResponseAnswerText && formatContent) {
             workflowStreamResponse?.({
               event: SseResponseEventEnum.fastAnswer,
               data: textAdaptGptResponse({
@@ -618,7 +636,20 @@ async function streamResponse({
     }
   }
 
-  const { reasoningContent: reasoning, content: answer, finish_reason, usage } = getResponseData();
+  const respData: any = getResponseData();
+  const { reasoningContent: reasoning, content: answer, finish_reason, usage } = respData;
 
-  return { answer, reasoning, finish_reason, usage };
+  // 从最终聚合或流对象上读取 citations，并在流式结束后追加一次
+  const citationsText = formatCitationsForAppend(respData?.citations ?? (stream as any)?.citations);
+  if (isResponseAnswerText && citationsText) {
+    workflowStreamResponse?.({
+      write,
+      event: SseResponseEventEnum.answer,
+      data: textAdaptGptResponse({
+        text: citationsText
+      })
+    });
+  }
+
+  return { answer: answer + (citationsText || ''), reasoning, finish_reason, usage };
 }
