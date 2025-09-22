@@ -1,14 +1,6 @@
 import { resolve } from 'path';
 import { defineConfig } from 'vitest/config';
-
 export default defineConfig({
-  resolve: {
-    alias: {
-      '@': resolve('projects/app/src'),
-      '@fastgpt': resolve('packages'),
-      '@test': resolve('test')
-    }
-  },
   test: {
     coverage: {
       enabled: true,
@@ -23,13 +15,15 @@ export default defineConfig({
     // fileParallelism: false,
     maxConcurrency: 5,
     pool: 'threads',
-    include: [
-      'test/test.ts',
-      'test/cases/**/*.test.ts',
-      'projects/app/test/**/*.test.ts',
-      'projects/sandbox/test/**/*.test.ts'
-    ],
+    include: ['test/test.ts', 'test/cases/**/*.test.ts', 'projects/app/test/**/*.test.ts'],
     testTimeout: 20000,
     reporters: ['github-actions', 'default']
+  },
+  resolve: {
+    alias: {
+      '@': resolve('projects/app/src'),
+      '@fastgpt': resolve('packages'),
+      '@test': resolve('test')
+    }
   }
 });

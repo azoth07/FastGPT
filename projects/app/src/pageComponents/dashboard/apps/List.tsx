@@ -17,7 +17,7 @@ import { useFolderDrag } from '@/components/common/folder/useFolderDrag';
 import dynamic from 'next/dynamic';
 import type { EditResourceInfoFormType } from '@/components/common/Modal/EditResourceModal';
 import MyMenu, { type MenuItemType } from '@fastgpt/web/components/common/MyMenu';
-import { AppDefaultRoleVal, AppRoleList } from '@fastgpt/global/support/permission/app/constant';
+import { AppRoleList } from '@fastgpt/global/support/permission/app/constant';
 import {
   deleteAppCollaborators,
   getCollaboratorList,
@@ -36,8 +36,8 @@ import { useSystem } from '@fastgpt/web/hooks/useSystem';
 import { useChatStore } from '@/web/core/chat/context/useChatStore';
 import { type RequireOnlyOne } from '@fastgpt/global/common/type/utils';
 import UserBox from '@fastgpt/web/components/common/UserBox';
+import { type PermissionValueType } from '@fastgpt/global/support/permission/type';
 import { ChatSidebarPaneEnum } from '@/pageComponents/chat/constants';
-import { ReadRoleVal } from '@fastgpt/global/support/permission/constant';
 const HttpEditModal = dynamic(() => import('./HttpPluginEditModal'));
 
 const ListItem = () => {
@@ -52,8 +52,10 @@ const ListItem = () => {
     content: t('app:move.hint')
   });
 
-  const { myApps, loadMyApps, onUpdateApp, setMoveAppId, folderDetail, setSearchKey } =
-    useContextSelector(AppListContext, (v) => v);
+  const { myApps, loadMyApps, onUpdateApp, setMoveAppId, folderDetail } = useContextSelector(
+    AppListContext,
+    (v) => v
+  );
 
   const [editedApp, setEditedApp] = useState<EditResourceInfoFormType>();
   const [editHttpPlugin, setEditHttpPlugin] = useState<EditHttpPluginProps>();
@@ -183,7 +185,6 @@ const ListItem = () => {
                 }}
                 onClick={() => {
                   if (AppFolderTypeList.includes(app.type)) {
-                    setSearchKey('');
                     router.push({
                       query: {
                         ...router.query,
@@ -435,11 +436,15 @@ const ListItem = () => {
           avatar={editPerApp.avatar}
           name={editPerApp.name}
           managePer={{
-            defaultRole: ReadRoleVal,
             permission: editPerApp.permission,
             onGetCollaboratorList: () => getCollaboratorList(editPerApp._id),
             roleList: AppRoleList,
-            onUpdateCollaborators: (props) =>
+            onUpdateCollaborators: (props: {
+              members?: string[];
+              groups?: string[];
+              orgs?: string[];
+              permission: PermissionValueType;
+            }) =>
               postUpdateAppCollaborators({
                 ...props,
                 appId: editPerApp._id

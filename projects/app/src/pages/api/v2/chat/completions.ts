@@ -56,7 +56,6 @@ import {
 } from '@fastgpt/global/core/workflow/utils';
 import { getNanoid } from '@fastgpt/global/common/string/tools';
 import { getSystemTime } from '@fastgpt/global/common/time/timezone';
-
 import { rewriteNodeOutputByHistories } from '@fastgpt/global/core/workflow/runtime/utils';
 import { getWorkflowResponseWrite } from '@fastgpt/service/core/workflow/dispatch/utils';
 import { WORKFLOW_MAX_RUN_TIMES } from '@fastgpt/service/core/workflow/constants';
@@ -133,7 +132,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       API params: chatId + [Human]
       API params: [histories, Human]
     */
-    const chatMessages = GPTMessages2Chats({ messages });
+    const chatMessages = GPTMessages2Chats(messages);
 
     // Computed start hook params
     const startHookText = (() => {

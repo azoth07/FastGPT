@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   pluginNodes2InputSchema,
   workflow2InputSchema,
-  getMcpServerTools
+  getMcpServerTools,
+  callMcpServerTool
 } from '@/service/support/mcp/utils';
 import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
 import { MongoMcpKey } from '@fastgpt/service/support/mcp/schema';
@@ -11,6 +12,11 @@ import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
 import { CommonErrEnum } from '@fastgpt/global/common/error/code/common';
 import { authAppByTmbId } from '@fastgpt/service/support/permission/app/auth';
 import { getAppLatestVersion } from '@fastgpt/service/core/app/version/controller';
+import {
+  getUserChatInfoAndAuthTeamPoints,
+  getRunningUserInfoByTmbId
+} from '@fastgpt/service/support/permission/auth/team';
+import { dispatchWorkFlow } from '@fastgpt/service/core/workflow/dispatch';
 
 vi.mock('@fastgpt/service/support/mcp/schema', () => ({
   MongoMcpKey: {

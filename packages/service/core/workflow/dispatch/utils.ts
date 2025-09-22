@@ -1,9 +1,7 @@
 import { getErrText } from '@fastgpt/global/common/error/utils';
 import { ChatRoleEnum } from '@fastgpt/global/core/chat/constants';
 import type { ChatItemType } from '@fastgpt/global/core/chat/type.d';
-import { NodeOutputKeyEnum, VariableInputEnum } from '@fastgpt/global/core/workflow/constants';
-import type { VariableItemType } from '@fastgpt/global/core/app/type';
-import { encryptSecret } from '../../../common/secret/aes256gcm';
+import { NodeOutputKeyEnum } from '@fastgpt/global/core/workflow/constants';
 import {
   type RuntimeEdgeItemType,
   type RuntimeNodeItemType,
@@ -117,12 +115,9 @@ export const checkQuoteQAValue = (quoteQA?: SearchDataResponseItemType[]) => {
 /* remove system variable */
 export const removeSystemVariable = (
   variables: Record<string, any>,
-  removeObj: Record<string, string> = {},
-  userVariablesConfigs: VariableItemType[] = []
+  removeObj: Record<string, string> = {}
 ) => {
   const copyVariables = { ...variables };
-
-  // Delete system variables
   delete copyVariables.userId;
   delete copyVariables.appId;
   delete copyVariables.chatId;
@@ -130,25 +125,13 @@ export const removeSystemVariable = (
   delete copyVariables.histories;
   delete copyVariables.cTime;
 
-  // Delete special variables
+  // delete external provider workflow variables
   Object.keys(removeObj).forEach((key) => {
     delete copyVariables[key];
   });
 
-  // Encrypt password variables
-  userVariablesConfigs.forEach((item) => {
-    const val = copyVariables[item.key];
-    if (item.type === VariableInputEnum.password && typeof val === 'string') {
-      copyVariables[item.key] = {
-        value: '',
-        secret: encryptSecret(val)
-      };
-    }
-  });
-
   return copyVariables;
 };
-
 export const filterSystemVariables = (variables: Record<string, any>): SystemVariablesType => {
   return {
     userId: variables.userId,
@@ -227,22 +210,17 @@ export const rewriteRuntimeWorkFlow = async ({
       if (!app) continue;
       const toolList = await getMCPChildren(app);
 
-      const parentId = mcpToolsetVal.toolId ?? toolSetNode.pluginId;
-      toolList.forEach((tool, index) => {
+      for (const tool of toolList) {
         const newToolNode = getMCPToolRuntimeNode({
           avatar: toolSetNode.avatar,
           tool,
           // New ?? Old
-          parentId
+          parentId: mcpToolsetVal.toolId ?? toolSetNode.pluginId
         });
-        newToolNode.nodeId = `${parentId}${index}`; // ID 不能随机，否则下次生成时候就和之前的记录对不上
 
-        nodes.push({
-          ...newToolNode,
-          name: `${toolSetNode.name}/${tool.name}`
-        });
+        nodes.push({ ...newToolNode, name: `${toolSetNode.name}/${tool.name}` });
         pushEdges(newToolNode.nodeId);
-      });
+      }
     }
   }
 

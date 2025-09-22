@@ -137,7 +137,13 @@ const NavBar = ({ currentTab }: { currentTab: TabEnum }) => {
                 fontSize={'sm'}
                 fontWeight={500}
                 onClick={() => {
-                  router.back();
+                  router.replace({
+                    query: {
+                      datasetId: router.query.datasetId,
+                      parentId: router.query.parentId,
+                      currentTab: TabEnum.collectionCard
+                    }
+                  });
                 }}
               >
                 <IconButton

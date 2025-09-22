@@ -14,6 +14,11 @@ import {
 } from '@chakra-ui/react';
 import { useTranslation } from 'next-i18next';
 import React, { useMemo, useRef, useState } from 'react';
+import {
+  ModelProviderList,
+  type ModelProviderIdType,
+  getModelProvider
+} from '@fastgpt/global/core/ai/provider';
 import MySelect from '@fastgpt/web/components/common/MySelect';
 import { modelTypeList, ModelTypeEnum } from '@fastgpt/global/core/ai/model';
 import SearchInput from '@fastgpt/web/components/common/Input/SearchInput';
@@ -22,20 +27,19 @@ import Avatar from '@fastgpt/web/components/common/Avatar';
 import MyTag from '@fastgpt/web/components/common/Tag/index';
 import dynamic from 'next/dynamic';
 import CopyBox from '@fastgpt/web/components/common/String/CopyBox';
+
 const MyModal = dynamic(() => import('@fastgpt/web/components/common/MyModal'));
 
 const ModelTable = () => {
-  const { t, i18n } = useTranslation();
-  const { getModelProviders, getModelProvider } = useSystemStore();
-
-  const [provider, setProvider] = useState<string | ''>('');
-  const providerList = useRef<{ label: any; value: string | '' }[]>([
+  const { t } = useTranslation();
+  const [provider, setProvider] = useState<ModelProviderIdType | ''>('');
+  const providerList = useRef<{ label: any; value: ModelProviderIdType | '' }[]>([
     { label: t('common:All'), value: '' },
-    ...getModelProviders(i18n.language).map((item) => ({
+    ...ModelProviderList.map((item) => ({
       label: (
         <HStack>
           <Avatar src={item.avatar} w={'1rem'} />
-          <Box>{item.name}</Box>
+          <Box>{t(item.name as any)}</Box>
         </HStack>
       ),
       value: item.id
@@ -158,12 +162,12 @@ const ModelTable = () => {
       ];
     })();
     const formatList = list.map((item) => {
-      const provider = getModelProvider(item.provider, i18n.language);
+      const provider = getModelProvider(item.provider);
       return {
         name: item.name,
         avatar: provider.avatar,
         providerId: provider.id,
-        providerName: provider.name,
+        providerName: t(provider.name as any),
         typeLabel: item.typeLabel,
         priceLabel: item.priceLabel,
         order: provider.order,
@@ -190,8 +194,6 @@ const ModelTable = () => {
     reRankModelList,
     t,
     modelType,
-    getModelProvider,
-    i18n.language,
     provider,
     search
   ]);

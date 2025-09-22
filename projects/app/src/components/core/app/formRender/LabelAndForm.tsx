@@ -7,8 +7,6 @@ import type { UseFormReturn } from 'react-hook-form';
 import { Controller } from 'react-hook-form';
 import InputRender from '.';
 import type { SpecificProps } from './type';
-import { InputTypeEnum } from './constant';
-import { useSafeTranslation } from '@fastgpt/web/hooks/useSafeTranslation';
 
 // Helper function to flatten error object keys
 const getFlattenedErrorKeys = (errors: any, prefix = ''): string[] => {
@@ -30,49 +28,37 @@ const getFlattenedErrorKeys = (errors: any, prefix = ''): string[] => {
 };
 
 const LabelAndFormRender = ({
+  formKey,
   label,
   required,
   placeholder,
   inputType,
+  variablesForm,
   showValueType,
   ...props
 }: {
+  formKey: string;
   label: string | React.ReactNode;
   required?: boolean;
   placeholder?: string;
+  variablesForm: UseFormReturn<any>;
   showValueType?: boolean;
-  form: UseFormReturn<any>;
-  fieldName: string;
-
-  minLength?: number;
 } & SpecificProps &
   BoxProps) => {
-  const { t } = useSafeTranslation();
-  const { control } = props.form;
+  const { control } = variablesForm;
 
   return (
     <Box _notLast={{ mb: 4 }}>
       <Flex alignItems={'center'} mb={1}>
-        {typeof label === 'string' ? <FormLabel required={required}>{t(label)}</FormLabel> : label}
+        {typeof label === 'string' ? <FormLabel required={required}>{label}</FormLabel> : label}
         {placeholder && <QuestionTip ml={1} label={placeholder} />}
       </Flex>
 
       <Controller
         control={control}
-        name={props.fieldName}
+        name={formKey}
         rules={{
-          validate: (value) => {
-            if (!required || inputType === InputTypeEnum.switch) return true;
-            return !!value;
-          },
-          ...(!!props?.minLength
-            ? {
-                minLength: {
-                  value: props.minLength,
-                  message: t(`common:min_length`, { minLength: props.minLength })
-                }
-              }
-            : {})
+          required
         }}
         render={({ field: { onChange, value }, fieldState: { error } }) => {
           return (

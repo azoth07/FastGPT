@@ -868,12 +868,8 @@ curl --location --request PUT 'http://localhost:3000/api/core/dataset/collection
   <Tab value="请求示例" >
 
 ```bash
-curl --location --request POST 'http://localhost:3000/api/core/dataset/collection/delete' \
---header 'Authorization: Bearer fastgpt-' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "collectionIds": ["65a8cdcb0d70d3de0bf08d0a"]
-}'
+curl --location --request DELETE 'http://localhost:3000/api/core/dataset/collection/delete?id=65aa2a64e6cb9b8ccdc00de8' \
+--header 'Authorization: Bearer {{authorization}}' \
 ```
 
   </Tab>
@@ -881,7 +877,7 @@ curl --location --request POST 'http://localhost:3000/api/core/dataset/collectio
   <Tab value="参数说明" >
 
 <div>
-- collectionIds: 集合的 ID 列表
+- id: 集合的ID
 </div>
 
   </Tab>

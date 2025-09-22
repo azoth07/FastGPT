@@ -11,7 +11,6 @@ import { MongoResourcePermission } from '@fastgpt/service/support/permission/sch
 import { MongoUser } from '@fastgpt/service/support/user/schema';
 import { MongoTeamMember } from '@fastgpt/service/support/user/team/teamMemberSchema';
 import { MongoTeam } from '@fastgpt/service/support/user/team/teamSchema';
-import { initTeamFreePlan } from '@fastgpt/service/support/wallet/sub/utils';
 import type { parseHeaderCertRet } from 'test/mocks/request';
 
 export async function getRootUser(): Promise<parseHeaderCertRet> {
@@ -23,11 +22,6 @@ export async function getRootUser(): Promise<parseHeaderCertRet> {
   const team = await MongoTeam.create({
     name: 'test team',
     ownerId: rootUser._id
-  });
-
-  // Initialize free subscription plan for the team
-  await initTeamFreePlan({
-    teamId: String(team._id)
   });
 
   const tmb = await MongoTeamMember.create({
@@ -44,8 +38,7 @@ export async function getRootUser(): Promise<parseHeaderCertRet> {
     isRoot: true,
     sourceName: undefined,
     teamId: tmb?.teamId,
-    tmbId: tmb?._id,
-    sessionId: ''
+    tmbId: tmb?._id
   };
 }
 
@@ -61,12 +54,6 @@ export async function getUser(username: string, teamId?: string): Promise<parseH
         name: username,
         ownerId: user._id
       });
-
-      // Initialize free subscription plan for the team
-      await initTeamFreePlan({
-        teamId: String(team._id)
-      });
-
       const tmb = await MongoTeamMember.create({
         name: username,
         teamId: team._id,
@@ -91,15 +78,14 @@ export async function getUser(username: string, teamId?: string): Promise<parseH
   })();
 
   return {
-    userId: String(user._id),
+    userId: user._id,
     apikey: '',
     appId: '',
     authType: AuthUserTypeEnum.token,
     isRoot: false,
     sourceName: undefined,
-    teamId: String(tmb?.teamId),
-    tmbId: String(tmb?._id),
-    sessionId: ''
+    teamId: tmb?.teamId,
+    tmbId: tmb?._id
   };
 }
 

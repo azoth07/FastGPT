@@ -13,6 +13,7 @@ import FormLabel from '@fastgpt/web/components/common/MyBox/FormLabel';
 import MySelect from '@fastgpt/web/components/common/MySelect';
 import { getChannelList, getDashboardV2 } from '@/web/core/ai/channel';
 import { getSystemModelList } from '@/web/core/ai/config';
+import { getModelProvider } from '@fastgpt/global/core/ai/provider';
 import AreaChartComponent from '@fastgpt/web/components/common/charts/AreaChartComponent';
 import FillRowTabs from '@fastgpt/web/components/common/Tabs/FillRowTabs';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
@@ -56,9 +57,9 @@ const getDefaultDateRange = (): DateRangeType => {
 };
 
 const ModelDashboard = ({ Tab }: { Tab: React.ReactNode }) => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const theme = useTheme();
-  const { feConfigs, getModelProvider } = useSystemStore();
+  const { feConfigs } = useSystemStore();
 
   const [viewMode, setViewMode] = useState<'chart' | 'table'>('chart');
 
@@ -112,7 +113,7 @@ const ModelDashboard = ({ Tab }: { Tab: React.ReactNode }) => {
   const modelList = useMemo(() => {
     const res = systemModelList
       .map((item) => {
-        const provider = getModelProvider(item.provider, i18n.language);
+        const provider = getModelProvider(item.provider);
         return {
           order: provider.order,
           icon: provider.avatar,

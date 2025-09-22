@@ -1,6 +1,7 @@
 import { MongoDatasetTraining } from '@fastgpt/service/core/dataset/training/schema';
 import { pushLLMTrainingUsage } from '@fastgpt/service/support/wallet/usage/controller';
 import { TrainingModeEnum } from '@fastgpt/global/core/dataset/constants';
+import { createChatCompletion } from '@fastgpt/service/core/ai/config';
 import type { ChatCompletionMessageParam } from '@fastgpt/global/core/ai/type.d';
 import { addLog } from '@fastgpt/service/common/system/log';
 import { replaceVariable } from '@fastgpt/global/common/string/tools';
@@ -9,6 +10,12 @@ import type { PushDatasetDataChunkProps } from '@fastgpt/global/core/dataset/api
 import { getLLMModel } from '@fastgpt/service/core/ai/model';
 import { checkTeamAiPointsAndLock } from './utils';
 import { addMinutes } from 'date-fns';
+import {
+  countGptMessagesTokens,
+  countPromptTokens
+} from '@fastgpt/service/common/string/tiktoken/index';
+import { loadRequestMessages } from '@fastgpt/service/core/chat/utils';
+import { llmCompletionsBodyFormat, formatLLMResponse } from '@fastgpt/service/core/ai/utils';
 import type { LLMModelItemType } from '@fastgpt/global/core/ai/model.d';
 import {
   chunkAutoChunkSize,
@@ -18,7 +25,6 @@ import { getErrText } from '@fastgpt/global/common/error/utils';
 import { text2Chunks } from '@fastgpt/service/worker/function';
 import { pushDataListToTrainingQueue } from '@fastgpt/service/core/dataset/training/controller';
 import { delay } from '@fastgpt/service/common/bullmq';
-import { createLLMResponse } from '@fastgpt/service/core/ai/llm/request';
 
 const reduceQueue = () => {
   global.qaQueueLen = global.qaQueueLen > 0 ? global.qaQueueLen - 1 : 0;
@@ -124,17 +130,20 @@ export async function generateQA(): Promise<any> {
           }
         ];
 
-        const {
-          answerText: answer,
-          usage: { inputTokens, outputTokens }
-        } = await createLLMResponse({
-          body: {
-            model: modelData.model,
-            temperature: 0.3,
-            messages,
-            stream: true
-          }
+        const { response: chatResponse } = await createChatCompletion({
+          body: llmCompletionsBodyFormat(
+            {
+              model: modelData.model,
+              temperature: 0.3,
+              messages: await loadRequestMessages({ messages, useVision: false }),
+              stream: true
+            },
+            modelData
+          )
         });
+        const { text: answer, usage } = await formatLLMResponse(chatResponse);
+        const inputTokens = usage?.prompt_tokens || (await countGptMessagesTokens(messages));
+        const outputTokens = usage?.completion_tokens || (await countPromptTokens(answer));
 
         const qaArr = await formatSplitText({ answer, rawText: text, llmModel: modelData }); // 格式化后的QA对
 
@@ -172,7 +181,7 @@ export async function generateQA(): Promise<any> {
         addLog.info(`[QA Queue] Finish`, {
           time: Date.now() - startTime,
           splitLength: qaArr.length,
-          usage: { inputTokens, outputTokens }
+          usage
         });
       } catch (err: any) {
         addLog.error(`[QA Queue] Error`, err);

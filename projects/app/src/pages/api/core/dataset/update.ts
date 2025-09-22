@@ -17,6 +17,7 @@ import {
 import { type ClientSession } from 'mongoose';
 import { parseParentIdInMongo } from '@fastgpt/global/common/parentFolder/utils';
 import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
+import { getResourceClbsAndGroups } from '@fastgpt/service/support/permission/controller';
 import {
   syncChildrenPermission,
   syncCollaborators
@@ -25,7 +26,10 @@ import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
 import { TeamDatasetCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
 import { DatasetErrEnum } from '@fastgpt/global/common/error/code/dataset';
 import { MongoDatasetTraining } from '@fastgpt/service/core/dataset/training/schema';
+import { MongoDatasetCollection } from '@fastgpt/service/core/dataset/collection/schema';
+import { addDays } from 'date-fns';
 import { refreshSourceAvatar } from '@fastgpt/service/common/file/image/controller';
+import { MongoResourcePermission } from '@fastgpt/service/support/permission/schema';
 import { type DatasetSchemaType } from '@fastgpt/global/core/dataset/type';
 import {
   removeDatasetSyncJobScheduler,
@@ -38,7 +42,6 @@ import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
 import { getI18nDatasetType } from '@fastgpt/service/support/user/audit/util';
 import { getEmbeddingModel, getLLMModel } from '@fastgpt/service/core/ai/model';
 import { computedCollectionChunkSettings } from '@fastgpt/global/core/dataset/training/utils';
-import { getResourceOwnedClbs } from '@fastgpt/service/support/permission/controller';
 
 export type DatasetUpdateQuery = {};
 export type DatasetUpdateResponse = any;
@@ -230,30 +233,39 @@ async function handler(
 
   await mongoSessionRun(async (session) => {
     if (isMove) {
-      const parentClbs = await getResourceOwnedClbs({
-        teamId: dataset.teamId,
-        resourceId: parentId,
-        resourceType: PerResourceTypeEnum.dataset,
-        session
-      });
+      if (isFolder && dataset.inheritPermission) {
+        const parentClbsAndGroups = await getResourceClbsAndGroups({
+          teamId: dataset.teamId,
+          resourceId: parentId,
+          resourceType: PerResourceTypeEnum.dataset,
+          session
+        });
 
-      await syncCollaborators({
-        teamId: dataset.teamId,
-        resourceId: id,
-        resourceType: PerResourceTypeEnum.dataset,
-        collaborators: parentClbs,
-        session
-      });
+        await syncCollaborators({
+          teamId: dataset.teamId,
+          resourceId: id,
+          resourceType: PerResourceTypeEnum.dataset,
+          collaborators: parentClbsAndGroups,
+          session
+        });
 
-      await syncChildrenPermission({
-        resource: dataset,
-        resourceType: PerResourceTypeEnum.dataset,
-        resourceModel: MongoDataset,
-        folderTypeList: [DatasetTypeEnum.folder],
-        collaborators: parentClbs,
-        session
-      });
-      logDatasetMove({ tmbId, teamId, dataset, targetName });
+        await syncChildrenPermission({
+          resource: dataset,
+          resourceType: PerResourceTypeEnum.dataset,
+          resourceModel: MongoDataset,
+          folderTypeList: [DatasetTypeEnum.folder],
+          collaborators: parentClbsAndGroups,
+          session
+        });
+        logDatasetMove({ tmbId, teamId, dataset, targetName });
+      } else {
+        logDatasetMove({ tmbId, teamId, dataset, targetName });
+        // Not folder, delete all clb
+        await MongoResourcePermission.deleteMany(
+          { resourceId: id, teamId: dataset.teamId, resourceType: PerResourceTypeEnum.dataset },
+          { session }
+        );
+      }
       return onUpdate(session);
     } else {
       logDatasetUpdate({ tmbId, teamId, dataset });

@@ -1,5 +1,6 @@
 /* oceanbase vector crud */
 import { DatasetVectorTableName } from '../constants';
+import { delay, retryFn } from '@fastgpt/global/common/system/utils';
 import { ObClient } from './controller';
 import { type RowDataPacket } from 'mysql2/promise';
 import {
@@ -25,6 +26,7 @@ export class ObVectorCtrl {
             createtime TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
       `);
+
       await ObClient.query(
         `CREATE VECTOR INDEX IF NOT EXISTS vector_index ON ${DatasetVectorTableName}(vector) WITH (distance=inner_product, type=hnsw, m=32, ef_construction=128);`
       );
@@ -40,7 +42,6 @@ export class ObVectorCtrl {
       addLog.error('init oceanbase error', error);
     }
   };
-
   insert = async (props: InsertVectorControllerProps): Promise<{ insertIds: string[] }> => {
     const { teamId, datasetId, collectionId, vectors } = props;
 
@@ -51,7 +52,7 @@ export class ObVectorCtrl {
       { key: 'collection_id', value: String(collectionId) }
     ]);
 
-    const { rowCount, insertIds } = await ObClient.insert(DatasetVectorTableName, {
+    const { rowCount, rows } = await ObClient.insert(DatasetVectorTableName, {
       values
     });
 
@@ -60,7 +61,7 @@ export class ObVectorCtrl {
     }
 
     return {
-      insertIds
+      insertIds: rows.map((row) => row.id)
     };
   };
   delete = async (props: DelDatasetVectorCtrlProps): Promise<any> => {

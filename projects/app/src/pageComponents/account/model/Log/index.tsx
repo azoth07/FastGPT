@@ -18,6 +18,7 @@ import {
   GridItem,
   type BoxProps
 } from '@chakra-ui/react';
+import { getModelProvider } from '@fastgpt/global/core/ai/provider';
 import DateRangePicker, {
   type DateRangeType
 } from '@fastgpt/web/components/common/DateRangePicker';
@@ -35,7 +36,6 @@ import MyModal from '@fastgpt/web/components/common/MyModal';
 import QuestionTip from '@fastgpt/web/components/common/MyTooltip/QuestionTip';
 import SearchInput from '@fastgpt/web/components/common/Input/SearchInput';
 import type { ChannelLogListItemType } from '@/global/aiproxy/type';
-import { useSystemStore } from '@/web/common/system/useSystemStore';
 
 type LogDetailType = Omit<ChannelLogListItemType, 'model' | 'request_at'> & {
   channelName: string | number;
@@ -49,9 +49,8 @@ type LogDetailType = Omit<ChannelLogListItemType, 'model' | 'request_at'> & {
   response_body?: string;
 };
 const ChannelLog = ({ Tab }: { Tab: React.ReactNode }) => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { userInfo } = useUserStore();
-  const { getModelProvider } = useSystemStore();
 
   const isRoot = userInfo?.username === 'root';
   const [filterProps, setFilterProps] = useState<{
@@ -104,7 +103,7 @@ const ChannelLog = ({ Tab }: { Tab: React.ReactNode }) => {
   const modelList = useMemo(() => {
     const res = systemModelList
       .map((item) => {
-        const provider = getModelProvider(item.provider, i18n.language);
+        const provider = getModelProvider(item.provider);
 
         return {
           order: provider.order,
@@ -121,7 +120,7 @@ const ChannelLog = ({ Tab }: { Tab: React.ReactNode }) => {
       },
       ...res
     ];
-  }, [getModelProvider, i18n.language, systemModelList, t]);
+  }, [systemModelList, t]);
 
   const { data, isLoading, ScrollData } = useScrollPagination(getChannelLog, {
     pageSize: 20,
@@ -144,7 +143,7 @@ const ChannelLog = ({ Tab }: { Tab: React.ReactNode }) => {
       const channelName = channelList.find((channel) => channel.value === `${item.channel}`)?.label;
 
       const model = systemModelList.find((model) => model.model === item.model);
-      const provider = getModelProvider(model?.provider, i18n.language);
+      const provider = getModelProvider(model?.provider);
 
       return {
         ...item,
@@ -160,7 +159,7 @@ const ChannelLog = ({ Tab }: { Tab: React.ReactNode }) => {
         ttfb_milliseconds: item.ttfb_milliseconds ? item.ttfb_milliseconds / 1000 : 0
       };
     });
-  }, [channelList, data, getModelProvider, i18n.language, systemModelList]);
+  }, [channelList, data, systemModelList]);
 
   const [logDetail, setLogDetail] = useState<LogDetailType>();
 

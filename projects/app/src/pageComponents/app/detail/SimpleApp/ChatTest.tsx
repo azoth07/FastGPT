@@ -16,8 +16,7 @@ import { useChatStore } from '@/web/core/chat/context/useChatStore';
 import MyBox from '@fastgpt/web/components/common/MyBox';
 import { cardStyles } from '../constants';
 import ChatQuoteList from '@/pageComponents/chat/ChatQuoteList';
-import VariablePopover from '@/components/core/chat/ChatContainer/components/VariablePopover';
-import { ChatTypeEnum } from '@/components/core/chat/ChatContainer/ChatBox/constants';
+import VariablePopover from '@/components/core/chat/ChatContainer/ChatBox/components/VariablePopover';
 
 type Props = {
   appForm: AppSimpleEditFormType;
@@ -46,7 +45,7 @@ const ChatTest = ({ appForm, setRenderEdit }: Props) => {
     setRenderEdit(!datasetCiteData);
   }, [datasetCiteData, setRenderEdit]);
 
-  const { ChatContainer, restartChat } = useChatTest({
+  const { ChatContainer, restartChat, loading } = useChatTest({
     ...workflowData,
     chatConfig: appForm.chatConfig,
     isReady: true
@@ -69,7 +68,7 @@ const ChatTest = ({ appForm, setRenderEdit }: Props) => {
           <Box fontSize={['md', 'lg']} fontWeight={'bold'} color={'myGray.900'} mr={3}>
             {t('app:chat_debug')}
           </Box>
-          {!isVariableVisible && <VariablePopover chatType={ChatTypeEnum.test} />}
+          {!isVariableVisible && <VariablePopover showExternalVariables />}
           <Box flex={1} />
           <MyTooltip label={t('common:core.chat.Restart')}>
             <IconButton

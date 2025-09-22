@@ -34,7 +34,6 @@ import MCPToolsEditModal from '@/pageComponents/dashboard/apps/MCPToolsEditModal
 import { getUtmWorkflow } from '@/web/support/marketing/utils';
 import { useMount } from 'ahooks';
 import SearchInput from '@fastgpt/web/components/common/Input/SearchInput';
-import { ReadRoleVal } from '@fastgpt/global/support/permission/constant';
 
 const CreateModal = dynamic(() => import('@/pageComponents/dashboard/apps/CreateModal'));
 const EditFolderModal = dynamic(
@@ -57,8 +56,7 @@ const MyApps = ({ MenuIcon }: { MenuIcon: JSX.Element }) => {
     isFetchingApps,
     folderDetail,
     refetchFolderDetail,
-    setSearchKey,
-    searchKey
+    setSearchKey
   } = useContextSelector(AppListContext, (v) => v);
   const { userInfo } = useUserStore();
 
@@ -166,7 +164,6 @@ const MyApps = ({ MenuIcon }: { MenuIcon: JSX.Element }) => {
             {isPc && (
               <SearchInput
                 maxW={['auto', '250px']}
-                value={searchKey}
                 onChange={(e) => setSearchKey(e.target.value)}
                 placeholder={t('app:search_app')}
                 maxLength={30}
@@ -247,7 +244,6 @@ const MyApps = ({ MenuIcon }: { MenuIcon: JSX.Element }) => {
               {
                 <SearchInput
                   maxW={['auto', '250px']}
-                  value={searchKey}
                   onChange={(e) => setSearchKey(e.target.value)}
                   placeholder={t('app:search_app')}
                   maxLength={30}
@@ -283,7 +279,6 @@ const MyApps = ({ MenuIcon }: { MenuIcon: JSX.Element }) => {
               deleteTip={t('app:confirm_delete_folder_tip')}
               onDelete={() => onDeleFolder(folderDetail._id)}
               managePer={{
-                defaultRole: ReadRoleVal,
                 permission: folderDetail.permission,
                 onGetCollaboratorList: () => getCollaboratorList(folderDetail._id),
                 roleList: AppRoleList,

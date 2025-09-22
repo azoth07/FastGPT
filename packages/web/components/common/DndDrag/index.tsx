@@ -23,17 +23,9 @@ type Props<T = any> = {
   }) => ReactElement<HTMLElement, string>;
   dataList: T[];
   zoom?: number;
-  renderInnerPlaceholder?: boolean;
 };
 
-function DndDrag<T>({
-  children,
-  renderClone,
-  onDragEndCb,
-  dataList,
-  zoom = 1,
-  renderInnerPlaceholder = true
-}: Props<T>) {
+function DndDrag<T>({ children, renderClone, onDragEndCb, dataList, zoom = 1 }: Props<T>) {
   const [draggingItemHeight, setDraggingItemHeight] = useState(0);
 
   const onDragStart = (start: DragStart) => {
@@ -63,9 +55,7 @@ function DndDrag<T>({
         {(provided, snapshot) => (
           <>
             {children({ provided, snapshot })}
-            {snapshot.isDraggingOver && renderInnerPlaceholder && (
-              <Box height={`${draggingItemHeight / zoom}px`} />
-            )}
+            {snapshot.isDraggingOver && <Box height={`${draggingItemHeight / zoom}px`} />}
           </>
         )}
       </Droppable>

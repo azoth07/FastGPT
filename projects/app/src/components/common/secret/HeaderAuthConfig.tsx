@@ -307,7 +307,7 @@ const HeaderAuthConfig = ({
                             h={8}
                             bg="myGray.50"
                             placeholder="key"
-                            maxLength={64}
+                            maxLength={20}
                             {...register(`customs.${index}.key`, {
                               required: true
                             })}

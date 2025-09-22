@@ -1,3 +1,4 @@
+import { useSystemStore } from '@/web/common/system/useSystemStore';
 import {
   Box,
   Button,
@@ -12,6 +13,7 @@ import {
   AccordionIcon,
   Input
 } from '@chakra-ui/react';
+import { getModelFromList } from '@fastgpt/global/core/ai/model';
 import Avatar from '@fastgpt/web/components/common/Avatar';
 import MyModal from '@fastgpt/web/components/common/MyModal';
 import { useRequest2 } from '@fastgpt/web/hooks/useRequest';
@@ -25,7 +27,7 @@ import {
   updateEvalItem
 } from '@/web/core/app/api/evaluation';
 import { usePagination } from '@fastgpt/web/hooks/usePagination';
-import { downloadFetch, getWebLLMModel } from '@/web/common/system/utils';
+import { downloadFetch } from '@/web/common/system/utils';
 import PopoverConfirm from '@fastgpt/web/components/common/MyPopover/PopoverConfirm';
 import { type TFunction } from 'i18next';
 import EmptyTip from '@fastgpt/web/components/common/EmptyTip';
@@ -81,13 +83,16 @@ const EvaluationDetailModal = ({
   onClose: () => void;
   fetchEvalList: () => void;
 }) => {
-  const { t, i18n } = useTranslation();
-  const language = i18n.language;
+  const { t } = useTranslation();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [editing, setEditing] = useState(false);
   const [pollingInterval, setPollingInterval] = useState(10000);
 
-  const modelData = useMemo(() => getWebLLMModel(evalDetail.evalModel), [evalDetail.evalModel]);
+  const { llmModelList } = useSystemStore();
+  const modelData = useMemo(
+    () => getModelFromList(llmModelList, evalDetail.evalModel),
+    [evalDetail.evalModel, llmModelList]
+  );
 
   const {
     data: evalItemsList,

@@ -4,7 +4,6 @@ import type { OrgSchemaType } from '@fastgpt/global/support/user/team/org/type';
 import { connectionMongo, getMongoModel } from '../../../common/mongo';
 import { OrgMemberCollectionName } from './orgMemberSchema';
 import { getNanoid } from '@fastgpt/global/common/string/tools';
-import { DEFAULT_ORG_AVATAR } from '@fastgpt/global/common/system/constants';
 const { Schema } = connectionMongo;
 
 export const OrgSchema = new Schema(
@@ -30,9 +29,7 @@ export const OrgSchema = new Schema(
       type: String,
       required: true
     },
-    avatar: {
-      type: String
-    },
+    avatar: String,
     description: String,
     updateTime: {
       type: Date,

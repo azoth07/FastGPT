@@ -19,18 +19,6 @@ import type { FlowNodeOutputItemType, ReferenceValueType } from '../type/io';
 import type { StoreNodeItemType } from '../type/node';
 import { isValidReferenceValueFormat } from '../utils';
 import type { RuntimeEdgeItemType, RuntimeNodeItemType } from './type';
-import { isSecretValue } from '../../../common/secret/utils';
-
-export const checkIsBranchNode = (node: RuntimeNodeItemType) => {
-  if (node.catchError) return true;
-
-  const map: Record<any, boolean> = {
-    [FlowNodeTypeEnum.classifyQuestion]: true,
-    [FlowNodeTypeEnum.userSelect]: true,
-    [FlowNodeTypeEnum.ifElseNode]: true
-  };
-  return !!map[node.flowNodeType];
-};
 
 export const extractDeepestInteractive = (
   interactive: WorkflowInteractiveResponseType
@@ -68,7 +56,7 @@ export const getMaxHistoryLimitFromNodes = (nodes: StoreNodeItemType[]): number 
 };
 
 /* value type format */
-export const valueTypeFormat = (value: any, valueType?: WorkflowIOValueTypeEnum) => {
+export const valueTypeFormat = (value: any, type?: WorkflowIOValueTypeEnum) => {
   const isObjectString = (value: any) => {
     if (typeof value === 'string' && value !== 'false' && value !== 'true') {
       const trimmedValue = value.trim();
@@ -82,37 +70,34 @@ export const valueTypeFormat = (value: any, valueType?: WorkflowIOValueTypeEnum)
 
   // 1. any值，忽略格式化
   if (value === undefined || value === null) return value;
-  if (!valueType || valueType === WorkflowIOValueTypeEnum.any) return value;
-
-  // Password check
-  if (valueType === WorkflowIOValueTypeEnum.string && isSecretValue(value)) return value;
+  if (!type || type === WorkflowIOValueTypeEnum.any) return value;
 
   // 2. 如果值已经符合目标类型，直接返回
   if (
-    (valueType === WorkflowIOValueTypeEnum.string && typeof value === 'string') ||
-    (valueType === WorkflowIOValueTypeEnum.number && typeof value === 'number') ||
-    (valueType === WorkflowIOValueTypeEnum.boolean && typeof value === 'boolean') ||
-    (valueType.startsWith('array') && Array.isArray(value)) ||
-    (valueType === WorkflowIOValueTypeEnum.object && typeof value === 'object') ||
-    (valueType === WorkflowIOValueTypeEnum.chatHistory &&
+    (type === WorkflowIOValueTypeEnum.string && typeof value === 'string') ||
+    (type === WorkflowIOValueTypeEnum.number && typeof value === 'number') ||
+    (type === WorkflowIOValueTypeEnum.boolean && typeof value === 'boolean') ||
+    (type.startsWith('array') && Array.isArray(value)) ||
+    (type === WorkflowIOValueTypeEnum.object && typeof value === 'object') ||
+    (type === WorkflowIOValueTypeEnum.chatHistory &&
       (Array.isArray(value) || typeof value === 'number')) ||
-    (valueType === WorkflowIOValueTypeEnum.datasetQuote && Array.isArray(value)) ||
-    (valueType === WorkflowIOValueTypeEnum.selectDataset && Array.isArray(value)) ||
-    (valueType === WorkflowIOValueTypeEnum.selectApp && typeof value === 'object')
+    (type === WorkflowIOValueTypeEnum.datasetQuote && Array.isArray(value)) ||
+    (type === WorkflowIOValueTypeEnum.selectDataset && Array.isArray(value)) ||
+    (type === WorkflowIOValueTypeEnum.selectApp && typeof value === 'object')
   ) {
     return value;
   }
 
   // 4. 按目标类型，进行格式转化
   // 4.1 基本类型转换
-  if (valueType === WorkflowIOValueTypeEnum.string) {
+  if (type === WorkflowIOValueTypeEnum.string) {
     return typeof value === 'object' ? JSON.stringify(value) : String(value);
   }
-  if (valueType === WorkflowIOValueTypeEnum.number) {
-    if (value === '') return null;
+  if (type === WorkflowIOValueTypeEnum.number) {
+    if (value === '') return undefined;
     return Number(value);
   }
-  if (valueType === WorkflowIOValueTypeEnum.boolean) {
+  if (type === WorkflowIOValueTypeEnum.boolean) {
     if (typeof value === 'string') {
       return value.toLowerCase() === 'true';
     }
@@ -120,7 +105,7 @@ export const valueTypeFormat = (value: any, valueType?: WorkflowIOValueTypeEnum)
   }
 
   // 4.3 字符串转对象
-  if (valueType === WorkflowIOValueTypeEnum.object) {
+  if (type === WorkflowIOValueTypeEnum.object) {
     if (isObjectString(value)) {
       const trimmedValue = value.trim();
       try {
@@ -131,7 +116,7 @@ export const valueTypeFormat = (value: any, valueType?: WorkflowIOValueTypeEnum)
   }
 
   // 4.4 数组类型(这里 value 不是数组类型)（TODO: 嵌套数据类型转化）
-  if (valueType.startsWith('array')) {
+  if (type.startsWith('array')) {
     if (isObjectString(value)) {
       try {
         return json5.parse(value);
@@ -146,7 +131,7 @@ export const valueTypeFormat = (value: any, valueType?: WorkflowIOValueTypeEnum)
       WorkflowIOValueTypeEnum.datasetQuote,
       WorkflowIOValueTypeEnum.selectDataset,
       WorkflowIOValueTypeEnum.selectApp
-    ].includes(valueType)
+    ].includes(type)
   ) {
     if (isObjectString(value)) {
       try {
@@ -157,7 +142,7 @@ export const valueTypeFormat = (value: any, valueType?: WorkflowIOValueTypeEnum)
   }
 
   // Invalid history type
-  if (valueType === WorkflowIOValueTypeEnum.chatHistory) {
+  if (type === WorkflowIOValueTypeEnum.chatHistory) {
     if (isObjectString(value)) {
       try {
         return json5.parse(value);
@@ -291,41 +276,35 @@ export const filterWorkflowEdges = (edges: RuntimeEdgeItemType[]) => {
 };
 
 /*
-  1. 输入线分类：普通线(实际上就是从 start 直接过来的分支）和递归线（可以追溯到自身的分支）
-  2. 递归线，会根据最近的一个 target 分支进行分类，同一个分支的属于一组
-  2. 起始线全部非 waiting 执行，或递归线任意一组全部非 waiting 执行
+  1. 输入线分类：普通线和递归线（可以追溯到自身）
+  2. 起始线全部非 waiting 执行，或递归线全部非 waiting 执行
 */
 export const checkNodeRunStatus = ({
-  nodesMap,
   node,
   runtimeEdges
 }: {
-  nodesMap: Map<string, RuntimeNodeItemType>;
   node: RuntimeNodeItemType;
   runtimeEdges: RuntimeEdgeItemType[];
 }) => {
-  const filterRuntimeEdges = filterWorkflowEdges(runtimeEdges);
-
-  const splitNodeEdges = (targetNode: RuntimeNodeItemType) => {
+  /*
+    区分普通连线和递归连线
+    递归连线：可以通过往上查询 nodes，最终追溯到自身
+  */
+  const splitEdges2WorkflowEdges = ({
+    sourceEdges,
+    allEdges,
+    currentNode
+  }: {
+    sourceEdges: RuntimeEdgeItemType[];
+    allEdges: RuntimeEdgeItemType[];
+    currentNode: RuntimeNodeItemType;
+  }) => {
     const commonEdges: RuntimeEdgeItemType[] = [];
-    const recursiveEdgeGroupsMap = new Map<string, RuntimeEdgeItemType[]>();
+    const recursiveEdges: RuntimeEdgeItemType[] = [];
 
-    const getEdgeLastBranchHandle = ({
-      startEdge,
-      targetNodeId
-    }: {
-      startEdge: RuntimeEdgeItemType;
-      targetNodeId: string;
-    }): string | '' | undefined => {
-      const stack: Array<{
-        edge: RuntimeEdgeItemType;
-        visited: Set<string>;
-        lasestBranchHandle?: string;
-      }> = [
-        {
-          edge: startEdge,
-          visited: new Set([targetNodeId])
-        }
+    const checkIsCircular = (startEdge: RuntimeEdgeItemType, initialVisited: string[]): boolean => {
+      const stack: Array<{ edge: RuntimeEdgeItemType; visited: Set<string> }> = [
+        { edge: startEdge, visited: new Set(initialVisited) }
       ];
 
       const MAX_DEPTH = 3000;
@@ -333,18 +312,11 @@ export const checkNodeRunStatus = ({
 
       while (stack.length > 0 && iterations < MAX_DEPTH) {
         iterations++;
-        const { edge, visited, lasestBranchHandle } = stack.pop()!;
 
-        // Circle
-        if (edge.source === targetNode.nodeId) {
-          // 检查自身是否为分支节点
-          const node = nodesMap.get(edge.source);
-          if (!node) return '';
-          const isBranch = checkIsBranchNode(node);
-          if (isBranch) return edge.sourceHandle;
+        const { edge, visited } = stack.pop()!;
 
-          // 检测到环,并且环中包含当前节点. 空字符代表是一个无分支循环，属于死循环，则忽略这个边。
-          return lasestBranchHandle ?? '';
+        if (edge.source === currentNode.nodeId) {
+          return true; // 检测到环,并且环中包含当前节点
         }
 
         if (visited.has(edge.source)) {
@@ -355,70 +327,54 @@ export const checkNodeRunStatus = ({
         newVisited.add(edge.source);
 
         // 查找目标节点的 source edges 并加入栈中
-        const nextEdges = filterRuntimeEdges.filter((item) => item.target === edge.source);
+        const nextEdges = allEdges.filter((item) => item.target === edge.source);
         for (const nextEdge of nextEdges) {
-          const node = nodesMap.get(nextEdge.target);
-          if (!node) continue;
-          const isBranch = checkIsBranchNode(node);
-
-          stack.push({
-            edge: nextEdge,
-            visited: newVisited,
-            lasestBranchHandle: isBranch ? edge.sourceHandle : lasestBranchHandle
-          });
+          stack.push({ edge: nextEdge, visited: newVisited });
         }
       }
 
-      return;
+      return false;
     };
 
-    const sourceEdges = filterRuntimeEdges.filter((item) => item.target === targetNode.nodeId);
     sourceEdges.forEach((edge) => {
-      const lastBranchHandle = getEdgeLastBranchHandle({
-        startEdge: edge,
-        targetNodeId: targetNode.nodeId
-      });
-
-      // 无效的循环，这条边则忽略
-      if (lastBranchHandle === '') return;
-
-      // 有效循环，则加入递归组
-      if (lastBranchHandle) {
-        recursiveEdgeGroupsMap.set(lastBranchHandle, [
-          ...(recursiveEdgeGroupsMap.get(lastBranchHandle) || []),
-          edge
-        ]);
-      }
-      // 无循环的连线，则加入普通组
-      else {
+      if (checkIsCircular(edge, [currentNode.nodeId])) {
+        recursiveEdges.push(edge);
+      } else {
         commonEdges.push(edge);
       }
     });
 
-    return { commonEdges, recursiveEdgeGroups: Array.from(recursiveEdgeGroupsMap.values()) };
+    return { commonEdges, recursiveEdges };
   };
 
-  // Classify edges
-  const { commonEdges, recursiveEdgeGroups } = splitNodeEdges(node);
+  const runtimeNodeSourceEdge = filterWorkflowEdges(runtimeEdges).filter(
+    (item) => item.target === node.nodeId
+  );
 
   // Entry
-  if (commonEdges.length === 0 && recursiveEdgeGroups.length === 0) {
+  if (runtimeNodeSourceEdge.length === 0) {
     return 'run';
   }
 
+  // Classify edges
+  const { commonEdges, recursiveEdges } = splitEdges2WorkflowEdges({
+    sourceEdges: runtimeNodeSourceEdge,
+    allEdges: runtimeEdges,
+    currentNode: node
+  });
+
   // check active（其中一组边，至少有一个 active，且没有 waiting 即可运行）
   if (
+    commonEdges.length > 0 &&
     commonEdges.some((item) => item.status === 'active') &&
     commonEdges.every((item) => item.status !== 'waiting')
   ) {
     return 'run';
   }
   if (
-    recursiveEdgeGroups.some(
-      (item) =>
-        item.some((item) => item.status === 'active') &&
-        item.every((item) => item.status !== 'waiting')
-    )
+    recursiveEdges.length > 0 &&
+    recursiveEdges.some((item) => item.status === 'active') &&
+    recursiveEdges.every((item) => item.status !== 'waiting')
   ) {
     return 'run';
   }
@@ -427,10 +383,7 @@ export const checkNodeRunStatus = ({
   if (commonEdges.length > 0 && commonEdges.every((item) => item.status === 'skipped')) {
     return 'skip';
   }
-  if (
-    recursiveEdgeGroups.length > 0 &&
-    recursiveEdgeGroups.some((item) => item.every((item) => item.status === 'skipped'))
-  ) {
+  if (recursiveEdges.length > 0 && recursiveEdges.every((item) => item.status === 'skipped')) {
     return 'skip';
   }
 

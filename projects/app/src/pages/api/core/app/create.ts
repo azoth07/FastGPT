@@ -6,11 +6,7 @@ import type { AppTypeEnum } from '@fastgpt/global/core/app/constants';
 import { AppFolderTypeList } from '@fastgpt/global/core/app/constants';
 import type { AppSchema } from '@fastgpt/global/core/app/type';
 import { type ShortUrlParams } from '@fastgpt/global/support/marketing/type';
-import {
-  OwnerRoleVal,
-  PerResourceTypeEnum,
-  WritePermissionVal
-} from '@fastgpt/global/support/permission/constant';
+import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
 import { TeamAppCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
 import { refreshSourceAvatar } from '@fastgpt/service/common/file/image/controller';
 import { pushTrack } from '@fastgpt/service/common/middle/tracks/utils';
@@ -26,7 +22,6 @@ import { type ApiRequestProps } from '@fastgpt/service/type/next';
 import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
 import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
 import { getI18nAppType } from '@fastgpt/service/support/user/audit/util';
-import { MongoResourcePermission } from '@fastgpt/service/support/permission/schema';
 
 export type CreateAppBody = {
   parentId?: ParentIdType;
@@ -127,7 +122,7 @@ export const onCreateApp = async ({
   session?: ClientSession;
 }) => {
   const create = async (session: ClientSession) => {
-    const [app] = await MongoApp.create(
+    const [{ _id: appId }] = await MongoApp.create(
       [
         {
           ...parseParentIdInMongo(parentId),
@@ -147,8 +142,6 @@ export const onCreateApp = async ({
       { session, ordered: true }
     );
 
-    const appId = app._id;
-
     if (!AppFolderTypeList.includes(type!)) {
       await MongoAppVersion.create(
         [
@@ -167,15 +160,6 @@ export const onCreateApp = async ({
         { session, ordered: true }
       );
     }
-
-    await MongoResourcePermission.insertOne({
-      teamId,
-      tmbId,
-      resourceId: app._id,
-      permission: OwnerRoleVal,
-      resourceType: PerResourceTypeEnum.app
-    });
-
     (async () => {
       addAuditLog({
         tmbId,

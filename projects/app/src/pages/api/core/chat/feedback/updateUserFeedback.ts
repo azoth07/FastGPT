@@ -60,7 +60,7 @@ async function handler(req: ApiRequestProps<UpdateChatFeedbackProps>, res: NextA
     return 0;
   })();
 
-  await MongoAppChatLog.findOneAndUpdate(
+  await MongoAppChatLog.updateOne(
     {
       teamId,
       appId,

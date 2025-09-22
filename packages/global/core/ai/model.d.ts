@@ -1,4 +1,5 @@
 import type { ModelTypeEnum } from './model';
+import type { ModelProviderIdType } from './provider';
 
 type PriceType = {
   charsPointsPrice?: number; // 1k chars=n points; 60s=n points;
@@ -8,7 +9,7 @@ type PriceType = {
   outputPrice?: number; // 1k tokens=n points
 };
 type BaseModelItemType = {
-  provider: string;
+  provider: ModelProviderIdType;
   model: string;
   name: string;
   avatar?: string; // model icon, from provider
@@ -64,7 +65,6 @@ export type EmbeddingModelItemType = PriceType &
     weight: number; // training weight
     hidden?: boolean; // Disallow creation
     normalization?: boolean; // normalization processing
-    batchSize?: number;
     defaultConfig?: Record<string, any>; // post request config
     dbConfig?: Record<string, any>; // Custom parameters for storage
     queryConfig?: Record<string, any>; // Custom parameters for query

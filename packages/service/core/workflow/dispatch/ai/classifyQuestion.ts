@@ -1,6 +1,11 @@
 import { chats2GPTMessages } from '@fastgpt/global/core/chat/adapt';
+import {
+  countGptMessagesTokens,
+  countPromptTokens
+} from '../../../../common/string/tiktoken/index';
 import type { ChatItemType } from '@fastgpt/global/core/chat/type.d';
 import { ChatItemValueTypeEnum, ChatRoleEnum } from '@fastgpt/global/core/chat/constants';
+import { createChatCompletion } from '../../../ai/config';
 import type { ClassifyQuestionAgentItemType } from '@fastgpt/global/core/workflow/template/system/classifyQuestion/type';
 import type { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
 import { NodeOutputKeyEnum } from '@fastgpt/global/core/workflow/constants';
@@ -13,9 +18,10 @@ import { getHistories } from '../utils';
 import { formatModelChars2Points } from '../../../../support/wallet/usage/utils';
 import { type DispatchNodeResultType } from '@fastgpt/global/core/workflow/runtime/type';
 import { getHandleId } from '@fastgpt/global/core/workflow/utils';
+import { loadRequestMessages } from '../../../chat/utils';
+import { llmCompletionsBodyFormat, formatLLMResponse } from '../../../ai/utils';
 import { addLog } from '../../../../common/system/log';
 import { ModelTypeEnum } from '../../../../../global/core/ai/model';
-import { createLLMResponse } from '../../../ai/llm/request';
 
 type Props = ModuleDispatchProps<{
   [NodeInputKeyEnum.aiModel]: string;
@@ -67,7 +73,8 @@ export const dispatchClassifyQuestion = async (props: Props): Promise<CQResponse
   const { totalPoints, modelName } = formatModelChars2Points({
     model: cqModel.model,
     inputTokens: inputTokens,
-    outputTokens: outputTokens
+    outputTokens: outputTokens,
+    modelType: ModelTypeEnum.llm
   });
 
   return {
@@ -140,19 +147,24 @@ const completions = async ({
       ]
     }
   ];
+  const requestMessages = await loadRequestMessages({
+    messages: chats2GPTMessages({ messages, reserveId: false }),
+    useVision: false
+  });
 
-  const {
-    answerText: answer,
-    usage: { inputTokens, outputTokens }
-  } = await createLLMResponse({
-    body: {
-      model: cqModel.model,
-      temperature: 0.01,
-      messages: chats2GPTMessages({ messages, reserveId: false }),
-      stream: true
-    },
+  const { response } = await createChatCompletion({
+    body: llmCompletionsBodyFormat(
+      {
+        model: cqModel.model,
+        temperature: 0.01,
+        messages: requestMessages,
+        stream: true
+      },
+      cqModel
+    ),
     userKey: externalProvider.openaiAccount
   });
+  const { text: answer, usage } = await formatLLMResponse(response);
 
   // console.log(JSON.stringify(chats2GPTMessages({ messages, reserveId: false }), null, 2));
 
@@ -166,8 +178,8 @@ const completions = async ({
   }
 
   return {
-    inputTokens,
-    outputTokens,
+    inputTokens: usage?.prompt_tokens || (await countGptMessagesTokens(requestMessages)),
+    outputTokens: usage?.completion_tokens || (await countPromptTokens(answer)),
     arg: { type: id }
   };
 };

@@ -9,7 +9,7 @@ import {
   type RerankModelItemType
 } from '@fastgpt/global/core/ai/model.d';
 import { debounce } from 'lodash';
-import { getModelProvider } from '../../../core/app/provider/controller';
+import { getModelProvider } from '@fastgpt/global/core/ai/provider';
 import { findModelFromAlldata } from '../model';
 import {
   reloadFastGPTConfigBuffer,
@@ -18,9 +18,8 @@ import {
 import { delay } from '@fastgpt/global/common/system/utils';
 import { pluginClient } from '../../../thirdProvider/fastgptPlugin';
 import { setCron } from '../../../common/system/cron';
-import { preloadModelProviders } from '../../../core/app/provider/controller';
 
-export const loadSystemModels = async (init = false, language = 'en') => {
+export const loadSystemModels = async (init = false) => {
   const pushModel = (model: SystemModelItemType) => {
     global.systemModelList.push(model);
 
@@ -78,8 +77,6 @@ export const loadSystemModels = async (init = false, language = 'en') => {
 
   if (!init && global.systemModelList) return;
 
-  await preloadModelProviders();
-
   global.systemModelList = [];
   global.systemActiveModelList = [];
   global.llmModelMap = new Map<string, LLMModelItemType>();
@@ -112,13 +109,11 @@ export const loadSystemModels = async (init = false, language = 'en') => {
         };
 
         const dbModel = dbModels.find((item) => item.model === model.model);
-        const provider = getModelProvider(dbModel?.metadata?.provider || model.provider, language);
 
         const modelData: any = {
           ...model,
           ...dbModel?.metadata,
-          provider: provider.id,
-          avatar: provider.avatar,
+          provider: getModelProvider(dbModel?.metadata?.provider || (model.provider as any)).id,
           type: dbModel?.metadata?.type || model.type,
           isCustom: false,
 
@@ -174,8 +169,8 @@ export const loadSystemModels = async (init = false, language = 'en') => {
 
     // Sort model list
     global.systemActiveModelList.sort((a, b) => {
-      const providerA = getModelProvider(a.provider, language);
-      const providerB = getModelProvider(b.provider, language);
+      const providerA = getModelProvider(a.provider);
+      const providerB = getModelProvider(b.provider);
       return providerA.order - providerB.order;
     });
     global.systemActiveDesensitizedModels = global.systemActiveModelList.map((model) => ({

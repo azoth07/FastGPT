@@ -132,7 +132,7 @@ async function handler(req: ApiRequestProps<GetDatasetListBody>) {
           const tmbRole = myRoles.find(
             (item) => String(item.resourceId) === datasetId && !!item.tmbId
           )?.permission;
-          const groupAndOrgRole = sumPer(
+          const groupRole = sumPer(
             ...myRoles
               .filter(
                 (item) => String(item.resourceId) === datasetId && (!!item.groupId || !!item.orgId)
@@ -140,7 +140,7 @@ async function handler(req: ApiRequestProps<GetDatasetListBody>) {
               .map((item) => item.permission)
           );
           return new DatasetPermission({
-            role: tmbRole ?? groupAndOrgRole,
+            role: tmbRole ?? groupRole,
             isOwner: String(dataset.tmbId) === String(tmbId) || teamPer.isOwner
           });
         };
@@ -155,13 +155,16 @@ async function handler(req: ApiRequestProps<GetDatasetListBody>) {
           dataset.type !== DatasetTypeEnum.folder
         ) {
           return {
-            Per: getPer(String(dataset.parentId)).addRole(getPer(String(dataset._id)).role),
+            Per: getPer(String(dataset.parentId)),
             privateDataset: getClbCount(String(dataset.parentId)) <= 1
           };
         }
         return {
           Per: getPer(String(dataset._id)),
-          privateDataset: getClbCount(String(dataset._id)) <= 1
+          privateDataset:
+            dataset.type === DatasetTypeEnum.folder
+              ? getClbCount(String(dataset._id)) <= 1
+              : getClbCount(String(dataset._id)) === 0
         };
       })();
 

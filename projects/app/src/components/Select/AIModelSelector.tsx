@@ -7,24 +7,18 @@ import { HUGGING_FACE_ICON } from '@fastgpt/global/common/system/constants';
 import { Box, Flex } from '@chakra-ui/react';
 import Avatar from '@fastgpt/web/components/common/Avatar';
 import MyTooltip from '@fastgpt/web/components/common/MyTooltip';
+import { ModelProviderList } from '@fastgpt/global/core/ai/provider';
 import MultipleRowSelect from '@fastgpt/web/components/common/MySelect/MultipleRowSelect';
-import type { ResponsiveValue } from '@chakra-ui/system';
+import { getModelFromList } from '@fastgpt/global/core/ai/model';
 
 type Props = SelectProps & {
   disableTip?: string;
-  noOfLines?: ResponsiveValue<number>;
 };
 
-const OneRowSelector = ({ list, onChange, disableTip, noOfLines, ...props }: Props) => {
+const OneRowSelector = ({ list, onChange, disableTip, ...props }: Props) => {
   const { t } = useTranslation();
-  const {
-    llmModelList,
-    embeddingModelList,
-    ttsModelList,
-    sttModelList,
-    reRankModelList,
-    getModelProvider
-  } = useSystemStore();
+  const { llmModelList, embeddingModelList, ttsModelList, sttModelList, reRankModelList } =
+    useSystemStore();
 
   const avatarSize = useMemo(() => {
     const size = {
@@ -46,10 +40,8 @@ const OneRowSelector = ({ list, onChange, disableTip, noOfLines, ...props }: Pro
     ];
     return list
       .map((item) => {
-        const modelData = allModels.find((model) => model.model === item.value);
+        const modelData = getModelFromList(allModels, item.value)!;
         if (!modelData) return;
-
-        const avatar = getModelProvider(modelData.provider)?.avatar;
 
         return {
           value: item.value,
@@ -58,12 +50,12 @@ const OneRowSelector = ({ list, onChange, disableTip, noOfLines, ...props }: Pro
               <Avatar
                 borderRadius={'0'}
                 mr={2}
-                src={avatar || HUGGING_FACE_ICON}
+                src={modelData?.avatar || HUGGING_FACE_ICON}
                 w={avatarSize}
                 fallbackSrc={HUGGING_FACE_ICON}
               />
 
-              <Box noOfLines={noOfLines}>{modelData.name}</Box>
+              <Box noOfLines={1}>{modelData.name}</Box>
             </Flex>
           )
         };
@@ -73,15 +65,13 @@ const OneRowSelector = ({ list, onChange, disableTip, noOfLines, ...props }: Pro
       label: React.JSX.Element;
     }[];
   }, [
+    list,
     llmModelList,
     embeddingModelList,
     ttsModelList,
     sttModelList,
     reRankModelList,
-    list,
-    getModelProvider,
-    avatarSize,
-    noOfLines
+    avatarSize
   ]);
 
   return (
@@ -109,24 +99,10 @@ const OneRowSelector = ({ list, onChange, disableTip, noOfLines, ...props }: Pro
   );
 };
 
-const MultipleRowSelector = ({
-  list,
-  onChange,
-  disableTip,
-  placeholder,
-  noOfLines,
-  ...props
-}: Props) => {
-  const { t, i18n } = useTranslation();
-  const {
-    llmModelList,
-    embeddingModelList,
-    ttsModelList,
-    sttModelList,
-    reRankModelList,
-    getModelProvider,
-    getModelProviders
-  } = useSystemStore();
+const MultipleRowSelector = ({ list, onChange, disableTip, placeholder, ...props }: Props) => {
+  const { t } = useTranslation();
+  const { llmModelList, embeddingModelList, ttsModelList, sttModelList, reRankModelList } =
+    useSystemStore();
   const modelList = useMemo(() => {
     const allModels = [
       ...llmModelList,
@@ -136,9 +112,7 @@ const MultipleRowSelector = ({
       ...reRankModelList
     ];
 
-    return list
-      .map((item) => allModels.find((model) => model.model === item.value))
-      .filter(Boolean);
+    return list.map((item) => getModelFromList(allModels, item.value)!).filter(Boolean);
   }, [llmModelList, embeddingModelList, ttsModelList, sttModelList, reRankModelList, list]);
 
   const [value, setValue] = useState<string[]>([]);
@@ -154,7 +128,7 @@ const MultipleRowSelector = ({
   }, [props.size]);
 
   const selectorList = useMemo(() => {
-    const renderList = getModelProviders(i18n.language).map<{
+    const renderList = ModelProviderList.map<{
       label: React.JSX.Element;
       value: string;
       children: { label: string | React.ReactNode; value: string }[];
@@ -168,7 +142,7 @@ const MultipleRowSelector = ({
             fallbackSrc={HUGGING_FACE_ICON}
             w={avatarSize}
           />
-          <Box>{provider.name}</Box>
+          <Box>{t(provider.name as any)}</Box>
         </Flex>
       ),
       value: provider.id,
@@ -176,20 +150,20 @@ const MultipleRowSelector = ({
     }));
 
     for (const item of list) {
-      const modelData = modelList.find((model) => model?.model === item.value);
+      const modelData = getModelFromList(modelList, item.value);
       if (!modelData) continue;
       const provider =
         renderList.find((item) => item.value === (modelData?.provider || 'Other')) ??
         renderList[renderList.length - 1];
 
-      provider?.children.push({
+      provider.children.push({
         label: modelData.name,
         value: modelData.model
       });
     }
 
     return renderList.filter((item) => item.children.length > 0);
-  }, [getModelProviders, i18n.language, avatarSize, list, modelList]);
+  }, [avatarSize, list, modelList, t]);
 
   const onSelect = useCallback(
     (e: string[]) => {
@@ -200,27 +174,25 @@ const MultipleRowSelector = ({
 
   const SelectedLabel = useMemo(() => {
     if (!props.value) return <>{t('common:not_model_config')}</>;
-    const modelData = modelList.find((model) => model?.model === props.value);
+    const modelData = getModelFromList(modelList, props.value);
 
     if (!modelData) return <>{t('common:not_model_config')}</>;
 
     setValue([modelData.provider, props.value]);
-
-    const avatar = getModelProvider(modelData.provider)?.avatar;
 
     return (
       <Flex alignItems={'center'} py={1}>
         <Avatar
           borderRadius={'0'}
           mr={2}
-          src={avatar}
+          src={modelData?.avatar}
           fallbackSrc={HUGGING_FACE_ICON}
           w={avatarSize}
         />
-        <Box noOfLines={noOfLines}>{modelData?.name}</Box>
+        <Box noOfLines={1}>{modelData?.name}</Box>
       </Flex>
     );
-  }, [props.value, t, modelList, getModelProvider, avatarSize, noOfLines]);
+  }, [modelList, props.value, t, avatarSize]);
 
   return (
     <Box
@@ -250,7 +222,7 @@ const MultipleRowSelector = ({
 };
 
 const AIModelSelector = (props: Props) => {
-  return props.list.length > 10 ? (
+  return props.list.length > 100 ? (
     <MultipleRowSelector {...props} />
   ) : (
     <OneRowSelector {...props} />

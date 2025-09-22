@@ -29,7 +29,6 @@ import dynamic from 'next/dynamic';
 import type { EditAPIDatasetInfoFormType } from './components/EditApiServiceModal';
 import { type EditResourceInfoFormType } from '@/components/common/Modal/EditResourceModal';
 import MyTooltip from '@fastgpt/web/components/common/MyTooltip';
-import { ReadRoleVal } from '@fastgpt/global/support/permission/constant';
 
 const EditResourceModal = dynamic(() => import('@/components/common/Modal/EditResourceModal'));
 const EditAPIDatasetInfoModal = dynamic(() => import('./components/EditApiServiceModal'));
@@ -381,7 +380,6 @@ const Info = ({ datasetId }: { datasetId: string }) => {
           <Box>
             <MemberManager
               managePer={{
-                defaultRole: ReadRoleVal,
                 permission: datasetDetail.permission,
                 onGetCollaboratorList: () => getCollaboratorList(datasetId),
                 roleList: DatasetRoleList,

@@ -35,14 +35,10 @@ export const getImageBase64 = async (url: string) => {
 
 export const addEndpointToImageUrl = (text: string) => {
   const baseURL = process.env.FE_DOMAIN;
-  const subRoute = process.env.NEXT_PUBLIC_BASE_URL || '';
   if (!baseURL) return text;
-  const regex = new RegExp(
-    `(?<!https?:\\/\\/[^\\s]*)(?:${subRoute}\\/api\\/system\\/img\\/[^\\s.]*\\.[^\\s]*)`,
-    'g'
+  // 匹配 /api/system/img/xxx.xx 的图片链接，并追加 baseURL
+  return text.replace(
+    /(?<!https?:\/\/[^\s]*)(?:\/api\/system\/img\/[^\s.]*\.[^\s]*)/g,
+    (match) => `${baseURL}${match}`
   );
-  // 匹配 ${subRoute}/api/system/img/xxx.xx 的图片链接，并追加 baseURL
-  return text.replace(regex, (match) => {
-    return `${baseURL}${match}`;
-  });
 };

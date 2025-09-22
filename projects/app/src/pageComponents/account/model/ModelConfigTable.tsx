@@ -18,6 +18,11 @@ import {
 } from '@chakra-ui/react';
 import { useTranslation } from 'next-i18next';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  ModelProviderList,
+  type ModelProviderIdType,
+  getModelProvider
+} from '@fastgpt/global/core/ai/provider';
 import MySelect from '@fastgpt/web/components/common/MySelect';
 import { modelTypeList, ModelTypeEnum } from '@fastgpt/global/core/ai/model';
 import SearchInput from '@fastgpt/web/components/common/Input/SearchInput';
@@ -54,20 +59,20 @@ const MyModal = dynamic(() => import('@fastgpt/web/components/common/MyModal'));
 const ModelEditModal = dynamic(() => import('./AddModelBox').then((mod) => mod.ModelEditModal));
 
 const ModelTable = ({ Tab }: { Tab: React.ReactNode }) => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { userInfo } = useUserStore();
-  const { defaultModels, feConfigs, getModelProviders, getModelProvider } = useSystemStore();
+  const { defaultModels, feConfigs } = useSystemStore();
 
   const isRoot = userInfo?.username === 'root';
 
-  const [provider, setProvider] = useState<string | ''>('');
-  const providerList = useRef<{ label: React.ReactNode; value: string | '' }[]>([
+  const [provider, setProvider] = useState<ModelProviderIdType | ''>('');
+  const providerList = useRef<{ label: any; value: ModelProviderIdType | '' }[]>([
     { label: t('common:All'), value: '' },
-    ...getModelProviders(i18n.language).map((item) => ({
+    ...ModelProviderList.map((item) => ({
       label: (
         <HStack>
           <Avatar src={item.avatar} w={'1rem'} />
-          <Box>{item.name}</Box>
+          <Box>{t(item.name as any)}</Box>
         </HStack>
       ),
       value: item.id
@@ -211,7 +216,7 @@ const ModelTable = ({ Tab }: { Tab: React.ReactNode }) => {
     })();
 
     const formatList = list.map((item) => {
-      const provider = getModelProvider(item.provider, i18n.language);
+      const provider = getModelProvider(item.provider);
       return {
         ...item,
         avatar: provider.avatar,
@@ -234,16 +239,7 @@ const ModelTable = ({ Tab }: { Tab: React.ReactNode }) => {
     });
 
     return filterList;
-  }, [
-    systemModelList,
-    t,
-    modelType,
-    getModelProvider,
-    i18n.language,
-    provider,
-    search,
-    showActive
-  ]);
+  }, [systemModelList, t, modelType, provider, search, showActive]);
   const activeModelLength = useMemo(() => {
     return modelList.filter((item) => item.isActive).length;
   }, [modelList]);

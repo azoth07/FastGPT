@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
-import type { LoginSuccessResponse } from '@/global/support/api/userRes.d';
+import type { ResLogin } from '@/global/support/api/userRes.d';
 import { useUserStore } from '@/web/support/user/useUserStore';
 import { clearToken } from '@/web/support/user/auth';
 import { oauthLogin } from '@/web/support/user/api';
@@ -19,7 +19,6 @@ import {
   getSourceDomain,
   removeFastGPTSem
 } from '@/web/support/marketing/utils';
-import { postAcceptInvitationLink } from '@/web/support/user/team/api';
 
 let isOauthLogging = false;
 
@@ -32,37 +31,15 @@ const provider = () => {
   const { toast } = useToast();
 
   const lastRoute = loginStore?.lastRoute
-    ? decodeURIComponent(loginStore.lastRoute)
+    ? decodeURIComponent(loginStore?.lastRoute)
     : '/dashboard/apps';
   const errorRedirectPage = lastRoute.startsWith('/chat') ? lastRoute : '/login';
 
   const loginSuccess = useCallback(
-    async (res: LoginSuccessResponse) => {
-      const decodeLastRoute = decodeURIComponent(lastRoute);
+    (res: ResLogin) => {
       setUserInfo(res.user);
 
-      const navigateTo = await (async () => {
-        if (res.user.team.status !== 'active') {
-          if (decodeLastRoute.includes('/account/team?invitelinkid=')) {
-            const id = decodeLastRoute.split('invitelinkid=')[1];
-            await postAcceptInvitationLink(id);
-            return '/dashboard/apps';
-          } else {
-            toast({
-              status: 'warning',
-              title: t('common:not_active_team')
-            });
-          }
-        }
-
-        return decodeLastRoute &&
-          !decodeLastRoute.includes('/login') &&
-          decodeLastRoute.startsWith('/')
-          ? lastRoute
-          : '/dashboard/apps';
-      })();
-
-      navigateTo && router.replace(navigateTo);
+      router.replace(lastRoute);
     },
     [setUserInfo, router, lastRoute]
   );
@@ -117,6 +94,7 @@ const provider = () => {
       return;
     }
 
+    console.log('SSO', { initd, loginStore, props, state });
     if (!props || !initd) return;
 
     if (isOauthLogging) return;

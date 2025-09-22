@@ -169,7 +169,8 @@ export async function dispatchDatasetSearch(
     const { totalPoints: embeddingTotalPoints, modelName: embeddingModelName } =
       formatModelChars2Points({
         model: vectorModel.model,
-        inputTokens: embeddingTokens
+        inputTokens: embeddingTokens,
+        modelType: ModelTypeEnum.embedding
       });
     nodeDispatchUsages.push({
       totalPoints: embeddingTotalPoints,
@@ -180,7 +181,8 @@ export async function dispatchDatasetSearch(
     // Rerank
     const { totalPoints: reRankTotalPoints, modelName: reRankModelName } = formatModelChars2Points({
       model: rerankModelData?.model,
-      inputTokens: reRankInputTokens
+      inputTokens: reRankInputTokens,
+      modelType: ModelTypeEnum.rerank
     });
     if (usingReRank) {
       nodeDispatchUsages.push({
@@ -196,7 +198,8 @@ export async function dispatchDatasetSearch(
         const { totalPoints, modelName } = formatModelChars2Points({
           model: queryExtensionResult.model,
           inputTokens: queryExtensionResult.inputTokens,
-          outputTokens: queryExtensionResult.outputTokens
+          outputTokens: queryExtensionResult.outputTokens,
+          modelType: ModelTypeEnum.llm
         });
         nodeDispatchUsages.push({
           totalPoints,
@@ -219,7 +222,8 @@ export async function dispatchDatasetSearch(
         const { totalPoints, modelName } = formatModelChars2Points({
           model: deepSearchResult.model,
           inputTokens: deepSearchResult.inputTokens,
-          outputTokens: deepSearchResult.outputTokens
+          outputTokens: deepSearchResult.outputTokens,
+          modelType: ModelTypeEnum.llm
         });
         nodeDispatchUsages.push({
           totalPoints,
@@ -268,18 +272,15 @@ export async function dispatchDatasetSearch(
       },
       [DispatchNodeResponseKeyEnum.nodeResponse]: responseData,
       nodeDispatchUsages,
-      [DispatchNodeResponseKeyEnum.toolResponses]:
-        searchRes.length > 0
-          ? {
-              prompt: getDatasetSearchToolResponsePrompt(),
-              cites: searchRes.map((item) => ({
-                id: item.id,
-                sourceName: item.sourceName,
-                updateTime: item.updateTime,
-                content: `${item.q}\n${item.a}`.trim()
-              }))
-            }
-          : 'No results'
+      [DispatchNodeResponseKeyEnum.toolResponses]: {
+        prompt: getDatasetSearchToolResponsePrompt(),
+        cites: searchRes.map((item) => ({
+          id: item.id,
+          sourceName: item.sourceName,
+          updateTime: item.updateTime,
+          content: `${item.q}\n${item.a}`.trim()
+        }))
+      }
     };
   } catch (error) {
     return getNodeErrResponse({ error });

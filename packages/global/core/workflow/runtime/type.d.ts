@@ -72,9 +72,8 @@ export type ChatDispatchProps = {
   maxRunTimes: number;
   isToolCall?: boolean;
   workflowStreamResponse?: WorkflowResponseType;
+  workflowDispatchDeep?: number;
   version?: 'v1' | 'v2';
-
-  workflowDispatchDeep: number;
 
   responseAllData?: boolean;
   responseDetail?: boolean;

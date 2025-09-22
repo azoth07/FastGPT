@@ -1,12 +1,10 @@
 import { cloneDeep } from 'lodash';
 import { type SystemModelItemType } from './type';
-import type { LLMModelItemType } from '@fastgpt/global/core/ai/model.d';
 
 export const getDefaultLLMModel = () => global?.systemDefaultModel.llm!;
-export const getLLMModel = (model?: string | LLMModelItemType) => {
+export const getLLMModel = (model?: string) => {
   if (!model) return getDefaultLLMModel();
-
-  return typeof model === 'string' ? global.llmModelMap.get(model) || getDefaultLLMModel() : model;
+  return global.llmModelMap.get(model) || getDefaultLLMModel();
 };
 
 export const getDatasetModel = (model?: string) => {

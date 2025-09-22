@@ -1,12 +1,13 @@
 import { Box, Button, ModalBody, ModalFooter, useDisclosure } from '@chakra-ui/react';
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo } from 'react';
 import { editorStateToText } from './utils';
 import type { EditorProps } from './Editor';
 import Editor from './Editor';
 import MyModal from '../../MyModal';
 import { useTranslation } from 'next-i18next';
 import type { EditorState, LexicalEditor } from 'lexical';
-import type { FormPropsType } from './type';
+import type { FormPropsType } from './type.d';
+import { useCallback } from 'react';
 
 const PromptEditor = ({
   showOpenModal = true,
@@ -33,27 +34,18 @@ const PromptEditor = ({
     },
     [onChange]
   );
-
   const onBlurInput = useCallback(
     (editor: LexicalEditor) => {
-      if (onBlur) {
-        const text = editorStateToText(editor);
-        onBlur(text);
-      }
+      const text = editorStateToText(editor);
+      onBlur?.(text);
     },
     [onBlur]
   );
-
   const formattedValue = useMemo(() => {
     if (typeof value === 'object') {
       return JSON.stringify(value);
     }
-
-    if (value === undefined || value === null) {
-      return '';
-    }
-
-    return String(value || '');
+    return value;
   }, [value]);
 
   return (
@@ -82,7 +74,6 @@ const PromptEditor = ({
           />
         )}
       </Box>
-
       <MyModal
         isOpen={isOpen}
         onClose={onClose}
@@ -111,5 +102,4 @@ const PromptEditor = ({
     </>
   );
 };
-
 export default React.memo(PromptEditor);

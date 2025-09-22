@@ -2,8 +2,6 @@ import React, { useCallback, useMemo, useState } from 'react';
 
 import MyModal from '@fastgpt/web/components/common/MyModal';
 import { useTranslation } from 'next-i18next';
-import { parseI18nString } from '@fastgpt/global/common/i18n/utils';
-import type { localeType } from '@fastgpt/global/common/i18n/type';
 import {
   Accordion,
   AccordionButton,
@@ -50,8 +48,6 @@ import type { LLMModelItemType } from '@fastgpt/global/core/ai/model.d';
 import { workflowStartNodeId } from '@/web/core/app/constants';
 import ConfigToolModal from './ConfigToolModal';
 import CostTooltip from '@/components/core/app/plugin/CostTooltip';
-import { useSafeTranslation } from '@fastgpt/web/hooks/useSafeTranslation';
-import { useSystemStore } from '@/web/common/system/useSystemStore';
 
 type Props = {
   selectedTools: FlowNodeTemplateType[];
@@ -224,10 +220,7 @@ const RenderList = React.memo(function RenderList({
   type: TemplateTypeEnum;
   setParentId: (parentId: ParentIdType) => any;
 }) {
-  const { i18n } = useTranslation();
-  const { t } = useSafeTranslation();
-  const { feConfigs } = useSystemStore();
-
+  const { t } = useTranslation();
   const [configTool, setConfigTool] = useState<FlowNodeTemplateType>();
   const onCloseConfigTool = useCallback(() => setConfigTool(undefined), []);
   const { toast } = useToast();
@@ -329,45 +322,23 @@ const RenderList = React.memo(function RenderList({
     const data = (() => {
       if (type === TemplateTypeEnum.systemPlugin) {
         return pluginGroups.map((group) => {
-          const map = group.groupTypes.reduce<
-            Record<
-              string,
-              {
-                list: NodeTemplateListItemType[];
-                label: string;
-              }
-            >
-          >((acc, item) => {
-            acc[item.typeId] = {
-              list: [],
-              label: t(parseI18nString(item.typeName, i18n.language))
-            };
-            return acc;
-          }, {});
-
+          const copy: NodeTemplateListType = group.groupTypes.map((type) => ({
+            list: [],
+            type: type.typeId,
+            label: type.typeName
+          }));
           templates.forEach((item) => {
-            if (map[item.templateType]) {
-              map[item.templateType].list.push({
-                ...item,
-                name: t(parseI18nString(item.name, i18n.language)),
-                intro: t(parseI18nString(item.intro, i18n.language))
-              });
-            }
+            const index = copy.findIndex((template) => template.type === item.templateType);
+            if (index === -1) return;
+            copy[index].list.push(item);
           });
           return {
             label: group.groupName,
-            list: Object.entries(map)
-              .map(([type, { list, label }]) => ({
-                type,
-                label,
-                list
-              }))
-              .filter((item) => item.list.length > 0)
+            list: copy.filter((item) => item.list.length > 0)
           };
         });
       }
 
-      // Team apps
       return [
         {
           list: [
@@ -383,7 +354,7 @@ const RenderList = React.memo(function RenderList({
     })();
 
     return data.filter(({ list }) => list.length > 0);
-  }, [i18n.language, pluginGroups, t, templates, type]);
+  }, [pluginGroups, templates, type]);
 
   const gridStyle = useMemo(() => {
     if (type === TemplateTypeEnum.teamPlugin) {
@@ -428,7 +399,7 @@ const RenderList = React.memo(function RenderList({
                       key={template.id}
                       placement={'right'}
                       label={
-                        <Box py={2} minW={['auto', '250px']}>
+                        <Box py={2}>
                           <Flex alignItems={'center'}>
                             <MyAvatar
                               src={template.avatar}
@@ -436,11 +407,8 @@ const RenderList = React.memo(function RenderList({
                               objectFit={'contain'}
                               borderRadius={'sm'}
                             />
-                            <Box fontWeight={'bold'} ml={3} color={'myGray.900'} flex={'1'}>
+                            <Box fontWeight={'bold'} ml={3} color={'myGray.900'}>
                               {t(template.name as any)}
-                            </Box>
-                            <Box color={'myGray.500'}>
-                              By {template.author || feConfigs?.systemTitle}
                             </Box>
                           </Flex>
                           <Box mt={2} color={'myGray.500'} maxH={'100px'} overflow={'hidden'}>

@@ -17,7 +17,6 @@ import {
   setUtmWorkflow
 } from '../support/marketing/utils';
 import { type ShortUrlParams } from '@fastgpt/global/support/marketing/type';
-import { setCouponCode } from '@/web/support/marketing/utils';
 
 type MarketingQueryParams = {
   hiId?: string;
@@ -30,7 +29,6 @@ type MarketingQueryParams = {
   utm_medium?: string;
   utm_content?: string;
   utm_workflow?: string;
-  couponCode?: string;
 };
 
 const MARKETING_PARAMS: (keyof MarketingQueryParams)[] = [
@@ -42,8 +40,7 @@ const MARKETING_PARAMS: (keyof MarketingQueryParams)[] = [
   'utm_source',
   'utm_medium',
   'utm_content',
-  'utm_workflow',
-  'couponCode'
+  'utm_workflow'
 ];
 
 export const useInitApp = () => {
@@ -58,8 +55,7 @@ export const useInitApp = () => {
     utm_source,
     utm_medium,
     utm_content,
-    utm_workflow,
-    couponCode
+    utm_workflow
   } = router.query as MarketingQueryParams;
 
   const { loadGitStar, setInitd, feConfigs } = useSystemStore();
@@ -152,10 +148,6 @@ export const useInitApp = () => {
       setUtmParams(utmParams);
     }
     setFastGPTSem({ keyword: k, search, ...utmParams });
-
-    if (couponCode) {
-      setCouponCode(couponCode);
-    }
 
     const newPath = getPathWithoutMarketingParams();
     router.replace(newPath);

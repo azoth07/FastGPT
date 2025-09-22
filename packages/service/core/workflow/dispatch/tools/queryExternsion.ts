@@ -45,7 +45,8 @@ export const dispatchQueryExtension = async ({
   const { totalPoints, modelName } = formatModelChars2Points({
     model: queryExtensionModel.model,
     inputTokens,
-    outputTokens
+    outputTokens,
+    modelType: ModelTypeEnum.llm
   });
 
   const set = new Set<string>();

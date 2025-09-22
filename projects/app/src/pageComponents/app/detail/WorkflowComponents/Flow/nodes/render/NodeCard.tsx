@@ -2,10 +2,7 @@ import React, { useCallback, useMemo } from 'react';
 import { Box, Button, Flex, useDisclosure, type FlexProps } from '@chakra-ui/react';
 import MyIcon from '@fastgpt/web/components/common/Icon';
 import Avatar from '@fastgpt/web/components/common/Avatar';
-import type {
-  FlowNodeItemType,
-  StoreNodeItemType
-} from '@fastgpt/global/core/workflow/type/node.d';
+import type { FlowNodeItemType } from '@fastgpt/global/core/workflow/type/node.d';
 import { useTranslation } from 'next-i18next';
 import { useEditTitle } from '@/web/common/hooks/useEditTitle';
 import { useToast } from '@fastgpt/web/hooks/useToast';
@@ -120,7 +117,7 @@ const NodeCard = (props: Props) => {
   const isAppNode = node && AppNodeFlowNodeTypeMap[node?.flowNodeType];
   const showVersion = useMemo(() => {
     // 1. MCP tool set do not have version
-    if (isAppNode && (node.toolConfig?.mcpToolSet || node.toolConfig?.mcpTool)) return false;
+    if (isAppNode && node.toolConfig?.mcpToolSet) return false;
     // 2. Team app/System commercial plugin
     if (isAppNode && node?.pluginId && !node?.pluginData?.error) return true;
     // 3. System tool
@@ -461,9 +458,7 @@ const MenuRender = React.memo(function MenuRender({
       setNodes((state) => {
         const node = state.find((node) => node.id === nodeId);
         if (!node) return state;
-        const template: Omit<StoreNodeItemType, 'nodeId'> = {
-          flowNodeType: node.data.flowNodeType,
-          parentNodeId: node.data.parentNodeId,
+        const template = {
           avatar: node.data.avatar,
           name: computedNewNodeName({
             templateName: node.data.name,
@@ -471,27 +466,14 @@ const MenuRender = React.memo(function MenuRender({
             pluginId: node.data.pluginId
           }),
           intro: node.data.intro,
-          toolDescription: node.data.toolDescription,
-          showStatus: node.data.showStatus,
-
-          version: node.data.version,
-          versionLabel: node.data.versionLabel,
-          isLatestVersion: node.data.isLatestVersion,
-
-          catchError: node.data.catchError,
+          flowNodeType: node.data.flowNodeType,
           inputs: node.data.inputs,
           outputs: node.data.outputs,
-
+          showStatus: node.data.showStatus,
           pluginId: node.data.pluginId,
-          isFolder: node.data.isFolder,
-          pluginData: node.data.pluginData,
-
-          toolConfig: node.data.toolConfig,
-
-          currentCost: node.data.currentCost,
-          systemKeyCost: node.data.systemKeyCost,
-          hasTokenFee: node.data.hasTokenFee,
-          hasSystemSecret: node.data.hasSystemSecret
+          version: node.data.version,
+          versionLabel: node.data.versionLabel,
+          isLatestVersion: node.data.isLatestVersion
         };
 
         return [
@@ -513,9 +495,7 @@ const MenuRender = React.memo(function MenuRender({
               outputs: template.outputs,
               version: template.version,
               versionLabel: template.versionLabel,
-              isLatestVersion: template.isLatestVersion,
-              toolConfig: template.toolConfig,
-              catchError: template.catchError
+              isLatestVersion: template.isLatestVersion
             },
             selected: true,
             parentNodeId: undefined,

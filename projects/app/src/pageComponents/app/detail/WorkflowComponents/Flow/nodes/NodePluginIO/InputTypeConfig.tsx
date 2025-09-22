@@ -30,13 +30,11 @@ import MyIcon from '@fastgpt/web/components/common/Icon';
 import DndDrag, { Draggable } from '@fastgpt/web/components/common/DndDrag';
 import MyTextarea from '@/components/common/Textarea/MyTextarea';
 import MyNumberInput from '@fastgpt/web/components/common/Input/NumberInput';
-import TimeInput from '@/components/core/app/formRender/TimeInput';
 
 import ChatFunctionTip from '@/components/core/app/Tip';
 import MySlider from '@/components/Slider';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
 import FormLabel from '@fastgpt/web/components/common/MyBox/FormLabel';
-import RadioGroup from '@fastgpt/web/components/common/Radio/RadioGroup';
 
 const InputTypeConfig = ({
   form,
@@ -83,17 +81,8 @@ const InputTypeConfig = ({
   const maxLength = watch('maxLength');
   const max = watch('max');
   const min = watch('min');
-  const minLength = watch('minLength');
   const defaultValue = watch('defaultValue');
   const valueType = watch('valueType');
-
-  const timeGranularity = watch('timeGranularity');
-  const timeType = watch('timeType');
-  const timeRangeStart = watch('timeRangeStart');
-  const timeRangeEnd = watch('timeRangeEnd');
-
-  const maxFiles = watch('maxFiles');
-  const maxSelectFiles = Math.min(feConfigs?.uploadFileMaxAmount ?? 20, 50);
 
   const selectValueTypeList = watch('customInputConfig.selectValueTypeList');
   const { isSelectAll: isSelectAllValueType, setIsSelectAll: setIsSelectAllValueType } =
@@ -127,17 +116,13 @@ const InputTypeConfig = ({
   const showValueTypeSelect =
     inputType === FlowNodeInputTypeEnum.reference ||
     inputType === FlowNodeInputTypeEnum.customVariable ||
-    inputType === VariableInputEnum.custom ||
-    inputType === VariableInputEnum.internal;
+    inputType === VariableInputEnum.custom;
 
   const showRequired = useMemo(() => {
     const list = [
       FlowNodeInputTypeEnum.addInputParam,
       FlowNodeInputTypeEnum.customVariable,
-      VariableInputEnum.timePointSelect,
-      VariableInputEnum.timeRangeSelect,
-      VariableInputEnum.custom,
-      VariableInputEnum.internal
+      VariableInputEnum.custom
     ];
     return !list.includes(inputType);
   }, [inputType]);
@@ -160,8 +145,7 @@ const InputTypeConfig = ({
       FlowNodeInputTypeEnum.switch,
       FlowNodeInputTypeEnum.select,
       FlowNodeInputTypeEnum.multipleSelect,
-      VariableInputEnum.custom,
-      VariableInputEnum.internal
+      VariableInputEnum.custom
     ];
 
     return list.includes(inputType as FlowNodeInputTypeEnum);
@@ -179,6 +163,10 @@ const InputTypeConfig = ({
     ];
     return type === 'plugin' && list.includes(inputType as FlowNodeInputTypeEnum);
   }, [inputType, type]);
+
+  // File select
+  const maxFiles = watch('maxFiles');
+  const maxSelectFiles = Math.min(feConfigs?.uploadFileMaxAmount ?? 20, 50);
 
   return (
     <Stack flex={1} borderLeft={'1px solid #F0F1F6'} justifyContent={'space-between'}>
@@ -229,14 +217,14 @@ const InputTypeConfig = ({
                 />
               </Box>
             ) : (
-              <Box fontSize={'14px'}>
+              <Box fontSize={'14px'} mb={2}>
                 {defaultValueType ? t(FlowValueTypeMap[defaultValueType]?.label as any) : ''}
               </Box>
             )}
           </Flex>
         )}
         {showRequired && (
-          <Flex alignItems={'center'}>
+          <Flex alignItems={'center'} minH={'40px'}>
             <FormLabel flex={'0 0 132px'} fontWeight={'medium'}>
               {t('workflow:field_required')}
             </FormLabel>
@@ -246,7 +234,7 @@ const InputTypeConfig = ({
         {/* reference */}
         {showIsToolInput && (
           <>
-            <Flex alignItems={'center'}>
+            <Flex alignItems={'center'} minH={'40px'}>
               <FormLabel flex={'0 0 132px'} fontWeight={'medium'}>
                 {t('workflow:field_used_as_tool_input')}
               </FormLabel>
@@ -306,62 +294,6 @@ const InputTypeConfig = ({
           </>
         )}
 
-        {(inputType === VariableInputEnum.timePointSelect ||
-          inputType === VariableInputEnum.timeRangeSelect) && (
-          <>
-            <Flex>
-              <FormLabel flex={'0 0 132px'} fontWeight={'medium'}>
-                {t('app:time_granularity')}
-              </FormLabel>
-              <RadioGroup
-                list={[
-                  { title: t('common:day'), value: 'day' },
-                  { title: t('common:hour'), value: 'hour' },
-                  { title: t('common:minute'), value: 'minute' },
-                  { title: t('common:second'), value: 'second' }
-                ]}
-                value={timeGranularity || 'day'}
-                onChange={(value) => setValue('timeGranularity', value)}
-              />
-            </Flex>
-            <Flex alignItems={'flex-top'}>
-              <FormLabel flex={'0 0 132px'} fontWeight={'medium'}>
-                {t('app:time_range_limit')}
-              </FormLabel>
-              <Flex flexDirection={'column'} gap={3}>
-                <Box>
-                  <Box color={'myGray.500'} fontSize="12px" mb={1}>
-                    {t('app:time_range_start')}
-                  </Box>
-                  <TimeInput
-                    value={timeRangeStart ? new Date(timeRangeStart) : undefined}
-                    onDateTimeChange={(date) => {
-                      setValue('timeRangeStart', date);
-                    }}
-                    popPosition="top"
-                    timeGranularity={timeGranularity}
-                    maxDate={timeRangeEnd ? new Date(timeRangeEnd) : undefined}
-                  />
-                </Box>
-                <Box>
-                  <Box color={'myGray.500'} fontSize="12px" mb={1}>
-                    {t('app:time_range_end')}
-                  </Box>
-                  <TimeInput
-                    value={timeRangeEnd ? new Date(timeRangeEnd) : undefined}
-                    onDateTimeChange={(date) => {
-                      setValue('timeRangeEnd', date);
-                    }}
-                    popPosition="top"
-                    timeGranularity={timeGranularity}
-                    minDate={timeRangeStart ? new Date(timeRangeStart) : undefined}
-                  />
-                </Box>
-              </Flex>
-            </Flex>
-          </>
-        )}
-
         {showDefaultValue && (
           <Flex alignItems={'center'} minH={'40px'}>
             <FormLabel flex={'0 0 132px'} fontWeight={'medium'}>
@@ -369,8 +301,7 @@ const InputTypeConfig = ({
             </FormLabel>
             <Flex flex={1} h={10}>
               {(inputType === FlowNodeInputTypeEnum.numberInput ||
-                ((inputType === VariableInputEnum.custom ||
-                  inputType === VariableInputEnum.internal) &&
+                (inputType === VariableInputEnum.custom &&
                   valueType === WorkflowIOValueTypeEnum.number)) && (
                 <MyNumberInput
                   value={defaultValue}
@@ -383,8 +314,7 @@ const InputTypeConfig = ({
                 />
               )}
               {(inputType === FlowNodeInputTypeEnum.input ||
-                ((inputType === VariableInputEnum.custom ||
-                  inputType === VariableInputEnum.internal) &&
+                (inputType === VariableInputEnum.custom &&
                   valueType === WorkflowIOValueTypeEnum.string)) && (
                 <MyTextarea
                   {...register('defaultValue')}
@@ -395,8 +325,7 @@ const InputTypeConfig = ({
                 />
               )}
               {(inputType === FlowNodeInputTypeEnum.JSONEditor ||
-                ((inputType === VariableInputEnum.custom ||
-                  inputType === VariableInputEnum.internal) &&
+                (inputType === VariableInputEnum.custom &&
                   ![
                     WorkflowIOValueTypeEnum.number,
                     WorkflowIOValueTypeEnum.string,
@@ -413,12 +342,9 @@ const InputTypeConfig = ({
                 />
               )}
               {(inputType === FlowNodeInputTypeEnum.switch ||
-                ((inputType === VariableInputEnum.custom ||
-                  inputType === VariableInputEnum.internal) &&
+                (inputType === VariableInputEnum.custom &&
                   valueType === WorkflowIOValueTypeEnum.boolean)) && (
-                <Flex h={10} alignItems={'center'}>
-                  <Switch {...register('defaultValue')} />
-                </Flex>
+                <Switch {...register('defaultValue')} />
               )}
               {inputType === FlowNodeInputTypeEnum.select && (
                 <MySelect<string>
@@ -613,8 +539,7 @@ const InputTypeConfig = ({
           </>
         )}
 
-        {(inputType === FlowNodeInputTypeEnum.fileSelect ||
-          inputType === VariableInputEnum.file) && (
+        {inputType === FlowNodeInputTypeEnum.fileSelect && (
           <>
             <Flex alignItems={'center'} minH={'40px'}>
               <FormLabel flex={'0 0 132px'} fontWeight={'medium'}>
@@ -658,22 +583,6 @@ const InputTypeConfig = ({
               </Box>
             </Box>
           </>
-        )}
-
-        {inputType === VariableInputEnum.password && (
-          <Flex alignItems={'center'}>
-            <FormLabel flex={'0 0 132px'} fontWeight={'medium'}>
-              {t('common:core.module.Min Length')}
-            </FormLabel>
-            <MyNumberInput
-              value={minLength}
-              min={1}
-              max={50}
-              onChange={(e) => {
-                setValue('minLength', e);
-              }}
-            />
-          </Flex>
         )}
       </Flex>
 

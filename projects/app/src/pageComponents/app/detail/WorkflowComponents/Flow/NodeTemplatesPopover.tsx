@@ -1,10 +1,10 @@
 import MyBox from '@fastgpt/web/components/common/MyBox';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useContextSelector } from 'use-context-selector';
 import { EDGE_TYPE, FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
 import type { FlowNodeItemType } from '@fastgpt/global/core/workflow/type/node';
-import { type Node } from 'reactflow';
-import { WorkflowNodeEdgeContext } from '../context/workflowInitContext';
+import { type Node, useReactFlow } from 'reactflow';
+import { WorkflowInitContext, WorkflowNodeEdgeContext } from '../context/workflowInitContext';
 import { useMemoizedFn } from 'ahooks';
 import NodeTemplateListHeader from './components/NodeTemplates/header';
 import NodeTemplateList from './components/NodeTemplates/list';
@@ -24,11 +24,9 @@ const NodeTemplatesPopover = () => {
   const {
     templateType,
     parentId,
-    searchKey,
-    setSearchKey,
     templatesIsLoading,
     templates,
-    onUpdateTemplateType,
+    loadNodeTemplates,
     onUpdateParentId
   } = useNodeTemplates();
 
@@ -118,11 +116,9 @@ const NodeTemplatesPopover = () => {
             <NodeTemplateListHeader
               isPopover={true}
               templateType={templateType}
-              onUpdateTemplateType={onUpdateTemplateType}
-              parentId={parentId}
+              loadNodeTemplates={loadNodeTemplates}
+              parentId={parentId || ''}
               onUpdateParentId={onUpdateParentId}
-              searchKey={searchKey}
-              setSearchKey={setSearchKey}
             />
             <NodeTemplateList
               onAddNode={onAddNode}

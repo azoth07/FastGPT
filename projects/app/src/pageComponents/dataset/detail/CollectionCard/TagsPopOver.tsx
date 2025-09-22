@@ -16,11 +16,9 @@ import { isEqual } from 'lodash';
 import { type DatasetCollectionsListItemType } from '@/global/core/dataset/type';
 
 const TagsPopOver = ({
-  currentCollection,
-  hoverBg = 'myGray.50'
+  currentCollection
 }: {
   currentCollection: DatasetCollectionItemType | DatasetCollectionsListItemType;
-  hoverBg?: string;
 }) => {
   const { t } = useTranslation();
   const {
@@ -106,8 +104,19 @@ const TagsPopOver = ({
           py={0.5}
           px={0.25}
           _hover={{
-            bg: hoverBg,
+            bg: 'myGray.50',
             borderRadius: '3px'
+          }}
+          onMouseEnter={(e) => {
+            e.stopPropagation();
+            if (!e.currentTarget.parentElement || !e.currentTarget.parentElement.parentElement)
+              return;
+            e.currentTarget.parentElement.parentElement.style.backgroundColor = 'white';
+          }}
+          onMouseLeave={(e) => {
+            if (!e.currentTarget.parentElement || !e.currentTarget.parentElement.parentElement)
+              return;
+            e.currentTarget.parentElement.parentElement.style.backgroundColor = '';
           }}
           onClick={(e) => {
             e.stopPropagation();

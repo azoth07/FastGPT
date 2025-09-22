@@ -18,6 +18,7 @@ import {
   type ReferenceArrayValueType,
   type ReferenceItemValueType
 } from './type/io.d';
+import type { NodeToolConfigType } from './type/node';
 import { type StoreNodeItemType } from './type/node';
 import type {
   VariableItemType,
@@ -246,7 +247,7 @@ export const appData2FlowNodeIO = ({
   const variableInput = !chatConfig?.variables
     ? []
     : chatConfig.variables.map((item) => {
-        const renderTypeMap: Record<VariableInputEnum, FlowNodeInputTypeEnum[]> = {
+        const renderTypeMap = {
           [VariableInputEnum.input]: [FlowNodeInputTypeEnum.input, FlowNodeInputTypeEnum.reference],
           [VariableInputEnum.textarea]: [
             FlowNodeInputTypeEnum.textarea,
@@ -254,22 +255,16 @@ export const appData2FlowNodeIO = ({
           ],
           [VariableInputEnum.numberInput]: [FlowNodeInputTypeEnum.numberInput],
           [VariableInputEnum.select]: [FlowNodeInputTypeEnum.select],
-          [VariableInputEnum.multipleSelect]: [FlowNodeInputTypeEnum.multipleSelect],
-          [VariableInputEnum.JSONEditor]: [FlowNodeInputTypeEnum.JSONEditor],
-          [VariableInputEnum.timePointSelect]: [FlowNodeInputTypeEnum.timePointSelect],
-          [VariableInputEnum.timeRangeSelect]: [FlowNodeInputTypeEnum.timeRangeSelect],
-          [VariableInputEnum.switch]: [FlowNodeInputTypeEnum.switch],
-          [VariableInputEnum.password]: [FlowNodeInputTypeEnum.password],
-          [VariableInputEnum.file]: [FlowNodeInputTypeEnum.fileSelect],
-          [VariableInputEnum.modelSelect]: [FlowNodeInputTypeEnum.selectLLMModel],
-          [VariableInputEnum.datasetSelect]: [FlowNodeInputTypeEnum.selectDataset],
-          [VariableInputEnum.internal]: [FlowNodeInputTypeEnum.hidden],
-          [VariableInputEnum.custom]: [FlowNodeInputTypeEnum.input, FlowNodeInputTypeEnum.reference]
+          [VariableInputEnum.custom]: [
+            FlowNodeInputTypeEnum.input,
+            FlowNodeInputTypeEnum.reference
+          ],
+          default: [FlowNodeInputTypeEnum.reference]
         };
 
         return {
           key: item.key,
-          renderTypeList: renderTypeMap[item.type] || [FlowNodeInputTypeEnum.reference],
+          renderTypeList: renderTypeMap[item.type] || renderTypeMap.default,
           label: item.label,
           debugLabel: item.label,
           description: '',

@@ -18,10 +18,6 @@ const ChatSettingSchema = new Schema({
     ref: AppCollectionName,
     required: true
   },
-  enableHome: {
-    type: Boolean,
-    default: true
-  },
   slogan: String,
   dialogTips: String,
   selectedTools: {
@@ -30,27 +26,7 @@ const ChatSettingSchema = new Schema({
   },
   homeTabTitle: String,
   wideLogoUrl: String,
-  squareLogoUrl: String,
-  quickAppIds: {
-    type: [String],
-    default: []
-  },
-  favouriteTags: {
-    type: [
-      {
-        id: String,
-        name: String
-      }
-    ],
-    default: [],
-    _id: false
-  }
-});
-
-ChatSettingSchema.virtual('quickAppList', {
-  ref: AppCollectionName,
-  localField: 'quickAppIds',
-  foreignField: '_id'
+  squareLogoUrl: String
 });
 
 ChatSettingSchema.index({ teamId: 1 });

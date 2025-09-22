@@ -17,7 +17,7 @@ import type {
   ParentTreePathItemType
 } from '@fastgpt/global/common/parentFolder/type';
 import type { GetSystemPluginTemplatesBody } from '@/pages/api/core/app/plugin/getSystemPluginTemplates';
-import type { SystemToolGroupSchemaType } from '@fastgpt/service/core/app/plugin/type';
+import type { PluginGroupSchemaType } from '@fastgpt/service/core/app/plugin/type';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
 import { defaultGroup } from '@fastgpt/web/core/workflow/constants';
 import type { createMCPToolsBody } from '@/pages/api/core/app/mcpTools/create';
@@ -29,10 +29,7 @@ import type {
   getToolVersionListProps,
   getToolVersionResponse
 } from '@/pages/api/core/app/plugin/getVersionList';
-import type {
-  McpGetChildrenmQuery,
-  McpGetChildrenmResponse
-} from '@/pages/api/core/app/mcpTools/getChildren';
+import type { McpGetChildrenmResponse } from '@/pages/api/core/app/mcpTools/getChildren';
 
 /* ============ team plugin ============== */
 export const getTeamPlugTemplates = async (data?: {
@@ -43,7 +40,7 @@ export const getTeamPlugTemplates = async (data?: {
     // handle get mcptools
     const app = await getAppDetailById(data.parentId);
     if (app.type === AppTypeEnum.toolSet) {
-      const children = await getMcpChildren({ id: data.parentId, searchKey: data.searchKey });
+      const children = await getMcpChildren(data.parentId);
       return children.map((item) => ({
         ...item,
         flowNodeType: FlowNodeTypeEnum.tool,
@@ -82,8 +79,11 @@ export const getTeamPlugTemplates = async (data?: {
 export const getSystemPlugTemplates = (data: GetSystemPluginTemplatesBody) =>
   POST<NodeTemplateListItemType[]>('/core/app/plugin/getSystemPluginTemplates', data);
 
-export const getPluginGroups = () =>
-  GET<SystemToolGroupSchemaType[]>('/core/app/plugin/getToolGroups');
+export const getPluginGroups = () => {
+  return useSystemStore.getState()?.feConfigs?.isPlus
+    ? GET<PluginGroupSchemaType[]>('/proApi/core/app/plugin/getPluginGroups')
+    : Promise.resolve([defaultGroup]);
+};
 
 export const getSystemPluginPaths = (data: GetPathProps) => {
   if (!data.sourceId) return Promise.resolve<ParentTreePathItemType[]>([]);
@@ -109,8 +109,8 @@ export const getMCPTools = (data: getMCPToolsBody) =>
 export const postRunMCPTool = (data: RunMCPToolBody) =>
   POST('/support/mcp/client/runTool', data, { timeout: 300000 });
 
-export const getMcpChildren = (data: McpGetChildrenmQuery) =>
-  GET<McpGetChildrenmResponse>('/core/app/mcpTools/getChildren', data);
+export const getMcpChildren = (id: string) =>
+  GET<McpGetChildrenmResponse>('/core/app/mcpTools/getChildren', { id });
 
 /* ============ http plugin ============== */
 export const postCreateHttpPlugin = (data: createHttpPluginBody) =>

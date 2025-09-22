@@ -22,9 +22,6 @@ interface ResponseDataType {
  * 请求开始
  */
 function requestStart(config: InternalAxiosRequestConfig): InternalAxiosRequestConfig {
-  if (config.headers) {
-    delete config.headers['content-length'];
-  }
   return config;
 }
 

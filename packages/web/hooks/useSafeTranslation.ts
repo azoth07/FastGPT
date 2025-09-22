@@ -4,9 +4,7 @@ import { I18N_NAMESPACES_MAP } from '../i18n/constants';
 export function useSafeTranslation() {
   const { t: originalT, ...rest } = useNextTranslation();
 
-  const t = (key: any, ...args: any[]): string => {
-    if (key === null || key === undefined) return '';
-    if (typeof key !== 'string') return String(key);
+  const t = (key: string | undefined, ...args: any[]): string => {
     if (!key) return '';
 
     const ns = key.split(':')[0];

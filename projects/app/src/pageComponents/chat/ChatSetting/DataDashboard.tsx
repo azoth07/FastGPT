@@ -28,11 +28,18 @@ const LogDetails = ({ Header }: Props) => {
   } = useMultipleSelect<ChatSourceEnum>(Object.values(ChatSourceEnum), true);
 
   return (
-    <Flex gap={'13px'} flexDir="column" h={['calc(100vh - 69px)', 'full']}>
+    <Flex
+      py={5}
+      pl={6}
+      pr={[0, 6]}
+      gap={'13px'}
+      flexDir="column"
+      mt={['46px', 0]}
+      h={['calc(100vh - 46px)', 'full']}
+    >
       <Header />
 
       <LogChart
-        px={[2, 0]}
         showSourceSelector={false}
         appId={appId}
         chatSources={chatSources}

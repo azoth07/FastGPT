@@ -51,7 +51,7 @@ const PluginRunContextProvider = ({
 
   const pluginInputs = useContextSelector(ChatItemContext, (v) => v.chatBoxData?.app?.pluginInputs);
   const setTab = useContextSelector(ChatItemContext, (v) => v.setPluginRunTab);
-  const resetVariables = useContextSelector(ChatItemContext, (v) => v.resetVariables);
+  const variablesForm = useContextSelector(ChatItemContext, (v) => v.variablesForm);
   const chatConfig = useContextSelector(ChatItemContext, (v) => v.chatBoxData?.app?.chatConfig);
 
   const setChatRecords = useContextSelector(ChatRecordContext, (v) => v.setChatRecords);
@@ -158,14 +158,14 @@ const PluginRunContextProvider = ({
               })
             };
           } else if (event === SseResponseEventEnum.updateVariables && variables) {
-            resetVariables({ variables });
+            variablesForm.setValue('variables', variables);
           }
 
           return item;
         })
       );
     },
-    [setChatRecords, resetVariables]
+    [setChatRecords, variablesForm]
   );
 
   const isChatting = useMemo(

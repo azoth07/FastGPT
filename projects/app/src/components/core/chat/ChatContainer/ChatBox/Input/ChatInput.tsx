@@ -64,7 +64,6 @@ const ChatInput = ({
   const chatInputGuide = useContextSelector(ChatBoxContext, (v) => v.chatInputGuide);
   const fileSelectConfig = useContextSelector(ChatBoxContext, (v) => v.fileSelectConfig);
   const dialogTips = useContextSelector(ChatBoxContext, (v) => v.dialogTips);
-  const autoTTSResponse = useContextSelector(ChatBoxContext, (v) => v.autoTTSResponse);
 
   const fileCtrl = useFieldArray({
     control,
@@ -377,6 +376,10 @@ const ChatInput = ({
 
   return (
     <Box
+      m={['0 auto 10px', '10px auto']}
+      w={'100%'}
+      maxW={['auto', 'min(820px, 100%)']}
+      px={[3, 5]}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -449,8 +452,7 @@ const ChatInput = ({
               handleSend={(text) => {
                 onSendMessage({
                   text: text.trim(),
-                  files: fileList,
-                  autoTTSResponse
+                  files: fileList
                 });
                 replaceFiles([]);
               }}

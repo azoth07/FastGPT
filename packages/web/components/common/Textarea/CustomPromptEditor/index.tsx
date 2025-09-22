@@ -126,7 +126,6 @@ const CustomPromptEditor = ({
             border="none"
             p={0}
             mb={2}
-            rounded={'none'}
             _focus={{
               border: 'none',
               boxShadow: 'none'
@@ -143,7 +142,7 @@ const CustomPromptEditor = ({
           <Button
             fontWeight={'medium'}
             onClick={() => {
-              onChange(value.replace(defaultPrompt, ''));
+              onChange(value.replace(defaultValue, ''));
               onClose();
             }}
             w={20}

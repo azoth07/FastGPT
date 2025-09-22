@@ -4,7 +4,7 @@ import {
   type DispatchNodeResultType,
   type ModuleDispatchProps
 } from '@fastgpt/global/core/workflow/runtime/type';
-import { runWorkflow } from '..';
+import { dispatchWorkFlow } from '..';
 import { DispatchNodeResponseKeyEnum } from '@fastgpt/global/core/workflow/runtime/constants';
 import {
   type AIChatItemValueItemType,
@@ -93,7 +93,7 @@ export const dispatchLoop = async (props: Props): Promise<Response> => {
 
     index++;
 
-    const response = await runWorkflow({
+    const response = await dispatchWorkFlow({
       ...props,
       lastInteractive: interactiveData?.childrenResponse,
       variables: newVariables,

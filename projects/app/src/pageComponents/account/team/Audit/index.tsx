@@ -72,7 +72,7 @@ function AuditLog({ Tabs }: { Tabs: React.ReactNode }) {
     isLoading: loadingLogs,
     ScrollData: LogScrollData
   } = useScrollPagination(getOperationLogs, {
-    pageSize: 30,
+    pageSize: 20,
     refreshDeps: [searchParams],
     params: searchParams
   });

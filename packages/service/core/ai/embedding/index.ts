@@ -23,9 +23,8 @@ export async function getVectorsByText({ model, input, type, headers }: GetVecto
 
   const formatInput = Array.isArray(input) ? input : [input];
 
-  let chunkSize = Number(model.batchSize || 1);
-  chunkSize = isNaN(chunkSize) ? 1 : chunkSize;
-
+  // 20 size every request
+  const chunkSize = parseInt(process.env.EMBEDDING_CHUNK_SIZE || '10');
   const chunks = [];
   for (let i = 0; i < formatInput.length; i += chunkSize) {
     chunks.push(formatInput.slice(i, i + chunkSize));
@@ -75,7 +74,14 @@ export async function getVectorsByText({ model, input, type, headers }: GetVecto
               const tokens = await Promise.all(chunk.map((item) => countPromptTokens(item)));
               return tokens.reduce((sum, item) => sum + item, 0);
             })(),
-            Promise.all(res.data.map((item) => formatVectors(item.embedding, model.normalization)))
+            Promise.all(
+              res.data
+                .map((item) => unityDimensional(item.embedding))
+                .map((item) => {
+                  if (model.normalization) return normalization(item);
+                  return item;
+                })
+            )
           ]);
 
           return {
@@ -99,34 +105,28 @@ export async function getVectorsByText({ model, input, type, headers }: GetVecto
   }
 }
 
-export function formatVectors(vector: number[], normalization = false) {
-  // normalization processing
-  function normalizationVector(vector: number[]) {
-    // Calculate the Euclidean norm (L2 norm)
-    const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
-    if (norm === 0) {
-      return vector;
-    }
-    // Normalize the vector by dividing each component by the norm
-    return vector.map((val) => val / norm);
-  }
-
-  // 超过上限，截断，并强制归一化
+function unityDimensional(vector: number[]) {
   if (vector.length > 1536) {
     console.log(
       `The current vector dimension is ${vector.length}, and the vector dimension cannot exceed 1536. The first 1536 dimensions are automatically captured`
     );
-    return normalizationVector(vector.slice(0, 1536));
-  } else if (vector.length < 1536) {
-    const vectorLen = vector.length;
-
-    const zeroVector = new Array(1536 - vectorLen).fill(0);
-
-    vector = vector.concat(zeroVector);
+    return vector.slice(0, 1536);
   }
+  let resultVector = vector;
+  const vectorLen = vector.length;
 
-  if (normalization) {
-    return normalizationVector(vector);
+  const zeroVector = new Array(1536 - vectorLen).fill(0);
+
+  return resultVector.concat(zeroVector);
+}
+// normalization processing
+function normalization(vector: number[]) {
+  if (vector.some((item) => item > 1)) {
+    // Calculate the Euclidean norm (L2 norm)
+    const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
+
+    // Normalize the vector by dividing each component by the norm
+    return vector.map((val) => val / norm);
   }
 
   return vector;

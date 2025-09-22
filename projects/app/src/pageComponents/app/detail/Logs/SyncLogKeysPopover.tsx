@@ -10,7 +10,6 @@ import { useContextSelector } from 'use-context-selector';
 import { AppContext } from '../context';
 import type { AppLogKeysType } from '@fastgpt/global/core/app/logs/type';
 import type { getLogKeysResponse } from '@/pages/api/core/app/logs/getLogKeys';
-import type { SetState } from 'ahooks/lib/createUseStorageState';
 
 const SyncLogKeysPopover = ({
   logKeys,
@@ -19,7 +18,7 @@ const SyncLogKeysPopover = ({
   fetchLogKeys
 }: {
   logKeys: AppLogKeysType[];
-  setLogKeys: (value: SetState<AppLogKeysType[]>) => void;
+  setLogKeys: (logKeys: AppLogKeysType[]) => void;
   teamLogKeys: AppLogKeysType[];
   fetchLogKeys: () => Promise<getLogKeysResponse>;
 }) => {

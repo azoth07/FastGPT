@@ -9,14 +9,14 @@ import {
   type STTModelType,
   type TTSModelType
 } from '@fastgpt/global/core/ai/model.d';
-import { getAIApi } from '@fastgpt/service/core/ai/config';
+import { createChatCompletion, getAIApi } from '@fastgpt/service/core/ai/config';
 import { addLog } from '@fastgpt/service/common/system/log';
 import { getVectorsByText } from '@fastgpt/service/core/ai/embedding';
 import { reRankRecall } from '@fastgpt/service/core/ai/rerank';
 import { aiTranscriptions } from '@fastgpt/service/core/ai/audio/transcriptions';
 import { isProduction } from '@fastgpt/global/common/system/constants';
 import * as fs from 'fs';
-import { createLLMResponse } from '@fastgpt/service/core/ai/llm/request';
+import { llmCompletionsBodyFormat, formatLLMResponse } from '@fastgpt/service/core/ai/utils';
 
 export type testQuery = { model: string; channelId?: number };
 
@@ -69,17 +69,29 @@ async function handler(
 export default NextAPI(handler);
 
 const testLLMModel = async (model: LLMModelItemType, headers: Record<string, string>) => {
-  const { answerText } = await createLLMResponse({
-    body: {
+  const requestBody = llmCompletionsBodyFormat(
+    {
       model: model.model,
       messages: [{ role: 'user', content: 'hi' }],
       stream: true
     },
-    custonHeaders: headers
-  });
+    model
+  );
 
-  if (answerText) {
-    return answerText;
+  const { response } = await createChatCompletion({
+    modelData: model,
+    body: requestBody,
+    options: {
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+        ...headers
+      }
+    }
+  });
+  const { text: answer } = await formatLLMResponse(response);
+
+  if (answer) {
+    return answer;
   }
 
   return Promise.reject('Model response empty');

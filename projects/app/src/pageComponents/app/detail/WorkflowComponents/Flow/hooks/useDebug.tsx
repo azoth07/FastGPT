@@ -30,7 +30,6 @@ import {
   nodeInputTypeToInputType,
   variableInputTypeToInputType
 } from '@/components/core/app/formRender/utils';
-import { useSafeTranslation } from '@fastgpt/web/hooks/useSafeTranslation';
 
 const MyRightDrawer = dynamic(
   () => import('@fastgpt/web/components/common/MyDrawer/MyRightDrawer')
@@ -42,28 +41,22 @@ enum TabEnum {
 }
 
 export const useDebug = () => {
-  const { t } = useSafeTranslation();
+  const { t } = useTranslation();
   const { toast } = useToast();
 
   const setNodes = useContextSelector(WorkflowNodeEdgeContext, (v) => v.setNodes);
   const getNodes = useContextSelector(WorkflowNodeEdgeContext, (v) => v.getNodes);
   const edges = useContextSelector(WorkflowNodeEdgeContext, (v) => v.edges);
   const onUpdateNodeError = useContextSelector(WorkflowContext, (v) => v.onUpdateNodeError);
-  const onRemoveError = useContextSelector(WorkflowContext, (v) => v.onRemoveError);
   const onStartNodeDebug = useContextSelector(WorkflowContext, (v) => v.onStartNodeDebug);
 
   const appDetail = useContextSelector(AppContext, (v) => v.appDetail);
 
-  const { filteredVar, customVar, internalVar, variables } = useMemo(() => {
+  const { filteredVar, customVar, variables } = useMemo(() => {
     const variables = appDetail.chatConfig?.variables || [];
     return {
-      filteredVar:
-        variables.filter(
-          (item) =>
-            item.type !== VariableInputEnum.custom && item.type !== VariableInputEnum.internal
-        ) || [],
+      filteredVar: variables.filter((item) => item.type !== VariableInputEnum.custom) || [],
       customVar: variables.filter((item) => item.type === VariableInputEnum.custom) || [],
-      internalVar: variables.filter((item) => item.type === VariableInputEnum.internal) || [],
       variables
     };
   }, [appDetail.chatConfig?.variables]);
@@ -87,7 +80,6 @@ export const useDebug = () => {
 
     const checkResults = checkWorkflowNodeAndConnection({ nodes, edges });
     if (!checkResults) {
-      onRemoveError();
       const storeNodes = uiWorkflow2StoreWorkflow({ nodes, edges });
 
       return JSON.stringify(storeNodes);
@@ -224,14 +216,14 @@ export const useDebug = () => {
 
     const onCheckRunError = useCallback((e: FieldErrors<Record<string, any>>) => {
       const hasRequiredNodeVar =
-        e.nodeVariables && Object.values(e.nodeVariables).some((item) => item.type === 'validate');
+        e.nodeVariables && Object.values(e.nodeVariables).some((item) => item.type === 'required');
 
       if (hasRequiredNodeVar) {
         return setCurrentTab(TabEnum.node);
       }
 
       const hasRequiredGlobalVar =
-        e.variables && Object.values(e.variables).some((item) => item.type === 'validate');
+        e.variables && Object.values(e.variables).some((item) => item.type === 'required');
 
       if (hasRequiredGlobalVar) {
         setCurrentTab(TabEnum.global);
@@ -242,8 +234,8 @@ export const useDebug = () => {
       <MyRightDrawer
         onClose={onClose}
         iconSrc="core/workflow/debugBlue"
-        title={t('workflow:debug_test')}
-        maxW={['90vw', '40vw']}
+        title={t('common:core.workflow.Debug Node')}
+        maxW={['90vw', '35vw']}
         px={0}
       >
         <Box flex={'1 0 0'} overflow={'auto'} px={6}>
@@ -261,54 +253,39 @@ export const useDebug = () => {
               onChange={setCurrentTab}
             />
           )}
-          <Box display={currentTab === TabEnum.node ? 'block' : 'none'}>
-            {renderInputs.map((item) => (
-              <LabelAndFormRender
-                key={item.key}
-                label={item.label}
-                required={item.required}
-                placeholder={t(item.placeholder || item.description)}
-                inputType={nodeInputTypeToInputType(item.renderTypeList)}
-                form={variablesForm}
-                fieldName={`nodeVariables.${item.key}`}
-                bg={'myGray.50'}
-              />
-            ))}
-          </Box>
           <Box display={currentTab === TabEnum.global ? 'block' : 'none'}>
             {customVar.map((item) => (
               <LabelAndFormRender
+                {...item}
                 key={item.key}
-                label={item.label}
-                required={item.required}
-                placeholder={t(item.description)}
+                formKey={`variables.${item.key}`}
+                placeholder={item.description}
                 inputType={variableInputTypeToInputType(item.type)}
-                form={variablesForm}
-                fieldName={`variables.${item.key}`}
-                bg={'myGray.50'}
-              />
-            ))}
-            {internalVar.map((item) => (
-              <LabelAndFormRender
-                key={item.key}
-                label={item.label}
-                required={item.required}
-                placeholder={t(item.description)}
-                inputType={variableInputTypeToInputType(item.type)}
-                form={variablesForm}
-                fieldName={`variables.${item.key}`}
+                variablesForm={variablesForm}
                 bg={'myGray.50'}
               />
             ))}
             {filteredVar.map((item) => (
               <LabelAndFormRender
+                {...item}
                 key={item.key}
-                label={item.label}
-                required={item.required}
+                formKey={`variables.${item.key}`}
                 placeholder={item.description}
                 inputType={variableInputTypeToInputType(item.type)}
-                form={variablesForm}
-                fieldName={`variables.${item.key}`}
+                variablesForm={variablesForm}
+                bg={'myGray.50'}
+              />
+            ))}
+          </Box>
+          <Box display={currentTab === TabEnum.node ? 'block' : 'none'}>
+            {renderInputs.map((item) => (
+              <LabelAndFormRender
+                {...item}
+                key={item.key}
+                formKey={`nodeVariables.${item.key}`}
+                placeholder={item.placeholder || item.description}
+                inputType={nodeInputTypeToInputType(item.renderTypeList)}
+                variablesForm={variablesForm}
                 bg={'myGray.50'}
               />
             ))}

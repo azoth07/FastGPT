@@ -10,7 +10,7 @@ import {
 } from '@chakra-ui/react';
 import { LoginPageTypeEnum } from '@/web/support/user/login/constants';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
-import type { LoginSuccessResponse } from '@/global/support/api/userRes.d';
+import type { ResLogin } from '@/global/support/api/userRes.d';
 import { useUserStore } from '@/web/support/user/useUserStore';
 import { useChatStore } from '@/web/core/chat/context/useChatStore';
 import dynamic from 'next/dynamic';
@@ -185,25 +185,31 @@ export const LoginContainer = ({
   onSuccess
 }: {
   children?: React.ReactNode;
-  onSuccess: (res: LoginSuccessResponse) => void;
+  onSuccess?: (res: ResLogin) => void;
 }) => {
   const { t } = useTranslation();
   const { feConfigs } = useSystemStore();
+  const { setUserInfo } = useUserStore();
   const { setLastChatAppId } = useChatStore();
 
-  const [pageType, setPageType] = useState<`${LoginPageTypeEnum}`>(LoginPageTypeEnum.passwordLogin);
+  const [pageType, setPageType] = useState<`${LoginPageTypeEnum}` | null>(null);
   const [showCommunityModal, setShowCommunityModal] = useState(false);
 
   // login success handler
   const loginSuccess = useCallback(
-    (res: LoginSuccessResponse) => {
+    (res: ResLogin) => {
+      setUserInfo(res.user);
       onSuccess?.(res);
     },
-    [onSuccess]
+    [setUserInfo, onSuccess]
   );
 
   // initialization logic
   useEffect(() => {
+    setPageType(
+      feConfigs?.oauth?.wechat ? LoginPageTypeEnum.wechat : LoginPageTypeEnum.passwordLogin
+    );
+
     // reset chat state
     setLastChatAppId('');
   }, [feConfigs?.oauth?.wechat, setLastChatAppId]);

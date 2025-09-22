@@ -541,7 +541,7 @@ const TrainingStates = ({
     }
   );
 
-  const errorCounts = Object.values(trainingDetail?.errorCounts || {}).reduce(
+  const errorCounts = (Object.values(trainingDetail?.errorCounts || {}) as number[]).reduce(
     (acc, count) => acc + count,
     0
   );

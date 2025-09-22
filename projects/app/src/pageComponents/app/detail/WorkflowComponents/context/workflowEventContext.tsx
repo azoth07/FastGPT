@@ -17,7 +17,7 @@ type WorkflowEventContextType = {
   hoverEdgeId?: string;
   setHoverEdgeId: React.Dispatch<React.SetStateAction<string | undefined>>;
   workflowControlMode?: 'drag' | 'select';
-  setWorkflowControlMode: (value: SetState<'drag' | 'select'>) => void;
+  setWorkflowControlMode: (value?: SetState<'drag' | 'select'> | undefined) => void;
   menu: {
     top: number;
     left: number;
@@ -40,7 +40,7 @@ export const WorkflowEventContext = createContext<WorkflowEventContextType>({
     throw new Error('Function not implemented.');
   },
   workflowControlMode: 'drag',
-  setWorkflowControlMode: function (value: SetState<'drag' | 'select'>): void {
+  setWorkflowControlMode: function (value?: SetState<'drag' | 'select'> | undefined): void {
     throw new Error('Function not implemented.');
   },
   menu: null,
@@ -96,7 +96,7 @@ const WorkflowEventContextProvider = ({ children }: { children: ReactNode }) => 
   /* Version histories */
   const [showHistoryModal, setShowHistoryModal] = useState(false);
 
-  const contextValue = useMemo<WorkflowEventContextType>(
+  const contextValue = useMemo(
     () => ({
       mouseInCanvas,
       reactFlowWrapper,

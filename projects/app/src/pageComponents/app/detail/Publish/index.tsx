@@ -17,7 +17,7 @@ const Link = dynamic(() => import('./Link'));
 const API = dynamic(() => import('./API'));
 const FeiShu = dynamic(() => import('./FeiShu'));
 const DingTalk = dynamic(() => import('./DingTalk'));
-const Wecom = dynamic(() => import('./Wecom'));
+// const Wecom = dynamic(() => import('./Wecom'));
 const OffiAccount = dynamic(() => import('./OffiAccount'));
 
 const OutLink = () => {
@@ -64,17 +64,13 @@ const OutLink = () => {
           }
         ]
       : []),
-    ...(feConfigs?.show_publish_wecom === true
-      ? [
-          {
-            icon: 'core/app/publish/wecom',
-            title: t('publish:wecom.bot'),
-            desc: t('publish:wecom.bot_desc'),
-            value: PublishChannelEnum.wecom,
-            isProFn: true
-          }
-        ]
-      : []),
+    // {
+    //   icon: 'core/app/publish/wecom',
+    //   title: t('publish:wecom.bot'),
+    //   desc: t('publish:wecom.bot_desc'),
+    //   value: PublishChannelEnum.wecom,
+    //   isProFn: true
+    // },
     ...(feConfigs?.show_publish_offiaccount !== false
       ? [
           {
@@ -139,7 +135,7 @@ const OutLink = () => {
         {linkType === PublishChannelEnum.apikey && <API appId={appId} />}
         {linkType === PublishChannelEnum.feishu && <FeiShu appId={appId} />}
         {linkType === PublishChannelEnum.dingtalk && <DingTalk appId={appId} />}
-        {linkType === PublishChannelEnum.wecom && <Wecom appId={appId} />}
+        {/* {linkType === PublishChannelEnum.wecom && <Wecom appId={appId} />} */}
         {linkType === PublishChannelEnum.officialAccount && <OffiAccount appId={appId} />}
       </Flex>
     </Box>

@@ -15,7 +15,6 @@ import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
 import { DispatchNodeResponseKeyEnum } from '@fastgpt/global/core/workflow/runtime/constants';
 import { extractDeepestInteractive } from '@fastgpt/global/core/workflow/runtime/utils';
 import { MongoAppChatLog } from '../app/logs/chatLogsSchema';
-import { writePrimary } from '../../common/mongo/utils';
 
 type Props = {
   chatId: string;
@@ -116,7 +115,7 @@ export async function saveChat({
     });
 
     await mongoSessionRun(async (session) => {
-      const [{ _id: chatItemIdHuman }, { _id: chatItemIdAi }] = await MongoChatItem.create(
+      const [{ _id: chatItemIdHuman }, { _id: chatItemIdAi }] = await MongoChatItem.insertMany(
         processedContent.map((item) => ({
           chatId,
           teamId,
@@ -124,7 +123,7 @@ export async function saveChat({
           appId,
           ...item
         })),
-        { session, ordered: true, ...writePrimary }
+        { session }
       );
 
       await MongoChat.updateOne(
@@ -153,8 +152,7 @@ export async function saveChat({
         },
         {
           session,
-          upsert: true,
-          ...writePrimary
+          upsert: true
         }
       );
 
@@ -217,8 +215,7 @@ export async function saveChat({
           }
         },
         {
-          upsert: true,
-          ...writePrimary
+          upsert: true
         }
       );
     } catch (error) {
@@ -226,15 +223,9 @@ export async function saveChat({
     }
 
     if (isUpdateUseTime) {
-      await MongoApp.updateOne(
-        { _id: appId },
-        {
-          updateTime: new Date()
-        },
-        {
-          ...writePrimary
-        }
-      ).catch();
+      await MongoApp.findByIdAndUpdate(appId, {
+        updateTime: new Date()
+      }).catch();
     }
   } catch (error) {
     addLog.error(`update chat history error`, error);

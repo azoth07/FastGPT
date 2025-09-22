@@ -1,5 +1,4 @@
-import type { Dispatch, SetStateAction } from 'react';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Flex, IconButton, Input, InputGroup, InputLeftElement } from '@chakra-ui/react';
 import FillRowTabs from '@fastgpt/web/components/common/Tabs/FillRowTabs';
 import MyIcon from '@fastgpt/web/components/common/Icon';
@@ -10,7 +9,6 @@ import { useRequest2 } from '@fastgpt/web/hooks/useRequest';
 import { getSystemPluginPaths } from '@/web/core/app/api/plugin';
 import { getAppFolderPath } from '@/web/core/app/api/app';
 import FolderPath from '@/components/common/folder/Path';
-import type { ParentIdType } from '@fastgpt/global/common/parentFolder/type';
 
 export enum TemplateTypeEnum {
   'basic' = 'basic',
@@ -22,10 +20,12 @@ export type NodeTemplateListHeaderProps = {
   onClose?: () => void;
   isPopover?: boolean;
   templateType: TemplateTypeEnum;
-  parentId: ParentIdType;
-  searchKey: string;
-  setSearchKey: Dispatch<SetStateAction<string>>;
-  onUpdateTemplateType: (type: TemplateTypeEnum) => void;
+  parentId: string;
+  loadNodeTemplates: (params: {
+    parentId?: string;
+    type?: TemplateTypeEnum;
+    searchVal?: string;
+  }) => Promise<any>;
   onUpdateParentId: (parentId: string) => void;
 };
 
@@ -34,14 +34,26 @@ const NodeTemplateListHeader = ({
   isPopover = false,
   templateType,
   parentId,
-  searchKey,
-  setSearchKey,
-  onUpdateTemplateType,
+  loadNodeTemplates,
   onUpdateParentId
 }: NodeTemplateListHeaderProps) => {
   const { t } = useTranslation();
   const { feConfigs } = useSystemStore();
   const router = useRouter();
+
+  const [searchKey, setSearchKey] = useState('');
+
+  useEffect(() => {
+    setSearchKey('');
+  }, [templateType]);
+
+  useEffect(() => {
+    loadNodeTemplates({
+      type: templateType,
+      parentId: '',
+      searchVal: searchKey
+    });
+  }, [searchKey, loadNodeTemplates, templateType]);
 
   // Get paths
   const { data: paths = [] } = useRequest2(
@@ -61,7 +73,7 @@ const NodeTemplateListHeader = ({
       {/* Tabs */}
       <Flex flex={'1 0 0'} alignItems={'center'} gap={2}>
         <Box flex={'1 0 0'}>
-          <FillRowTabs<TemplateTypeEnum>
+          <FillRowTabs
             list={[
               {
                 icon: 'core/modules/basicNode',
@@ -90,7 +102,10 @@ const NodeTemplateListHeader = ({
               : {})}
             value={templateType}
             onChange={(e) => {
-              onUpdateTemplateType(e);
+              loadNodeTemplates({
+                type: e as TemplateTypeEnum,
+                parentId: ''
+              });
             }}
           />
         </Box>

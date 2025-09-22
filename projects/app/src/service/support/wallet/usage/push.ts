@@ -35,6 +35,7 @@ export const pushGenerateVectorUsage = ({
   deepSearchOutputTokens?: number;
 }) => {
   const { totalPoints: totalVector, modelName: vectorModelName } = formatModelChars2Points({
+    modelType: ModelTypeEnum.embedding,
     model,
     inputTokens
   });
@@ -46,6 +47,7 @@ export const pushGenerateVectorUsage = ({
         extensionModelName: ''
       };
     const { totalPoints, modelName } = formatModelChars2Points({
+      modelType: ModelTypeEnum.llm,
       model: extensionModel,
       inputTokens: extensionInputTokens,
       outputTokens: extensionOutputTokens
@@ -62,6 +64,7 @@ export const pushGenerateVectorUsage = ({
         deepSearchModelName: ''
       };
     const { totalPoints, modelName } = formatModelChars2Points({
+      modelType: ModelTypeEnum.llm,
       model: deepSearchModel,
       inputTokens: deepSearchInputTokens,
       outputTokens: deepSearchOutputTokens
@@ -142,7 +145,8 @@ export const pushQuestionGuideUsage = ({
   const { totalPoints, modelName } = formatModelChars2Points({
     inputTokens,
     outputTokens,
-    model
+    model,
+    modelType: ModelTypeEnum.llm
   });
 
   createUsage({
@@ -180,7 +184,8 @@ export const pushAudioSpeechUsage = ({
 }) => {
   const { totalPoints, modelName } = formatModelChars2Points({
     model,
-    inputTokens: charsLength
+    inputTokens: charsLength,
+    modelType: ModelTypeEnum.tts
   });
 
   createUsage({
@@ -216,6 +221,7 @@ export const pushWhisperUsage = ({
   const { totalPoints, modelName } = formatModelChars2Points({
     model: whisperModel.model,
     inputTokens: duration,
+    modelType: ModelTypeEnum.stt,
     multiple: 60
   });
 
@@ -253,7 +259,8 @@ export const pushRerankUsage = ({
 }) => {
   const { totalPoints, modelName } = formatModelChars2Points({
     model,
-    inputTokens
+    inputTokens,
+    modelType: ModelTypeEnum.rerank
   });
 
   createUsage({

@@ -153,10 +153,7 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
       }
 
       const usagePoints = (() => {
-        if (
-          params.system_input_config?.type === SystemToolInputTypeEnum.team ||
-          params.system_input_config?.type === SystemToolInputTypeEnum.manual
-        ) {
+        if (params.system_input_config?.type !== SystemToolInputTypeEnum.system) {
           return 0;
         }
         return (tool.systemKeyCost ?? 0) + (tool.currentCost ?? 0);

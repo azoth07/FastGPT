@@ -30,10 +30,7 @@ export enum FlowNodeInputTypeEnum { // render ui
   hidden = 'hidden',
   custom = 'custom',
 
-  fileSelect = 'fileSelect',
-  timePointSelect = 'timePointSelect',
-  timeRangeSelect = 'timeRangeSelect',
-  password = 'password'
+  fileSelect = 'fileSelect'
 }
 export const FlowNodeInputMap: Record<
   FlowNodeInputTypeEnum,
@@ -97,15 +94,6 @@ export const FlowNodeInputMap: Record<
   },
   [FlowNodeInputTypeEnum.fileSelect]: {
     icon: 'core/workflow/inputType/file'
-  },
-  [FlowNodeInputTypeEnum.timePointSelect]: {
-    icon: 'core/workflow/inputType/timePointSelect'
-  },
-  [FlowNodeInputTypeEnum.timeRangeSelect]: {
-    icon: 'core/workflow/inputType/timeRangeSelect'
-  },
-  [FlowNodeInputTypeEnum.password]: {
-    icon: 'core/workflow/inputType/password'
   }
 };
 
@@ -122,8 +110,6 @@ export enum FlowNodeTypeEnum {
   systemConfig = 'userGuide',
   pluginConfig = 'pluginConfig',
   globalVariable = 'globalVariable',
-  comment = 'comment',
-
   workflowStart = 'workflowStart',
   chatNode = 'chatNode',
 
@@ -155,6 +141,7 @@ export enum FlowNodeTypeEnum {
   loopStart = 'loopStart',
   loopEnd = 'loopEnd',
   formInput = 'formInput',
+  comment = 'comment',
   tool = 'tool',
   toolSet = 'toolSet'
 }

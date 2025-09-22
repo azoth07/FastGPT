@@ -1,6 +1,6 @@
 import React, { type Dispatch } from 'react';
 import { LoginPageTypeEnum } from '@/web/support/user/login/constants';
-import type { LoginSuccessResponse } from '@/global/support/api/userRes';
+import type { ResLogin } from '@/global/support/api/userRes';
 import { Box, Center, Flex, Link } from '@chakra-ui/react';
 import { useQuery } from '@tanstack/react-query';
 import { getWXLoginQR, getWXLoginResult } from '@/web/support/user/api';
@@ -23,7 +23,7 @@ import { useSystemStore } from '@/web/common/system/useSystemStore';
 import PolicyTip from './PolicyTip';
 
 interface Props {
-  loginSuccess: (e: LoginSuccessResponse) => void;
+  loginSuccess: (e: ResLogin) => void;
   setPageType: Dispatch<`${LoginPageTypeEnum}`>;
 }
 
@@ -55,7 +55,7 @@ const WechatForm = ({ setPageType, loginSuccess }: Props) => {
     {
       refetchInterval: 3 * 1000,
       enabled: !!wechatInfo?.code,
-      onSuccess(data: LoginSuccessResponse | undefined) {
+      onSuccess(data: ResLogin | undefined) {
         if (data) {
           removeFastGPTSem();
           loginSuccess(data);

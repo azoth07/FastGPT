@@ -18,6 +18,11 @@ import {
 } from '@chakra-ui/react';
 import { useTranslation } from 'next-i18next';
 import React, { useMemo, useRef, useState } from 'react';
+import {
+  ModelProviderList,
+  type ModelProviderIdType,
+  getModelProvider
+} from '@fastgpt/global/core/ai/provider';
 import MySelect from '@fastgpt/web/components/common/MySelect';
 import { ModelTypeEnum } from '@fastgpt/global/core/ai/model';
 import Avatar from '@fastgpt/web/components/common/Avatar';
@@ -90,8 +95,8 @@ export const ModelEditModal = ({
   onSuccess: () => void;
   onClose: () => void;
 }) => {
-  const { t, i18n } = useTranslation();
-  const { feConfigs, getModelProviders } = useSystemStore();
+  const { t } = useTranslation();
+  const { feConfigs } = useSystemStore();
 
   const { register, getValues, setValue, handleSubmit, watch, reset } =
     useForm<SystemModelItemType>({
@@ -106,13 +111,14 @@ export const ModelEditModal = ({
   const isRerankModel = modelData?.type === ModelTypeEnum.rerank;
 
   const provider = watch('provider');
+  const providerData = useMemo(() => getModelProvider(provider), [provider]);
 
-  const providerList = useRef<{ label: React.ReactNode; value: string }[]>(
-    getModelProviders(i18n.language).map((item) => ({
+  const providerList = useRef<{ label: any; value: ModelProviderIdType }[]>(
+    ModelProviderList.map((item) => ({
       label: (
         <HStack>
           <Avatar src={item.avatar} w={'1rem'} />
-          <Box>{item.name}</Box>
+          <Box>{t(item.name as any)}</Box>
         </HStack>
       ),
       value: item.id
@@ -467,26 +473,6 @@ export const ModelEditModal = ({
                       <Td textAlign={'right'}>
                         <Flex justifyContent={'flex-end'}>
                           <Switch {...register('normalization')} />
-                        </Flex>
-                      </Td>
-                    </Tr>
-                    <Tr>
-                      <Td>
-                        <HStack spacing={1}>
-                          <Box>{t('account_model:batch_size')}</Box>
-                        </HStack>
-                      </Td>
-                      <Td textAlign={'right'}>
-                        <Flex justifyContent={'flex-end'}>
-                          <MyNumberInput
-                            defaultValue={1}
-                            register={register}
-                            name="batchSize"
-                            min={1}
-                            step={1}
-                            isRequired
-                            {...InputStyles}
-                          />
                         </Flex>
                       </Td>
                     </Tr>

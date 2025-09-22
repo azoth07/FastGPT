@@ -137,7 +137,7 @@ const FolderSlideCard = ({
                 isInheritPermission={isInheritPermission}
                 hasParent={hasParent}
               >
-                {({ MemberListCard, onOpenManageModal }) => {
+                {({ MemberListCard, onOpenManageModal, onOpenAddMember }) => {
                   return (
                     <>
                       <Flex alignItems="center" justifyContent="space-between">
@@ -145,15 +145,26 @@ const FolderSlideCard = ({
                           {t('common:permission.Collaborator')}
                         </Box>
                         {managePer.permission.hasManagePer && (
-                          <MyTooltip label={t('common:permission.Manage')}>
-                            <MyIcon
-                              w="1rem"
-                              name="common/settingLight"
-                              cursor={'pointer'}
-                              _hover={{ color: 'primary.600' }}
-                              onClick={onOpenManageModal}
-                            />
-                          </MyTooltip>
+                          <HStack spacing={3}>
+                            <MyTooltip label={t('common:permission.Manage')}>
+                              <MyIcon
+                                w="1rem"
+                                name="common/settingLight"
+                                cursor={'pointer'}
+                                _hover={{ color: 'primary.600' }}
+                                onClick={onOpenManageModal}
+                              />
+                            </MyTooltip>
+                            <MyTooltip label={t('common:Add')}>
+                              <MyIcon
+                                w="1rem"
+                                name="support/permission/collaborator"
+                                cursor={'pointer'}
+                                _hover={{ color: 'primary.600' }}
+                                onClick={onOpenAddMember}
+                              />
+                            </MyTooltip>
+                          </HStack>
                         )}
                       </Flex>
                       <MemberListCard

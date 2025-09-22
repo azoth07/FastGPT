@@ -29,7 +29,7 @@ export async function dispatchDatasetConcat(
 
   const rrfConcatResults = datasetSearchResultConcat(
     quoteList.map((list) => ({
-      weight: 1,
+      k: 60,
       list
     }))
   );

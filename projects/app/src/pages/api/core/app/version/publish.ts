@@ -70,8 +70,8 @@ async function handler(req: ApiRequestProps<PostPublishAppProps>, res: NextApiRe
     );
 
     // update app
-    await MongoApp.updateOne(
-      { _id: appId },
+    await MongoApp.findByIdAndUpdate(
+      appId,
       {
         modules: nodes,
         edges,

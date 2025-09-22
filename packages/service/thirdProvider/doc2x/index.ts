@@ -86,11 +86,11 @@ export const useDoc2xServer = ({ apiKey }: { apiKey: string }) => {
     const uid = preupload_data.uid;
 
     // 2. Upload file to pre-signed URL with binary stream
+    const blob = new Blob([fileBuffer], { type: 'application/pdf' });
     const response = await axios
-      .put(upload_url, fileBuffer, {
+      .put(upload_url, blob, {
         headers: {
-          'Content-Type': 'application/pdf',
-          'Content-Length': fileBuffer.length.toString()
+          'Content-Type': 'application/pdf'
         }
       })
       .catch((error) => {

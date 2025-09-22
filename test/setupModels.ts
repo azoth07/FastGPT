@@ -1,4 +1,5 @@
 import { ModelTypeEnum } from 'packages/global/core/ai/model';
+import type { ModelProviderIdType } from 'packages/global/core/ai/provider';
 
 export default async function setupModels() {
   global.llmModelMap = new Map<string, any>();
@@ -16,7 +17,7 @@ export default async function setupModels() {
     defaultSystemChatPrompt: undefined,
     fieldMap: undefined,
     defaultConfig: undefined,
-    provider: 'OpenAI',
+    provider: 'OpenAI' as ModelProviderIdType,
     functionCall: false,
     toolChoice: false,
     maxContext: 4096,
@@ -37,7 +38,7 @@ export default async function setupModels() {
       defaultSystemChatPrompt: undefined,
       fieldMap: undefined,
       defaultConfig: undefined,
-      provider: 'OpenAI',
+      provider: 'OpenAI' as ModelProviderIdType,
       functionCall: false,
       toolChoice: false,
       maxContext: 4096,

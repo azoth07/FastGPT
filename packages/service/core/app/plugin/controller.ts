@@ -42,7 +42,7 @@ import type {
 import { isProduction } from '@fastgpt/global/common/system/constants';
 import { Output_Template_Error_Message } from '@fastgpt/global/core/workflow/template/output';
 import { splitCombinePluginId } from '@fastgpt/global/core/app/plugin/utils';
-import { getMCPToolRuntimeNode } from '@fastgpt/global/core/app/mcpTools/utils';
+import { getMCPParentId, getMCPToolRuntimeNode } from '@fastgpt/global/core/app/mcpTools/utils';
 import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
 import { getMCPChildren } from '../mcp';
 import { cloneDeep } from 'lodash';
@@ -504,17 +504,17 @@ const dbPluginFormat = (item: SystemPluginConfigSchemaType): SystemPluginTemplat
 
 /* FastsGPT-Pluign api: */
 function getCachedSystemPlugins() {
-  if (!global.systemToolsCache) {
-    global.systemToolsCache = {
+  if (!global.systemPlugins_cache) {
+    global.systemPlugins_cache = {
       expires: 0,
       data: [] as SystemPluginTemplateItemType[]
     };
   }
-  return global.systemToolsCache;
+  return global.systemPlugins_cache;
 }
 
 const cleanSystemPluginCache = () => {
-  global.systemToolsCache = undefined;
+  global.systemPlugins_cache = undefined;
 };
 
 export const refetchSystemPlugins = () => {
@@ -579,20 +579,15 @@ export const getSystemTools = async (): Promise<SystemPluginTemplateItemType[]> 
       .filter((item) => item.customConfig?.associatedPluginId)
       .map((item) => dbPluginFormat(item));
 
-    const concatTools = [...formatTools, ...dbPlugins];
-    concatTools.sort((a, b) => (a.pluginOrder ?? 0) - (b.pluginOrder ?? 0));
+    const plugins = [...formatTools, ...dbPlugins];
+    plugins.sort((a, b) => (a.pluginOrder ?? 0) - (b.pluginOrder ?? 0));
 
-    global.systemToolsCache = {
+    global.systemPlugins_cache = {
       expires: Date.now() + 30 * 60 * 1000, // 30 minutes
-      data: concatTools
+      data: plugins
     };
 
-    global.systemToolsTypeCache = {};
-    concatTools.forEach((item) => {
-      global.systemToolsTypeCache[item.templateType] = 1;
-    });
-
-    return concatTools;
+    return plugins;
   }
 };
 
@@ -613,11 +608,10 @@ export const getSystemToolById = async (id: string): Promise<SystemPluginTemplat
 };
 
 declare global {
-  var systemToolsCache:
+  var systemPlugins_cache:
     | {
         expires: number;
         data: SystemPluginTemplateItemType[];
       }
     | undefined;
-  var systemToolsTypeCache: Record<string, 1>;
 }

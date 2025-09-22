@@ -19,16 +19,16 @@ function RoleTags({ permission }: PermissionTagsProp) {
   const roleTagList = getRoleLabelList(permission);
 
   return (
-    <Flex gap="2" alignItems="center" flexWrap="wrap" minH="15px">
+    <Flex gap="2" alignItems="center">
       {roleTagList.map((item) => (
         <Tag
           mixBlendMode={'multiply'}
           key={item}
           colorSchema="blue"
           border="none"
-          py={1}
-          px={2}
-          fontSize={'2xs'}
+          py={2}
+          px={3}
+          fontSize={'xs'}
         >
           {t(item as any)}
         </Tag>
