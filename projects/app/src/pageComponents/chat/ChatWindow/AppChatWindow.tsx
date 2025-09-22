@@ -25,6 +25,11 @@ import { ChatSidebarPaneEnum } from '../constants';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
 import ChatHistorySidebar from '@/pageComponents/chat/slider/ChatSliderSidebar';
 import ChatSliderMobileDrawer from '@/pageComponents/chat/slider/ChatSliderMobileDrawer';
+import dynamic from 'next/dynamic';
+import { getNanoid } from '@fastgpt/global/common/string/tools';
+import { ChatErrEnum } from '@fastgpt/global/common/error/code/chat';
+
+const CustomPluginRunBox = dynamic(() => import('@/pageComponents/chat/CustomPluginRunBox'));
 
 type Props = {
   myApps: AppListItemType[];
@@ -33,7 +38,6 @@ type Props = {
 const AppChatWindow = ({ myApps }: Props) => {
   const { userInfo } = useUserStore();
   const { chatId, appId, outLinkAuthData } = useChatStore();
-  const { feConfigs } = useSystemStore();
 
   const { t } = useTranslation();
   const { isPc } = useSystem();
@@ -41,6 +45,8 @@ const AppChatWindow = ({ myApps }: Props) => {
   const forbidLoadChat = useContextSelector(ChatContext, (v) => v.forbidLoadChat);
   const onUpdateHistoryTitle = useContextSelector(ChatContext, (v) => v.onUpdateHistoryTitle);
 
+  const isPlugin = useContextSelector(ChatItemContext, (v) => v.isPlugin);
+  const onChangeChatId = useContextSelector(ChatContext, (v) => v.onChangeChatId);
   const chatBoxData = useContextSelector(ChatItemContext, (v) => v.chatBoxData);
   const datasetCiteData = useContextSelector(ChatItemContext, (v) => v.datasetCiteData);
   const setChatBoxData = useContextSelector(ChatItemContext, (v) => v.setChatBoxData);
@@ -73,6 +79,10 @@ const AppChatWindow = ({ myApps }: Props) => {
       errorToast: '',
       onError(e: any) {
         if (e?.code && e.code >= 502000) {
+          if (e?.statusText === ChatErrEnum.unAuthChat) {
+            onChangeChatId();
+            return;
+          }
           handlePaneChange(ChatSidebarPaneEnum.TEAM_APPS);
         }
       },
@@ -103,7 +113,7 @@ const AppChatWindow = ({ myApps }: Props) => {
         onMessage: generatingMessage
       });
 
-      const newTitle = getChatTitleFromChatMessage(GPTMessages2Chats(histories)[0]);
+      const newTitle = getChatTitleFromChatMessage(GPTMessages2Chats({ messages: histories })[0]);
 
       onUpdateHistoryTitle({ chatId, newTitle });
       setChatBoxData((state) => ({
@@ -153,16 +163,26 @@ const AppChatWindow = ({ myApps }: Props) => {
         />
 
         <Box flex={'1 0 0'} bg={'white'}>
-          <ChatBox
-            showEmptyIntro
-            appId={appId}
-            chatId={chatId}
-            isReady={!loading}
-            feedbackType={'user'}
-            chatType={ChatTypeEnum.chat}
-            outLinkAuthData={outLinkAuthData}
-            onStartChat={onStartChat}
-          />
+          {isPlugin ? (
+            <CustomPluginRunBox
+              appId={appId}
+              chatId={chatId}
+              outLinkAuthData={outLinkAuthData}
+              onNewChat={() => onChangeChatId(getNanoid())}
+              onStartChat={onStartChat}
+            />
+          ) : (
+            <ChatBox
+              showEmptyIntro
+              appId={appId}
+              chatId={chatId}
+              isReady={!loading}
+              feedbackType={'user'}
+              chatType={ChatTypeEnum.chat}
+              outLinkAuthData={outLinkAuthData}
+              onStartChat={onStartChat}
+            />
+          )}
         </Box>
       </Flex>
     </Flex>

@@ -9,7 +9,6 @@ import { getRunningUserInfoByTmbId } from '@fastgpt/service/support/user/team/ut
 import type { PostWorkflowDebugProps, PostWorkflowDebugResponse } from '@/global/core/workflow/api';
 import { NextAPI } from '@/service/middleware/entry';
 import { ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
-import { defaultApp } from '@/web/core/app/constants';
 import { WORKFLOW_MAX_RUN_TIMES } from '@fastgpt/service/core/workflow/constants';
 import { getLastInteractiveValue } from '@fastgpt/global/core/workflow/runtime/utils';
 import { getLocale } from '@fastgpt/service/common/middle/i18n';
@@ -21,10 +20,12 @@ async function handler(
   const {
     nodes = [],
     edges = [],
+    skipNodeQueue,
     variables = {},
     appId,
     query = [],
-    history = []
+    history = [],
+    chatConfig
   } = req.body as PostWorkflowDebugProps;
   if (!nodes) {
     return Promise.reject('Prams Error');
@@ -47,34 +48,34 @@ async function handler(
 
   // auth balance
   const { timezone, externalProvider } = await getUserChatInfoAndAuthTeamPoints(tmbId);
-  const lastInteractive = getLastInteractiveValue(history);
+  const interactive = getLastInteractiveValue(history);
 
   /* start process */
-  const { flowUsages, flowResponses, debugResponse, newVariables, workflowInteractiveResponse } =
-    await dispatchWorkFlow({
-      res,
-      lang: getLocale(req),
-      requestOrigin: req.headers.origin,
-      mode: 'debug',
-      timezone,
-      externalProvider,
-      uid: tmbId,
-      runningAppInfo: {
-        id: app._id,
-        teamId: app.teamId,
-        tmbId: app.tmbId
-      },
-      runningUserInfo: await getRunningUserInfoByTmbId(tmbId),
-      runtimeNodes: nodes,
-      runtimeEdges: edges,
-      lastInteractive,
-      variables,
-      query: query,
-      chatConfig: defaultApp.chatConfig,
-      histories: history,
-      stream: false,
-      maxRunTimes: WORKFLOW_MAX_RUN_TIMES
-    });
+  const { flowUsages, debugResponse, newVariables } = await dispatchWorkFlow({
+    res,
+    lang: getLocale(req),
+    requestOrigin: req.headers.origin,
+    mode: 'debug',
+    timezone,
+    externalProvider,
+    uid: tmbId,
+    runningAppInfo: {
+      id: app._id,
+      teamId: app.teamId,
+      tmbId: app.tmbId
+    },
+    runningUserInfo: await getRunningUserInfoByTmbId(tmbId),
+    runtimeNodes: nodes,
+    runtimeEdges: edges,
+    defaultSkipNodeQueue: skipNodeQueue,
+    lastInteractive: interactive,
+    variables,
+    query: query,
+    chatConfig: chatConfig || app.chatConfig,
+    histories: history,
+    stream: false,
+    maxRunTimes: WORKFLOW_MAX_RUN_TIMES
+  });
 
   createChatUsage({
     appName: `${app.name}-Debug`,
@@ -86,10 +87,8 @@ async function handler(
   });
 
   return {
-    ...debugResponse,
-    newVariables,
-    flowResponses,
-    workflowInteractiveResponse
+    ...debugResponse!,
+    newVariables
   };
 }
 

@@ -49,12 +49,17 @@ export type AppSchema = {
   teamTags: string[];
   inheritPermission?: boolean;
 
+  // if access the app by favourite or quick
+  favourite?: boolean;
+  quick?: boolean;
+
   // abandon
   defaultPermission?: number;
 };
 
 export type AppListItemType = {
   _id: string;
+  parentId: ParentIdType;
   tmbId: string;
   name: string;
   avatar: string;
@@ -157,11 +162,23 @@ export type VariableItemType = {
 
   // input
   maxLength?: number;
+  // password
+  minLength?: number;
   // numberInput
   max?: number;
   min?: number;
   // select
   list?: { label: string; value: string }[];
+  // file
+  canSelectFile?: boolean;
+  canSelectImg?: boolean;
+  maxFiles?: number;
+  // timeSelect
+  timeGranularity?: 'second' | 'minute' | 'hour' | 'day';
+  timeType?: 'point' | 'range';
+  timeRangeStart?: string;
+  timeRangeEnd?: string;
+
   // @deprecated
   enums?: { value: string; label: string }[];
 };

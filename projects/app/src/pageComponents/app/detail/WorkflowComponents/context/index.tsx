@@ -54,12 +54,12 @@ import { cloneDeep } from 'lodash';
 import { type AppVersionSchemaType } from '@fastgpt/global/core/app/version';
 import WorkflowInitContextProvider, { WorkflowNodeEdgeContext } from './workflowInitContext';
 import WorkflowEventContextProvider from './workflowEventContext';
-import { getAppConfigByDiff } from '@/web/core/app/diff';
 import WorkflowStatusContextProvider from './workflowStatusContext';
 import { type ChatItemType, type UserChatItemValueItemType } from '@fastgpt/global/core/chat/type';
 import { type WorkflowInteractiveResponseType } from '@fastgpt/global/core/workflow/template/system/interactive/type';
 import { FlowNodeOutputTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
 import { useChatStore } from '@/web/core/chat/context/useChatStore';
+import type { WorkflowDebugResponse } from '@fastgpt/service/core/workflow/dispatch/type';
 
 /* 
   Context
@@ -157,6 +157,7 @@ type WorkflowContextType = {
   nodeList: FlowNodeItemType[];
 
   onUpdateNodeError: (node: string, isError: Boolean) => void;
+  onRemoveError: () => void;
   onResetNode: (e: { id: string; node: FlowNodeTemplateType }) => void;
   onChangeNode: (e: FlowNodeChangeProps) => void;
   getNodeDynamicInputs: (nodeId: string) => FlowNodeInputItemType[];
@@ -265,7 +266,9 @@ type WorkflowContextType = {
 export type DebugDataType = {
   runtimeNodes: RuntimeNodeItemType[];
   runtimeEdges: RuntimeEdgeItemType[];
-  nextRunNodes: RuntimeNodeItemType[];
+  entryNodeIds: string[];
+  skipNodeQueue?: WorkflowDebugResponse['skipNodeQueue'];
+
   variables: Record<string, any>;
   history?: ChatItemType[];
   query?: UserChatItemValueItemType[];
@@ -401,6 +404,9 @@ export const WorkflowContext = createContext<WorkflowContextType>({
     isSaved?: boolean;
   }): boolean {
     throw new Error('Function not implemented.');
+  },
+  onRemoveError: function (): void {
+    throw new Error('Function not implemented.');
   }
 });
 
@@ -468,6 +474,17 @@ const WorkflowContextProvider = ({
           item.selected = true;
           //@ts-ignore
           item.data.isError = isError;
+        }
+        return item;
+      });
+    });
+  });
+  const onRemoveError = useMemoizedFn(() => {
+    setNodes((state) => {
+      return state.map((item) => {
+        if (item.data.isError) {
+          item.data.isError = false;
+          item.selected = false;
         }
         return item;
       });
@@ -625,6 +642,7 @@ const WorkflowContextProvider = ({
     const checkResults = checkWorkflowNodeAndConnection({ nodes, edges });
 
     if (!checkResults) {
+      onRemoveError();
       const storeWorkflow = uiWorkflow2StoreWorkflow({ nodes, edges });
 
       return storeWorkflow;
@@ -670,57 +688,36 @@ const WorkflowContextProvider = ({
         }))
       );
 
-      // 2. Set isEntry field and get entryNodes
+      // 2. Set isEntry field and get entryNodes, and set running status
       const runtimeNodes = debugData.runtimeNodes.map((item) => ({
         ...item,
-        isEntry: debugData.nextRunNodes.some((node) => node.nodeId === item.nodeId)
+        isEntry: debugData.entryNodeIds.some((id) => id === item.nodeId)
       }));
-      const entryNodes = runtimeNodes.filter((item) => item.isEntry);
-
-      const runtimeNodeStatus: Record<string, string> = entryNodes
-        .map((node) => {
-          const status = checkNodeRunStatus({
-            node,
-            runtimeEdges: debugData?.runtimeEdges || []
-          });
-
-          return {
-            nodeId: node.nodeId,
-            status
-          };
-        })
-        .reduce(
-          (acc, cur) => ({
-            ...acc,
-            [cur.nodeId]: cur.status
-          }),
-          {}
-        );
-
-      // 3. Set entry node status to running
-      entryNodes.forEach((node) => {
-        if (runtimeNodeStatus[node.nodeId] !== 'wait') {
+      const entryNodes = runtimeNodes.filter((item) => {
+        if (item.isEntry) {
           onChangeNode({
-            nodeId: node.nodeId,
+            nodeId: item.nodeId,
             type: 'attr',
             key: 'debugResult',
             value: defaultRunningStatus
           });
+          return true;
         }
       });
 
       try {
-        // 4. Run one step
+        // 3. Run one step
         const {
-          finishedEdges,
-          finishedNodes,
-          nextStepRunNodes,
-          flowResponses,
-          newVariables,
-          workflowInteractiveResponse
+          memoryEdges,
+          memoryNodes,
+          entryNodeIds,
+          skipNodeQueue,
+          nodeResponses,
+          newVariables
         } = await postWorkflowDebug({
           nodes: runtimeNodes,
           edges: debugData.runtimeEdges,
+          skipNodeQueue: debugData.skipNodeQueue,
           variables: {
             appId,
             cTime: formatTime2YMDHMW(),
@@ -728,53 +725,37 @@ const WorkflowContextProvider = ({
           },
           query: debugData.query, // 添加 query 参数
           history: debugData.history,
-          appId
+          appId,
+          chatConfig: appDetail.chatConfig
         });
 
-        // 5. Store debug result
+        // 4. Store debug result
         setWorkflowDebugData({
-          runtimeNodes: finishedNodes,
-          // edges need to save status
-          runtimeEdges: finishedEdges,
-          nextRunNodes: nextStepRunNodes,
-          variables: newVariables,
-          workflowInteractiveResponse: workflowInteractiveResponse
+          runtimeNodes: memoryNodes,
+          runtimeEdges: memoryEdges,
+          entryNodeIds,
+          skipNodeQueue,
+          variables: newVariables
         });
 
-        // 6. selected entry node and Update entry node debug result
+        // 5. selected entry node and Update entry node debug result
         setNodes((state) =>
           state.map((node) => {
             const isEntryNode = entryNodes.some((item) => item.nodeId === node.data.nodeId);
 
-            if (!isEntryNode || runtimeNodeStatus[node.data.nodeId] === 'wait') return node;
-
-            const result = flowResponses.find((item) => item.nodeId === node.data.nodeId);
-
-            if (runtimeNodeStatus[node.data.nodeId] === 'skip') {
-              return {
-                ...node,
-                selected: isEntryNode,
-                data: {
-                  ...node.data,
-                  debugResult: {
-                    status: 'skipped',
-                    showResult: true,
-                    isExpired: false
-                  }
-                }
-              };
-            }
+            const result = nodeResponses[node.data.nodeId];
+            if (!result) return node;
             return {
               ...node,
-              selected: isEntryNode,
+              selected: result.type === 'run' && isEntryNode,
               data: {
                 ...node.data,
                 debugResult: {
-                  status: 'success',
-                  response: result,
+                  status: result.type === 'run' ? 'success' : 'skipped',
+                  response: result.response,
                   showResult: true,
                   isExpired: false,
-                  workflowInteractiveResponse: workflowInteractiveResponse
+                  workflowInteractiveResponse: result.interactiveResponse
                 }
               }
             };
@@ -782,13 +763,9 @@ const WorkflowContextProvider = ({
         );
 
         // Check for an empty response(Skip node)
-        if (
-          !workflowInteractiveResponse &&
-          flowResponses.length === 0 &&
-          nextStepRunNodes.length > 0
-        ) {
-          onNextNodeDebug(debugData);
-        }
+        // if (!workflowInteractiveResponse && flowResponses.length === 0 && entryNodeIds.length > 0) {
+        //   onNextNodeDebug(debugData);
+        // }
       } catch (error) {
         entryNodes.forEach((node) => {
           onChangeNode({
@@ -805,7 +782,7 @@ const WorkflowContextProvider = ({
         console.log(error);
       }
     },
-    [appId, onChangeNode, setNodes]
+    [appId, onChangeNode, setNodes, appDetail.chatConfig]
   );
   const onStopNodeDebug = useMemoizedFn(() => {
     setWorkflowDebugData(undefined);
@@ -839,7 +816,10 @@ const WorkflowContextProvider = ({
       const data: DebugDataType = {
         runtimeNodes,
         runtimeEdges,
-        nextRunNodes: runtimeNodes.filter((node) => node.nodeId === entryNodeId),
+        entryNodeIds: runtimeNodes
+          .filter((node) => node.nodeId === entryNodeId)
+          .map((node) => node.nodeId),
+        skipNodeQueue: [],
         variables,
         query,
         history
@@ -1025,6 +1005,7 @@ const WorkflowContextProvider = ({
       // node
       nodeList,
       onUpdateNodeError,
+      onRemoveError,
       onResetNode,
       onChangeNode,
       getNodeDynamicInputs,
@@ -1075,6 +1056,7 @@ const WorkflowContextProvider = ({
       onChangeNode,
       onDelEdge,
       onNextNodeDebug,
+      onRemoveError,
       onResetNode,
       onStartNodeDebug,
       onStopNodeDebug,
