@@ -120,8 +120,10 @@ export default NextAPI(handler);
 export const config = {
   api: {
     bodyParser: {
+
       sizeLimit: '20mb'
     },
     responseLimit: '20mb'
+
   }
 };

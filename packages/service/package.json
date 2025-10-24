@@ -36,7 +36,7 @@
     "jsonpath-plus": "^10.3.0",
     "jsonwebtoken": "^9.0.2",
     "lodash": "^4.17.21",
-    "mammoth": "^1.6.0",
+    "mammoth": "^1.11.0",
     "minio": "^8.0.5",
     "mongoose": "^8.10.1",
     "multer": "2.0.2",
@@ -54,7 +54,8 @@
     "tiktoken": "1.0.17",
     "tunnel": "^0.0.6",
     "turndown": "^7.1.2",
-    "winston": "^3.17.0"
+    "winston": "^3.17.0",
+    "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/cookie": "^0.5.2",
