@@ -21,6 +21,7 @@ import MyIcon from '@fastgpt/web/components/common/Icon';
 import Avatar from '@fastgpt/web/components/common/Avatar';
 import type {
   InteractiveBasicType,
+  PaymentPauseInteractive,
   UserInputInteractive,
   UserSelectInteractive
 } from '@fastgpt/global/core/workflow/template/system/interactive/type';
@@ -31,7 +32,7 @@ import { SelectOptionsComponent, FormInputComponent } from './Interactive/Intera
 import { extractDeepestInteractive } from '@fastgpt/global/core/workflow/runtime/utils';
 import { useContextSelector } from 'use-context-selector';
 import { type OnOpenCiteModalProps } from '@/web/core/chat/context/chatItemContext';
-import { ChatBoxContext } from '../ChatContainer/ChatBox/Provider';
+import { WorkflowAuthContext } from '../ChatContainer/context/workflowAuthContext';
 import { useCreation } from 'ahooks';
 
 const accordionButtonStyle = {
@@ -98,9 +99,9 @@ const RenderText = React.memo(function RenderText({
   chatItemDataId: string;
   onOpenCiteModal?: (e?: OnOpenCiteModalProps) => void;
 }) {
-  const appId = useContextSelector(ChatBoxContext, (v) => v.appId);
-  const chatId = useContextSelector(ChatBoxContext, (v) => v.chatId);
-  const outLinkAuthData = useContextSelector(ChatBoxContext, (v) => v.outLinkAuthData);
+  const appId = useContextSelector(WorkflowAuthContext, (v) => v.appId);
+  const chatId = useContextSelector(WorkflowAuthContext, (v) => v.chatId);
+  const outLinkAuthData = useContextSelector(WorkflowAuthContext, (v) => v.outLinkAuthData);
 
   const source = useMemo(() => {
     if (!text) return '';
@@ -218,7 +219,7 @@ const RenderUserFormInteractive = React.memo(function RenderFormInput({
   const defaultValues = useMemo(() => {
     if (interactive.type === 'userInput') {
       return interactive.params.inputForm?.reduce((acc: Record<string, any>, item, index) => {
-        acc[`field_${index}`] = !!item.value ? item.value : item.defaultValue;
+        acc[item.key] = !!item.value ? item.value : item.defaultValue;
         return acc;
       }, {});
     }
@@ -229,9 +230,8 @@ const RenderUserFormInteractive = React.memo(function RenderFormInput({
     (data: Record<string, any>) => {
       const finalData: Record<string, any> = {};
       interactive.params.inputForm?.forEach((item, index) => {
-        const fieldName = `field_${index}`;
-        if (fieldName in data) {
-          finalData[item.label] = data[fieldName];
+        if (item.key in data) {
+          finalData[item.key] = data[item.key];
         }
       });
 
@@ -253,6 +253,32 @@ const RenderUserFormInteractive = React.memo(function RenderFormInput({
         )}
       />
     </Flex>
+  );
+});
+const RenderPaymentPauseInteractive = React.memo(function RenderPaymentPauseInteractive({
+  interactive
+}: {
+  interactive: InteractiveBasicType & PaymentPauseInteractive;
+}) {
+  const { t } = useTranslation();
+
+  return interactive.params.continue ? (
+    <Box>{t('chat:task_has_continued')}</Box>
+  ) : (
+    <>
+      <Box color={'myGray.500'}>{t(interactive.params.description)}</Box>
+      <Button
+        maxW={'250px'}
+        onClick={() => {
+          onSendPrompt({
+            text: 'Continue',
+            isInteractivePrompt: true
+          });
+        }}
+      >
+        {t('chat:continue_run')}
+      </Button>
+    </>
   );
 });
 
@@ -298,6 +324,9 @@ const AIResponseBox = ({
     }
     if (finalInteractive.type === 'userInput') {
       return <RenderUserFormInteractive interactive={finalInteractive} />;
+    }
+    if (finalInteractive.type === 'paymentPause') {
+      return <RenderPaymentPauseInteractive interactive={finalInteractive} />;
     }
   }
   return null;

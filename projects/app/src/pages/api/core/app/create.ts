@@ -2,8 +2,8 @@ import { NextAPI } from '@/service/middleware/entry';
 import { CommonErrEnum } from '@fastgpt/global/common/error/code/common';
 import type { ParentIdType } from '@fastgpt/global/common/parentFolder/type';
 import { parseParentIdInMongo } from '@fastgpt/global/common/parentFolder/utils';
-import type { AppTypeEnum } from '@fastgpt/global/core/app/constants';
-import { AppFolderTypeList } from '@fastgpt/global/core/app/constants';
+import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
+import { AppFolderTypeList, ToolTypeList, AppTypeList } from '@fastgpt/global/core/app/constants';
 import type { AppSchema } from '@fastgpt/global/core/app/type';
 import { type ShortUrlParams } from '@fastgpt/global/support/marketing/type';
 import {
@@ -39,11 +39,14 @@ export type CreateAppBody = {
   modules: AppSchema['modules'];
   edges?: AppSchema['edges'];
   chatConfig?: AppSchema['chatConfig'];
+
+  templateId?: string;
   utmParams?: ShortUrlParams;
 };
 
 async function handler(req: ApiRequestProps<CreateAppBody>) {
-  const { parentId, name, avatar, intro, type, modules, edges, chatConfig, utmParams } = req.body;
+  let { parentId, name, avatar, intro, type, modules, edges, chatConfig, templateId, utmParams } =
+    req.body;
 
   if (!name || !type || !Array.isArray(modules)) {
     return Promise.reject(CommonErrEnum.inheritPermissionError);
@@ -91,7 +94,8 @@ async function handler(req: ApiRequestProps<CreateAppBody>) {
     teamId,
     tmbId,
     userAvatar: tmb?.avatar,
-    username: tmb?.user?.username
+    username: tmb?.user?.username,
+    templateId
   });
 
   pushTrack.createApp({
@@ -131,12 +135,13 @@ export const onCreateApp = async ({
   pluginData,
   username,
   userAvatar,
+  templateId,
   session
 }: {
   parentId?: ParentIdType;
   name?: string;
   avatar?: string;
-  type?: AppTypeEnum;
+  type: AppTypeEnum;
   modules?: AppSchema['modules'];
   edges?: AppSchema['edges'];
   chatConfig?: AppSchema['chatConfig'];
@@ -146,8 +151,20 @@ export const onCreateApp = async ({
   pluginData?: AppSchema['pluginData'];
   username?: string;
   userAvatar?: string;
+  templateId?: string;
   session?: ClientSession;
 }) => {
+  if (parentId) {
+    const parentApp = await MongoApp.findById(parentId, 'type').lean();
+
+    if (ToolTypeList.includes(type) && parentApp?.type !== AppTypeEnum.toolFolder) {
+      return Promise.reject('tool type can only be created in tool folder');
+    }
+    if (AppTypeList.includes(type) && parentApp?.type !== AppTypeEnum.folder) {
+      return Promise.reject('agent type can only be created in agent folder');
+    }
+  }
+
   const create = async (session: ClientSession) => {
     const [app] = await MongoApp.create(
       [
@@ -163,7 +180,8 @@ export const onCreateApp = async ({
           chatConfig,
           type,
           version: 'v2',
-          pluginData
+          pluginData,
+          templateId
         }
       ],
       { session, ordered: true }
@@ -198,6 +216,8 @@ export const onCreateApp = async ({
       resourceType: PerResourceTypeEnum.app
     });
 
+    await getS3AvatarSource().refreshAvatar(avatar, undefined, session);
+
     (async () => {
       addAuditLog({
         tmbId,
@@ -209,8 +229,6 @@ export const onCreateApp = async ({
         }
       });
     })();
-
-    await getS3AvatarSource().refreshAvatar(avatar, undefined, session);
 
     return appId;
   };
