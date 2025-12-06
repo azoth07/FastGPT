@@ -14,11 +14,11 @@ export const connectPg = async (): Promise<Pool> => {
     max: Number(process.env.DB_MAX_LINK || 20),
     min: 10,
     keepAlive: true,
-    idleTimeoutMillis: 600000,
-    connectionTimeoutMillis: 20000,
-    query_timeout: 30000,
-    statement_timeout: 40000,
-    idle_in_transaction_session_timeout: 60000
+    idleTimeoutMillis: 6000000,
+    connectionTimeoutMillis: 200000,
+    query_timeout: 300000,
+    statement_timeout: 400000,
+    idle_in_transaction_session_timeout: 600000
   });
 
   global.pgClient.on('error', async (err) => {
