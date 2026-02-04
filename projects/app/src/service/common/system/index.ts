@@ -108,25 +108,32 @@ export async function getInitConfig() {
 }
 
 const defaultFeConfigs: FastGPTFeConfigsType = {
-  show_emptyChat: true,
-  show_git: true,
-  docUrl: 'https://doc.fastgpt.io',
-  openAPIDocUrl: 'https://doc.fastgpt.io/docs/introduction/development/openapi/intro',
-  submitPluginRequestUrl: 'https://github.com/labring/fastgpt-plugin/issues',
+
+
+
+  show_emptyChat: false,
+  show_git: false,
+  docUrl: '',
+  openAPIDocUrl: '',
+  submitPluginRequestUrl: '',
+
+
   appTemplateCourse:
-    'https://fael3z0zfze.feishu.cn/wiki/CX9wwMGyEi5TL6koiLYcg7U0nWb?fromScene=spaceOverview',
-  systemTitle: 'FastGPT',
+    '',
+  systemTitle: 'AI Agent',
   concatMd:
-    '项目开源地址: [FastGPT GitHub](https://github.com/labring/FastGPT)\n交流群: ![](https://oss.laf.run/otnvvf-imgs/fastgpt-feishu1.png)',
+    '',
   limit: {
     exportDatasetLimitMinutes: 0,
     websiteSyncLimitMinuted: 0
   },
   scripts: [],
   favicon: '/favicon.ico',
+
   chineseRedirectUrl: process.env.CHINESE_IP_REDIRECT_URL || '',
   uploadFileMaxSize: Number(process.env.UPLOAD_FILE_MAX_SIZE || 1000),
   uploadFileMaxAmount: Number(process.env.UPLOAD_FILE_MAX_AMOUNT || 1000)
+
 };
 
 export async function initSystemConfig() {

@@ -16,12 +16,13 @@ export const connectPg = async (): Promise<Pool> => {
     min: 15, // 调整为 max 的 50%
     keepAlive: true,
 
+
     // 超时配置
-    idleTimeoutMillis: 1800000, // 30分钟，减少频繁重连
-    connectionTimeoutMillis: 30000, // 30秒，给予充足的连接获取时间
-    query_timeout: 60000, // 60秒，向量检索可能需要更长时间
-    statement_timeout: 90000, // 90秒，比 query_timeout 长
-    idle_in_transaction_session_timeout: 60000, // 保持 60秒
+    idleTimeoutMillis: 18000000, // 30分钟，减少频繁重连
+    connectionTimeoutMillis: 300000, // 30秒，给予充足的连接获取时间
+    query_timeout: 600000, // 60秒，向量检索可能需要更长时间
+    statement_timeout: 900000, // 90秒，比 query_timeout 长
+    idle_in_transaction_session_timeout: 600000, // 保持 60秒
 
     // 额外推荐配置
     allowExitOnIdle: false, // 防止连接池过早关闭
