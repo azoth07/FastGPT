@@ -19,7 +19,7 @@ import { useRouter } from 'next/router';
 
 import AppCard from '../WorkflowComponents/AppCard';
 import { useSystem } from '@fastgpt/web/hooks/useSystem';
-import { useRequest2 } from '@fastgpt/web/hooks/useRequest';
+import { useRequest } from '@fastgpt/web/hooks/useRequest';
 import MyModal from '@fastgpt/web/components/common/MyModal';
 import { formatTime2YMDHMS } from '@fastgpt/global/common/string/time';
 import { useToast } from '@fastgpt/web/hooks/useToast';
@@ -75,7 +75,7 @@ const Header = () => {
 
   const { lastAppListRouteType } = useSystemStore();
 
-  const { runAsync: onClickSave, loading } = useRequest2(
+  const { runAsync: onClickSave, loading } = useRequest(
     async ({
       isPublish,
       versionName = formatTime2YMDHMS(new Date())
@@ -135,14 +135,19 @@ const Header = () => {
           mt={[2, 0]}
           pl={[2, 4]}
           pr={[2, 6]}
-          borderBottom={'base'}
           alignItems={['flex-start', 'center']}
           userSelect={'none'}
           h={['auto', '67px']}
           flexWrap={'wrap'}
+          position={'fixed'}
+          top={0}
+          left={0}
+          right={0}
+          zIndex={100}
           {...(currentTab === TabEnum.appEdit
             ? {
-                bg: 'myGray.25'
+                bg: 'rgba(255, 255, 255, 0.70)',
+                backdropFilter: 'blur(6px)'
               }
             : {
                 bg: 'transparent',
@@ -186,7 +191,8 @@ const Header = () => {
                   icon={<MyIcon name={'history'} w={'18px'} />}
                   aria-label={''}
                   size={'sm'}
-                  w={'30px'}
+                  w={'34px'}
+                  h={'34px'}
                   variant={'whitePrimary'}
                   onClick={() => {
                     setShowHistoryModal(true);
@@ -194,8 +200,9 @@ const Header = () => {
                 />
               )}
               <Button
-                size={'sm'}
                 leftIcon={<MyIcon name={'core/workflow/debug'} w={['14px', '16px']} />}
+                w={'81px'}
+                h={'34px'}
                 variant={'whitePrimary'}
                 flexShrink={0}
                 onClick={() => {
@@ -209,6 +216,7 @@ const Header = () => {
               </Button>
               {!showHistoryModal && (
                 <SaveButton
+                  colorSchema={'black'}
                   isLoading={loading}
                   onClickSave={onClickSave}
                   checkData={() => !!flowData2StoreDataAndCheck()}

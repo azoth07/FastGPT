@@ -1,9 +1,11 @@
 import { ObjectIdSchema } from '@fastgpt/global/common/type/mongo';
+import { ReadStream } from 'fs';
 import { z } from 'zod';
 
 export const CreateUploadDatasetFileParamsSchema = z.object({
   filename: z.string().nonempty(),
-  datasetId: ObjectIdSchema
+  datasetId: ObjectIdSchema,
+  maxFileSize: z.number().positive().optional()
 });
 export type CreateUploadDatasetFileParams = z.infer<typeof CreateUploadDatasetFileParamsSchema>;
 
@@ -15,8 +17,7 @@ export const CreateGetDatasetFileURLParamsSchema = z.object({
 export type CreateGetDatasetFileURLParams = z.infer<typeof CreateGetDatasetFileURLParamsSchema>;
 
 export const DeleteDatasetFilesByPrefixParamsSchema = z.object({
-  datasetId: ObjectIdSchema.optional(),
-  rawPrefix: z.string().nonempty().optional()
+  datasetId: ObjectIdSchema.optional()
 });
 export type DeleteDatasetFilesByPrefixParams = z.infer<
   typeof DeleteDatasetFilesByPrefixParamsSchema
@@ -44,9 +45,20 @@ export const ParsedFileContentS3KeyParamsSchema = z.object({
 });
 export type ParsedFileContentS3KeyParams = z.infer<typeof ParsedFileContentS3KeyParamsSchema>;
 
-export const UploadDatasetFileByBufferParamsSchema = z.object({
-  datasetId: ObjectIdSchema,
-  buffer: z.instanceof(Buffer),
-  filename: z.string().nonempty()
-});
-export type UploadDatasetFileByBufferParams = z.infer<typeof UploadDatasetFileByBufferParamsSchema>;
+export const UploadParamsSchema = z.union([
+  z.object({
+    datasetId: ObjectIdSchema,
+    filename: z.string().nonempty(),
+    buffer: z.instanceof(Buffer),
+    contentType: z.string().optional()
+  }),
+
+  z.object({
+    datasetId: ObjectIdSchema,
+    filename: z.string().nonempty(),
+    stream: z.instanceof(ReadStream),
+    size: z.int().positive().optional(),
+    contentType: z.string().optional()
+  })
+]);
+export type UploadParams = z.input<typeof UploadParamsSchema>;

@@ -6,8 +6,10 @@ import { addLog } from '@fastgpt/service/common/system/log';
 import { ChatRoleEnum, ChatSourceEnum } from '@fastgpt/global/core/chat/constants';
 import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
 import { dispatchWorkFlow } from '@fastgpt/service/core/workflow/dispatch';
-import type { ChatCompletionCreateParams } from '@fastgpt/global/core/ai/type.d';
-import type { ChatCompletionMessageParam } from '@fastgpt/global/core/ai/type.d';
+import type {
+  ChatCompletionCreateParams,
+  ChatCompletionMessageParam
+} from '@fastgpt/global/core/ai/type.d';
 import {
   getWorkflowEntryNodeIds,
   getMaxHistoryLimitFromNodes,
@@ -18,11 +20,15 @@ import {
 } from '@fastgpt/global/core/workflow/runtime/utils';
 import { GPTMessages2Chats, chatValue2RuntimePrompt } from '@fastgpt/global/core/chat/adapt';
 import { getChatItems } from '@fastgpt/service/core/chat/controller';
-import { saveChat, updateInteractiveChat } from '@fastgpt/service/core/chat/saveChat';
+import {
+  type Props as SaveChatProps,
+  saveChat,
+  updateInteractiveChat
+} from '@fastgpt/service/core/chat/saveChat';
 import { responseWrite } from '@fastgpt/service/common/response';
 import { authOutLinkChatStart } from '@/service/support/permission/auth/outLink';
+import { recordAppUsage } from '@fastgpt/service/core/app/record/utils';
 import { pushResult2Remote, addOutLinkUsage } from '@fastgpt/service/support/outLink/tools';
-import requestIp from 'request-ip';
 import { getUsageSourceByAuthType } from '@fastgpt/global/support/wallet/usage/tools';
 import { authTeamSpaceToken } from '@/service/support/permission/auth/team';
 import {
@@ -61,6 +67,8 @@ import { UserError } from '@fastgpt/global/common/error/utils';
 import { getLocale } from '@fastgpt/service/common/middle/i18n';
 import { formatTime2YMDHM } from '@fastgpt/global/common/string/time';
 import { LimitTypeEnum, teamFrequencyLimit } from '@fastgpt/service/common/api/frequencyLimit';
+import { getIpFromRequest } from '@fastgpt/service/common/geo';
+import { pushTrack } from '@fastgpt/service/common/middle/tracks/utils';
 
 type FastGptWebChatProps = {
   chatId?: string; // undefined: get histories from messages, '': new chat, 'xxxxx': get histories from db
@@ -84,8 +92,8 @@ type AuthResponseType = {
   teamId: string;
   tmbId: string;
   app: AppSchema;
-  responseDetail?: boolean;
-  showNodeStatus?: boolean;
+  showCite?: boolean;
+  showRunningStatus?: boolean;
   authType: `${AuthUserTypeEnum}`;
   apikey?: string;
   responseAllData: boolean;
@@ -114,9 +122,9 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
     metadata
   } = req.body as Props;
 
-  const originIp = requestIp.getClientIp(req);
-
   const startTime = Date.now();
+
+  const originIp = getIpFromRequest(req);
 
   try {
     if (!Array.isArray(messages)) {
@@ -150,13 +158,13 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       teamId,
       tmbId,
       app,
-      responseDetail,
+      showCite,
       authType,
       sourceName,
       apikey,
       responseAllData,
       outLinkUserId = customUid,
-      showNodeStatus
+      showRunningStatus
     } = await (async () => {
       // share chat
       if (shareId && outLinkUid) {
@@ -196,7 +204,9 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       return;
     }
 
-    retainDatasetCite = retainDatasetCite && !!responseDetail;
+    pushTrack.teamChatQPM({ teamId });
+
+    retainDatasetCite = retainDatasetCite && !!showCite;
     const isPlugin = app.type === AppTypeEnum.workflowTool;
 
     // Check message type
@@ -227,7 +237,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
 
     // Get and concat history;
     const limit = getMaxHistoryLimitFromNodes(app.modules);
-    const [{ histories }, { nodes, edges, chatConfig }, chatDetail] = await Promise.all([
+    const [{ histories }, { versionId, nodes, edges, chatConfig }, chatDetail] = await Promise.all([
       getChatItems({
         appId: app._id,
         chatId,
@@ -266,8 +276,10 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       detail,
       streamResponse: stream,
       id: chatId,
-      showNodeStatus
+      showNodeStatus: showRunningStatus
     });
+
+    const saveChatId = chatId || getNanoid(24);
 
     /* start flow controller */
     const {
@@ -276,10 +288,12 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       assistantResponses,
       newVariables,
       durationSeconds,
-      system_memories
+      system_memories,
+      customFeedbacks
     } = await (async () => {
       if (app.version === 'v2') {
         return dispatchWorkFlow({
+          apiVersion: 'v1',
           res,
           lang: getLocale(req),
           requestOrigin: req.headers.origin,
@@ -295,7 +309,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
           runningUserInfo: await getRunningUserInfoByTmbId(tmbId),
           uid: String(outLinkUserId || tmbId),
 
-          chatId,
+          chatId: saveChatId,
           responseChatItemId,
           runtimeNodes,
           runtimeEdges: storeEdges2RuntimeEdges(edges, interactive),
@@ -314,7 +328,6 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
     })();
 
     // save chat
-    const isOwnerUse = !shareId && !spaceTeamId && String(tmbId) === String(app.tmbId);
     const source = (() => {
       if (shareId) {
         return ChatSourceEnum.share;
@@ -339,19 +352,19 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       obj: ChatRoleEnum.AI,
       value: assistantResponses,
       [DispatchNodeResponseKeyEnum.nodeResponse]: flowResponses,
-      memories: system_memories
+      memories: system_memories,
+      customFeedbacks
     };
 
-    const saveChatId = chatId || getNanoid(24);
-    const params = {
+    const params: SaveChatProps = {
       chatId: saveChatId,
       appId: app._id,
+      versionId,
       teamId,
       tmbId: tmbId,
       nodes,
       appChatConfig: chatConfig,
       variables: newVariables,
-      isUpdateUseTime: isOwnerUse && source === ChatSourceEnum.online, // owner update use time
       newTitle,
       shareId,
       outLinkUid: outLinkUserId,
@@ -360,8 +373,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       userContent: userQuestion,
       aiContent: aiResponse,
       metadata: {
-        originIp,
-        ...metadata
+        ...metadata,
+        originIp
       },
       durationSeconds
     };
@@ -371,12 +384,21 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       await saveChat(params);
     }
 
+    const isOwnerUse = !shareId && !spaceTeamId && String(tmbId) === String(app.tmbId);
+    if (isOwnerUse && source === ChatSourceEnum.online) {
+      await recordAppUsage({
+        appId: app._id,
+        tmbId,
+        teamId
+      });
+    }
+
     addLog.info(`completions running time: ${(Date.now() - startTime) / 1000}s`);
 
     /* select fe response field */
     const feResponseData = responseAllData
       ? flowResponses
-      : filterPublicNodeResponseData({ nodeRespones: flowResponses, responseDetail });
+      : filterPublicNodeResponseData({ nodeRespones: flowResponses, responseDetail: showCite });
 
     if (stream) {
       workflowResponseWrite({
@@ -401,32 +423,59 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
 
       res.end();
     } else {
-      const responseContent = (() => {
-        if (assistantResponses.length === 0) return '';
-        if (assistantResponses.length === 1 && assistantResponses[0].text?.content)
-          return assistantResponses[0].text?.content;
-
-        if (!detail) {
-          return assistantResponses
-            .map((item) => item?.text?.content)
-            .filter(Boolean)
-            .join('\n');
+      const formatResponseContent = removeAIResponseCite(assistantResponses, retainDatasetCite);
+      const formattdResponse = (() => {
+        if (formatResponseContent.length === 0)
+          return {
+            reasoning: '',
+            content: ''
+          };
+        if (formatResponseContent.length === 1) {
+          return {
+            reasoning: formatResponseContent[0].reasoning?.content,
+            content: formatResponseContent[0].text?.content
+          };
         }
 
-        return assistantResponses;
+        if (!detail) {
+          return {
+            reasoning: formatResponseContent
+              .map((item) => item?.reasoning?.content)
+              .filter(Boolean)
+              .join('\n'),
+            content: formatResponseContent
+              .map((item) => item?.text?.content)
+              .filter(Boolean)
+              .join('\n')
+          };
+        }
+
+        return formatResponseContent;
       })();
-      const formatResponseContent = removeAIResponseCite(responseContent, retainDatasetCite);
-      const error = flowResponses[flowResponses.length - 1]?.error;
+
+      const error =
+        flowResponses[flowResponses.length - 1]?.error ||
+        flowResponses[flowResponses.length - 1]?.errorText;
 
       res.json({
         ...(detail ? { responseData: feResponseData, newVariables } : {}),
         error,
-        id: saveChatId,
+        id: chatId || '',
         model: '',
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 1 },
         choices: [
           {
-            message: { role: 'assistant', content: formatResponseContent },
+            message: {
+              role: 'assistant',
+              ...(Array.isArray(formattdResponse)
+                ? { content: formattdResponse }
+                : {
+                    content: formattdResponse.content,
+                    ...(formattdResponse.reasoning && {
+                      reasoning_content: formattdResponse.reasoning
+                    })
+                  })
+            },
             finish_reason: 'stop',
             index: 0
           }
@@ -469,7 +518,7 @@ const authShareChat = async ({
   shareId: string;
   chatId?: string;
 }): Promise<AuthResponseType> => {
-  const { teamId, tmbId, appId, authType, responseDetail, showNodeStatus, uid, sourceName } =
+  const { teamId, tmbId, appId, authType, showCite, showRunningStatus, uid, sourceName } =
     await authOutLinkChatStart(data);
   const app = await MongoApp.findById(appId).lean();
 
@@ -491,9 +540,9 @@ const authShareChat = async ({
     apikey: '',
     authType,
     responseAllData: false,
-    responseDetail,
+    showCite,
     outLinkUserId: uid,
-    showNodeStatus
+    showRunningStatus
   };
 };
 const authTeamSpaceChat = async ({
@@ -530,7 +579,7 @@ const authTeamSpaceChat = async ({
     authType: AuthUserTypeEnum.outLink,
     apikey: '',
     responseAllData: false,
-    responseDetail: true,
+    showCite: true,
     outLinkUserId: uid
   };
 };
@@ -612,7 +661,7 @@ const authHeaderRequest = async ({
     authType,
     sourceName,
     responseAllData: true,
-    responseDetail: true
+    showCite: true
   };
 };
 

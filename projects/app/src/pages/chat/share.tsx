@@ -22,7 +22,7 @@ import { useContextSelector } from 'use-context-selector';
 import ChatContextProvider, { ChatContext } from '@/web/core/chat/context/chatContext';
 import { GetChatTypeEnum } from '@/global/core/chat/constants';
 import { useMount } from 'ahooks';
-import { useRequest2 } from '@fastgpt/web/hooks/useRequest';
+import { useRequest } from '@fastgpt/web/hooks/useRequest';
 import { getNanoid } from '@fastgpt/global/common/string/tools';
 
 import dynamic from 'next/dynamic';
@@ -53,10 +53,10 @@ type Props = {
   shareId: string;
   authToken: string;
   customUid: string;
-  showRawSource: boolean;
-  responseDetail: boolean;
-  // showFullText: boolean;
-  showNodeStatus: boolean;
+  canDownloadSource: boolean;
+  isShowCite: boolean;
+  isShowFullText: boolean;
+  showRunningStatus: boolean;
 };
 
 const OutLink = (props: Props) => {
@@ -81,8 +81,11 @@ const OutLink = (props: Props) => {
   const { isPc } = useSystem();
   const { outLinkAuthData, appId, chatId } = useChatStore();
 
-  const isOpenSlider = useContextSelector(ChatContext, (v) => v.isOpenSlider);
-  const onCloseSlider = useContextSelector(ChatContext, (v) => v.onCloseSlider);
+  // Remove empty value field
+  const formatedCustomVariables = useMemo(() => {
+    return Object.fromEntries(Object.entries(customVariables).filter(([_, value]) => value !== ''));
+  }, [customVariables]);
+
   const forbidLoadChat = useContextSelector(ChatContext, (v) => v.forbidLoadChat);
   const onChangeChatId = useContextSelector(ChatContext, (v) => v.onChangeChatId);
   const onUpdateHistoryTitle = useContextSelector(ChatContext, (v) => v.onUpdateHistoryTitle);
@@ -92,14 +95,14 @@ const OutLink = (props: Props) => {
   const setChatBoxData = useContextSelector(ChatItemContext, (v) => v.setChatBoxData);
   const datasetCiteData = useContextSelector(ChatItemContext, (v) => v.datasetCiteData);
   const setCiteModalData = useContextSelector(ChatItemContext, (v) => v.setCiteModalData);
-  const isResponseDetail = useContextSelector(ChatItemContext, (v) => v.isResponseDetail);
+  const isShowCite = useContextSelector(ChatItemContext, (v) => v.isShowCite);
 
   const chatRecords = useContextSelector(ChatRecordContext, (v) => v.chatRecords);
   const totalRecordsCount = useContextSelector(ChatRecordContext, (v) => v.totalRecordsCount);
   const isChatRecordsLoaded = useContextSelector(ChatRecordContext, (v) => v.isChatRecordsLoaded);
 
   const initSign = useRef(false);
-  const { data, loading } = useRequest2(
+  const { data, loading } = useRequest(
     async () => {
       const shareId = outLinkAuthData.shareId;
       const outLinkUid = outLinkAuthData.outLinkUid;
@@ -114,7 +117,10 @@ const OutLink = (props: Props) => {
       setChatBoxData(res);
 
       resetVariables({
-        variables: res.variables,
+        variables: {
+          ...formatedCustomVariables,
+          ...res.variables
+        },
         variableList: res.app?.chatConfig?.variables
       });
 
@@ -169,7 +175,7 @@ const OutLink = (props: Props) => {
           responseChatItemId,
           chatId: completionChatId,
           ...outLinkAuthData,
-          retainDatasetCite: isResponseDetail
+          retainDatasetCite: isShowCite
         },
         onMessage: generatingMessage,
         abortCtrl: controller
@@ -207,7 +213,7 @@ const OutLink = (props: Props) => {
       chatId,
       customVariables,
       outLinkAuthData,
-      isResponseDetail,
+      isShowCite,
       onUpdateHistoryTitle,
       setChatBoxData,
       forbidLoadChat,
@@ -382,10 +388,11 @@ const Render = (props: Props) => {
     <ChatContextProvider params={chatHistoryProviderParams}>
       <ChatItemContextProvider
         showRouteToDatasetDetail={false}
-        isShowReadRawSource={props.showRawSource}
-        isResponseDetail={props.responseDetail}
-        // isShowFullText={props.showFullText}
-        showNodeStatus={props.showNodeStatus}
+        showWholeResponse={false}
+        canDownloadSource={props.canDownloadSource}
+        isShowCite={props.isShowCite}
+        isShowFullText={props.isShowFullText}
+        showRunningStatus={props.showRunningStatus}
       >
         <ChatRecordContextProvider params={chatRecordProviderParams}>
           <OutLink {...props} />
@@ -410,7 +417,7 @@ export async function getServerSideProps(context: any) {
         {
           shareId
         },
-        'appId showRawSource showNodeStatus responseDetail'
+        'appId canDownloadSource showCite showFullText showRunningStatus'
       )
         .populate<{ associatedApp: AppSchema }>('associatedApp', 'name avatar intro')
         .lean();
@@ -426,10 +433,10 @@ export async function getServerSideProps(context: any) {
       appName: app?.associatedApp?.name ?? 'AI',
       appAvatar: app?.associatedApp?.avatar ?? '',
       appIntro: app?.associatedApp?.intro ?? 'AI',
-      showRawSource: app?.showRawSource ?? false,
-      responseDetail: app?.responseDetail ?? false,
-      // showFullText: app?.showFullText ?? false,
-      showNodeStatus: app?.showNodeStatus ?? false,
+      canDownloadSource: app?.canDownloadSource ?? false,
+      isShowCite: app?.showCite ?? false,
+      isShowFullText: app?.showFullText ?? false,
+      showRunningStatus: app?.showRunningStatus ?? false,
       shareId: shareId ?? '',
       authToken: authToken ?? '',
       customUid,

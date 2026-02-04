@@ -4,6 +4,7 @@ import { setCron } from '../system/cron';
 import { checkTimerLock } from '../system/timerLock/utils';
 import { TimerIdEnum } from '../system/timerLock/constants';
 import path from 'node:path';
+import { S3Error } from 'minio';
 
 export async function clearExpiredMinioFiles() {
   try {
@@ -26,26 +27,7 @@ export async function clearExpiredMinioFiles() {
         const bucket = global.s3BucketMap[bucketName];
 
         if (bucket) {
-          await bucket.delete(file.minioKey);
-
-          if (!file.minioKey.includes('-parsed/')) {
-            try {
-              const dir = path.dirname(file.minioKey);
-              const basename = path.basename(file.minioKey);
-              const ext = path.extname(basename);
-
-              if (ext) {
-                const nameWithoutExt = path.basename(basename, ext);
-                const parsedPrefix = `${dir}/${nameWithoutExt}-parsed`;
-
-                await bucket.addDeleteJob({ prefix: parsedPrefix });
-                addLog.info(`Scheduled deletion of parsed images: ${parsedPrefix}`);
-              }
-            } catch (error) {
-              addLog.debug(`Failed to schedule parsed images deletion for ${file.minioKey}`);
-            }
-          }
-
+          await bucket.addDeleteJob({ key: file.minioKey });
           await MongoS3TTL.deleteOne({ _id: file._id });
 
           success++;

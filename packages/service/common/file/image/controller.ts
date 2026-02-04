@@ -2,13 +2,12 @@ import { type preUploadImgProps } from '@fastgpt/global/common/file/api';
 import { imageBaseUrl } from '@fastgpt/global/common/file/image/constants';
 import { MongoImage } from './schema';
 import { type ClientSession, Types } from '../../../common/mongo';
-import { guessBase64ImageType } from '../utils';
+import { guessBase64ImageType } from './utils';
 import { readFromSecondary } from '../../mongo/utils';
 import { addHours } from 'date-fns';
 import { imageFileType } from '@fastgpt/global/common/file/constants';
 import { retryFn } from '@fastgpt/global/common/system/utils';
 import { UserError } from '@fastgpt/global/common/error/utils';
-import { S3Sources } from '../../s3/type';
 import { getS3AvatarSource } from '../../s3/sources/avatar';
 import { isS3ObjectKey } from '../../s3/utils';
 import path from 'path';
@@ -78,9 +77,9 @@ export const copyAvatarImage = async ({
   const avatarSource = getS3AvatarSource();
   if (isS3ObjectKey(imageUrl?.slice(avatarSource.prefix.length), 'avatar')) {
     const filename = (() => {
-      const last = imageUrl.split('/').pop()?.split('-')[1];
-      if (!last) return getNanoid(6).concat(path.extname(imageUrl));
-      return `${getNanoid(6)}-${last}`;
+      const extname = path.extname(imageUrl);
+      if (!extname) return getNanoid(6);
+      return path.basename(imageUrl);
     })();
     const key = await getS3AvatarSource().copyAvatar({
       key: imageUrl,

@@ -1,9 +1,7 @@
-import type { ApiRequestProps, ApiResponseType } from '@fastgpt/service/type/next';
+import type { ApiRequestProps } from '@fastgpt/service/type/next';
 import { NextAPI } from '@/service/middleware/entry';
-import { authFrequencyLimit } from '@/service/common/frequencyLimit/api';
+import { authFrequencyLimit } from '@fastgpt/service/common/system/frequencyLimit/utils';
 import { addDays, addSeconds } from 'date-fns';
-import { removeFilesByPaths } from '@fastgpt/service/common/file/utils';
-import { getUploadModel } from '@fastgpt/service/common/file/multer';
 import { authDatasetCollection } from '@fastgpt/service/support/permission/dataset/auth';
 import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
 import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
@@ -13,8 +11,10 @@ import { getEmbeddingModel, getLLMModel, getVlmModel } from '@fastgpt/service/co
 import { pushDataListToTrainingQueue } from '@fastgpt/service/core/dataset/training/controller';
 import { TrainingModeEnum } from '@fastgpt/global/core/dataset/constants';
 import path from 'node:path';
-import fsp from 'node:fs/promises';
+import fs from 'node:fs';
 import { getFileS3Key, uploadImage2S3Bucket } from '@fastgpt/service/common/s3/utils';
+import { multer } from '@fastgpt/service/common/file/multer';
+import { getTeamPlanStatus } from '@fastgpt/service/support/wallet/sub/utils';
 
 export type insertImagesQuery = {};
 
@@ -24,31 +24,18 @@ export type insertImagesBody = {
 
 export type insertImagesResponse = {};
 
-const authUploadLimit = (tmbId: string, num: number) => {
-  if (!global.feConfigs.uploadFileMaxAmount) return;
-  return authFrequencyLimit({
-    eventId: `${tmbId}-uploadfile`,
-    maxAmount: global.feConfigs.uploadFileMaxAmount * 2,
-    expiredTime: addSeconds(new Date(), 30), // 30s
-    num
-  });
-};
-
 async function handler(
-  req: ApiRequestProps<insertImagesBody, insertImagesQuery>,
-  res: ApiResponseType<any>
+  req: ApiRequestProps<insertImagesBody, insertImagesQuery>
 ): Promise<insertImagesResponse> {
-  const filePaths: string[] = [];
+  const filepaths: string[] = [];
 
   try {
-    const upload = getUploadModel({
-      maxSize: global.feConfigs?.uploadFileMaxSize
+    const result = await multer.resolveMultipleFormData({
+      request: req,
+      maxFileSize: global.feConfigs.uploadFileMaxSize
     });
-    const {
-      files,
-      data: { collectionId }
-    } = await upload.getUploadFiles<insertImagesBody>(req, res);
-    filePaths.push(...files.map((item) => item.path));
+    filepaths.push(...result.fileMetadata.map((item) => item.path));
+    const { collectionId } = result.data;
 
     const { collection, teamId, tmbId } = await authDatasetCollection({
       collectionId,
@@ -59,13 +46,19 @@ async function handler(
     });
     const dataset = collection.dataset;
 
-    await authUploadLimit(tmbId, files.length);
+    const planStatus = await getTeamPlanStatus({ teamId });
+    await authFrequencyLimit({
+      eventId: `${tmbId}-uploadfile`,
+      maxAmount:
+        planStatus.standardConstants?.maxUploadFileCount || global.feConfigs.uploadFileMaxAmount,
+      expiredTime: addSeconds(new Date(), 30), // 30s
+      num: result.fileMetadata.length
+    });
 
-    // 1. Upload images to S3
     const imageIds = await Promise.all(
-      files.map(async (file) =>
+      result.fileMetadata.map(async (file) =>
         uploadImage2S3Bucket('private', {
-          base64Img: (await fsp.readFile(file.path)).toString('base64'),
+          base64Img: (await fs.promises.readFile(file.path)).toString('base64'),
           uploadKey: getFileS3Key.dataset({
             datasetId: dataset._id,
             filename: path.basename(file.filename)
@@ -77,7 +70,6 @@ async function handler(
       )
     );
 
-    // 2. Insert images to training queue
     await mongoSessionRun(async (session) => {
       const traingBillId = await (async () => {
         const { usageId } = await createTrainingUsage({
@@ -114,7 +106,7 @@ async function handler(
   } catch (error) {
     return Promise.reject(error);
   } finally {
-    removeFilesByPaths(filePaths);
+    multer.clearDiskTempFiles(filepaths);
   }
 }
 

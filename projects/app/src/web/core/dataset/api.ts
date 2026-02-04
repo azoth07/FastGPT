@@ -83,7 +83,6 @@ import type {
   DatasetCreateWithFilesBody,
   DatasetCreateWithFilesResponse
 } from '@/pages/api/core/dataset/createWithFiles';
-import type { PresignDatasetFileGetUrlParams } from '@fastgpt/global/core/dataset/v2/api';
 
 /* ======================== dataset ======================= */
 export const getDatasets = (data: GetDatasetListBody) =>
@@ -146,9 +145,6 @@ export const postBackupDatasetCollection = ({
 
       const percent = Math.round((e.loaded / e.total) * 100);
       percentListen?.(percent);
-    },
-    headers: {
-      'Content-Type': 'multipart/form-data; charset=utf-8'
     }
   });
 };
@@ -172,9 +168,6 @@ export const postTemplateDatasetCollection = ({
 
       const percent = Math.round((e.loaded / e.total) * 100);
       percentListen?.(percent);
-    },
-    headers: {
-      'Content-Type': 'multipart/form-data; charset=utf-8'
     }
   });
 };

@@ -8,12 +8,13 @@ import { useToast } from '@fastgpt/web/hooks/useToast';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
 import { useTranslation } from 'next-i18next';
 import FormLayout from './FormLayout';
-import { useRequest2 } from '@fastgpt/web/hooks/useRequest';
+import { useRequest } from '@fastgpt/web/hooks/useRequest';
 import PolicyTip from './PolicyTip';
 import { useSearchParams } from 'next/navigation';
 import { UserErrEnum } from '@fastgpt/global/common/error/code/user';
 import { useRouter } from 'next/router';
 import { useMount } from 'ahooks';
+import type { LangEnum } from '@fastgpt/global/common/i18n/type';
 
 interface Props {
   setPageType: Dispatch<`${LoginPageTypeEnum}`>;
@@ -26,8 +27,7 @@ interface LoginFormType {
 }
 
 const LoginForm = ({ setPageType, loginSuccess }: Props) => {
-  const { t } = useTranslation();
-  const { toast } = useToast();
+  const { t, i18n } = useTranslation();
   const { feConfigs } = useSystemStore();
   const query = useSearchParams();
   const router = useRouter();
@@ -38,14 +38,15 @@ const LoginForm = ({ setPageType, loginSuccess }: Props) => {
     formState: { errors }
   } = useForm<LoginFormType>();
 
-  const { runAsync: onclickLogin, loading: requesting } = useRequest2(
+  const { runAsync: onclickLogin, loading: requesting } = useRequest(
     async ({ username, password }: LoginFormType) => {
       const { code } = await getPreLogin(username);
       loginSuccess(
         await postLogin({
           username,
           password,
-          code
+          code,
+          language: i18n.language as LangEnum
         })
       );
     },

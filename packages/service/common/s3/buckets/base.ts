@@ -1,98 +1,72 @@
-import { Client, type RemoveOptions, type CopyConditions, S3Error } from 'minio';
+import {
+  Client,
+  type RemoveOptions,
+  type CopyConditions,
+  S3Error,
+  InvalidObjectNameError,
+  InvalidXMLError
+} from 'minio';
 import {
   type CreatePostPresignedUrlOptions,
   type CreatePostPresignedUrlParams,
   type CreatePostPresignedUrlResult,
-  type S3OptionsType,
   type createPreviewUrlParams,
   CreateGetPresignedUrlParamsSchema
 } from '../type';
-import { defaultS3Options, getSystemMaxFileSize, Mimes } from '../constants';
+import { getSystemMaxFileSize, Mimes } from '../constants';
 import path from 'node:path';
 import { MongoS3TTL } from '../schema';
-import { getNanoid } from '@fastgpt/global/common/string/tools';
-import { addHours, addMinutes } from 'date-fns';
+import { addHours, addMinutes, differenceInSeconds } from 'date-fns';
 import { addLog } from '../../system/log';
 import { addS3DelJob } from '../mq';
-import { type Readable } from 'node:stream';
+import { type UploadFileByBufferParams, UploadFileByBufferSchema } from '../type';
+import type { createStorage } from '@fastgpt-sdk/storage';
+import { parseFileExtensionFromUrl } from '@fastgpt/global/common/string/tools';
+
+type IStorage = ReturnType<typeof createStorage>;
+
+// Check if the error is a "file not found" type error, which should be treated as success
+export const isFileNotFoundError = (error: any): boolean => {
+  if (error instanceof S3Error) {
+    // Handle various "not found" error codes
+    return (
+      error.code === 'NoSuchKey' ||
+      error.code === 'InvalidObjectName' ||
+      error.message === 'Not Found' ||
+      error.message ===
+        'The request signature we calculated does not match the signature you provided. Check your key and signing method.' ||
+      error.message.includes('Resource name contains bad components') ||
+      error.message.includes('Object name contains unsupported characters.')
+    );
+  }
+  if (error instanceof InvalidObjectNameError || error instanceof InvalidXMLError) {
+    return true;
+  }
+  return false;
+};
 
 export class S3BaseBucket {
-  private _client: Client;
-  private _externalClient: Client | undefined;
-
-  /**
-   *
-   * @param bucketName the bucket you want to operate
-   * @param options the options for the s3 client
-   */
   constructor(
-    private readonly bucketName: string,
-    public options: Partial<S3OptionsType> = defaultS3Options
-  ) {
-    options = { ...defaultS3Options, ...options };
-    this.options = options;
-    this._client = new Client(options as S3OptionsType);
+    private readonly _client: IStorage,
+    private readonly _externalClient: IStorage | undefined
+  ) {}
 
-    if (this.options.externalBaseURL) {
-      const externalBaseURL = new URL(this.options.externalBaseURL);
-      const endpoint = externalBaseURL.hostname;
-      const useSSL = externalBaseURL.protocol === 'https:';
-
-      const externalPort = externalBaseURL.port
-        ? parseInt(externalBaseURL.port)
-        : useSSL
-          ? 443
-          : undefined; // https 默认 443，其他情况让 MinIO 客户端使用默认端口
-
-      this._externalClient = new Client({
-        useSSL: useSSL,
-        endPoint: endpoint,
-        port: externalPort,
-        accessKey: options.accessKey,
-        secretKey: options.secretKey,
-        transportAgent: options.transportAgent
-      });
-    }
-
-    const init = async () => {
-      if (!(await this.exist())) {
-        await this.client.makeBucket(this.bucketName);
-      }
-      await this.options.afterInit?.();
-      console.log(`S3 init success: ${this.name}`);
-    };
-    init();
-  }
-
-  get name(): string {
-    return this.bucketName;
-  }
-  get client(): Client {
+  get client(): IStorage {
     return this._client;
   }
-  get externalClient(): Client {
+
+  get externalClient(): IStorage {
     return this._externalClient ?? this._client;
   }
 
+  get bucketName(): string {
+    return this.client.bucketName;
+  }
+
   // TODO: 加到 MQ 里保障幂等
-  async move({
-    from,
-    to,
-    options
-  }: {
-    from: string;
-    to: string;
-    options?: CopyConditions;
-  }): Promise<void> {
-    await this.copy({
-      from,
-      to,
-      options: {
-        copyConditions: options,
-        temporary: false
-      }
-    });
-    await this.delete(from);
+  async move({ from, to }: { from: string; to: string }): Promise<void> {
+    await this.copy({ from, to, options: { temporary: false } });
+    await this.removeObject(from);
   }
 
   async copy({
@@ -104,75 +78,42 @@ export class S3BaseBucket {
     to: string;
     options?: {
       temporary?: boolean;
-      copyConditions?: CopyConditions;
     };
-  }): ReturnType<Client['copyObject']> {
-    const bucket = this.name;
+  }) {
     if (options?.temporary) {
       await MongoS3TTL.create({
         minioKey: to,
-        bucketName: this.name,
+        bucketName: this.bucketName,
         expiredTime: addHours(new Date(), 24)
       });
     }
-    return this.client.copyObject(bucket, to, `${bucket}/${from}`, options?.copyConditions);
+    return this.client.copyObjectInSelfBucket({ sourceKey: from, targetKey: to });
   }
 
-  exist(): Promise<boolean> {
-    return this.client.bucketExists(this.name);
-  }
-
-  async delete(objectKey: string, options?: RemoveOptions): Promise<void> {
-    try {
-      if (!objectKey) return Promise.resolve();
-
-      // 把连带的 parsed 数据一起删除
-      const fileParsedPrefix = `${path.dirname(objectKey)}/${path.basename(objectKey, path.extname(objectKey))}-parsed`;
-      await this.addDeleteJob({ prefix: fileParsedPrefix });
-
-      return await this.client.removeObject(this.name, objectKey, options);
-    } catch (error) {
-      if (error instanceof S3Error) {
-        if (error.code === 'InvalidObjectName') {
-          addLog.warn(`${this.name} delete object not found: ${objectKey}`, error);
-          return Promise.resolve();
-        }
+  async removeObject(objectKey: string): Promise<void> {
+    this.client.deleteObject({ key: objectKey }).catch((err) => {
+      if (isFileNotFoundError(err)) {
+        return Promise.resolve();
       }
-      return Promise.reject(error);
-    }
-  }
-
-  listObjectsV2(
-    ...params: Parameters<Client['listObjectsV2']> extends [string, ...infer R] ? R : never
-  ) {
-    return this.client.listObjectsV2(this.name, ...params);
-  }
-
-  putObject(...params: Parameters<Client['putObject']> extends [string, ...infer R] ? R : never) {
-    return this.client.putObject(this.name, ...params);
-  }
-
-  getObject(...params: Parameters<Client['getObject']> extends [string, ...infer R] ? R : never) {
-    return this.client.getObject(this.name, ...params);
-  }
-
-  statObject(...params: Parameters<Client['statObject']> extends [string, ...infer R] ? R : never) {
-    return this.client.statObject(this.name, ...params);
-  }
-
-  async fileStreamToBuffer(stream: Readable): Promise<Buffer> {
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) {
-      chunks.push(chunk);
-    }
-    return Buffer.concat(chunks);
+      addLog.error(`[S3 delete error]`, {
+        message: err.message,
+        data: { code: err.code, key: objectKey }
+      });
+      throw err;
+    });
   }
 
   addDeleteJob(params: Omit<Parameters<typeof addS3DelJob>[0], 'bucketName'>) {
-    return addS3DelJob({ ...params, bucketName: this.name });
+    return addS3DelJob({ ...params, bucketName: this.bucketName });
   }
 
-  async createPostPresignedUrl(
+  async isObjectExists(key: string) {
+    const { exists } = await this.client.checkObjectExists({ key });
+
+    return exists ?? false;
+  }
+
+  async createPresignedPutUrl(
     params: CreatePostPresignedUrlParams,
     options: CreatePostPresignedUrlOptions = {}
   ): Promise<CreatePostPresignedUrlResult> {
@@ -182,45 +123,39 @@ export class S3BaseBucket {
       const filename = params.filename;
       const ext = path.extname(filename).toLowerCase();
       const contentType = Mimes[ext as keyof typeof Mimes] ?? 'application/octet-stream';
+      const expiredSeconds = differenceInSeconds(addMinutes(new Date(), 10), new Date());
 
-      const key = (() => {
-        if ('rawKey' in params) return params.rawKey;
-        return [params.source, params.teamId, `${getNanoid(6)}-${filename}`].join('/');
-      })();
-
-      const policy = this.externalClient.newPostPolicy();
-      policy.setKey(key);
-      policy.setBucket(this.name);
-      policy.setContentType(contentType);
-      if (formatMaxFileSize) {
-        policy.setContentLengthRange(1, formatMaxFileSize);
-      }
-      policy.setExpires(addMinutes(new Date(), 10));
-      policy.setUserMetaData({
-        'content-disposition': `attachment; filename="${encodeURIComponent(filename)}"`,
-        'origin-filename': encodeURIComponent(filename),
-        'upload-time': new Date().toISOString(),
-        ...params.metadata
+      const { metadata, url } = await this.externalClient.generatePresignedPutUrl({
+        key: params.rawKey,
+        expiredSeconds,
+        contentType,
+        metadata: {
+          contentDisposition: `attachment; filename="${encodeURIComponent(filename)}"`,
+          originFilename: encodeURIComponent(filename),
+          uploadTime: new Date().toISOString(),
+          ...params.metadata
+        }
       });
-
-      const { formData, postURL } = await this.externalClient.presignedPostPolicy(policy);
 
       if (expiredHours) {
         await MongoS3TTL.create({
-          minioKey: key,
-          bucketName: this.name,
+          minioKey: params.rawKey,
+          bucketName: this.bucketName,
           expiredTime: addHours(new Date(), expiredHours)
         });
       }
 
       return {
-        url: postURL,
-        fields: formData,
+        url: url,
+        key: params.rawKey,
+        headers: {
+          ...metadata
+        },
         maxSize: formatMaxFileSize
       };
     } catch (error) {
-      addLog.error('Failed to create post presigned url', error);
-      return Promise.reject('Failed to create post presigned url');
+      addLog.error('Failed to create presigned put url', error);
+      return Promise.reject('Failed to create presigned put url');
     }
   }
 
@@ -230,9 +165,7 @@ export class S3BaseBucket {
     const { key, expiredHours } = parsed;
     const expires = expiredHours ? expiredHours * 60 * 60 : 30 * 60; // expires 的单位是秒 默认 30 分钟
 
-    return await this.externalClient.presignedGetObject(this.name, key, expires, {
-      'Content-Disposition': `attachment; filename="${path.basename(key)}"`
-    });
+    return await this.externalClient.generatePresignedGetUrl({ key, expiredSeconds: expires });
   }
 
   async createPreviewUrl(params: createPreviewUrlParams) {
@@ -241,8 +174,54 @@ export class S3BaseBucket {
     const { key, expiredHours } = parsed;
     const expires = expiredHours ? expiredHours * 60 * 60 : 30 * 60; // expires 的单位是秒 默认 30 分钟
 
-    return await this.client.presignedGetObject(this.name, key, expires, {
-      'Content-Disposition': `attachment; filename="${path.basename(key)}"`
+    return await this.client.generatePresignedGetUrl({ key, expiredSeconds: expires });
+  }
+
+  async uploadFileByBuffer(params: UploadFileByBufferParams) {
+    const { key, buffer, contentType } = UploadFileByBufferSchema.parse(params);
+
+    await MongoS3TTL.create({
+      minioKey: key,
+      bucketName: this.bucketName,
+      expiredTime: addHours(new Date(), 1)
     });
+
+    await this.client.uploadObject({
+      key,
+      body: buffer,
+      contentType: contentType || 'application/octet-stream'
+    });
+
+    return {
+      key,
+      accessUrl: await this.createExternalUrl({
+        key,
+        expiredHours: 2
+      })
+    };
+  }
+
+  async getFileMetadata(key: string) {
+    const metadataResponse = await this.client.getObjectMetadata({ key });
+    if (!metadataResponse) return;
+
+    const contentLength = metadataResponse.contentLength;
+    const filename: string = decodeURIComponent(metadataResponse.metadata.originFilename || '');
+    const extension = parseFileExtensionFromUrl(filename);
+    const contentType: string = metadataResponse.contentType || 'application/octet-stream';
+
+    return {
+      filename,
+      extension,
+      contentType,
+      contentLength
+    };
+  }
+
+  async getFileStream(key: string) {
+    const downloadResponse = await this.client.downloadObject({ key });
+    if (!downloadResponse) return;
+
+    return downloadResponse.body;
   }
 }

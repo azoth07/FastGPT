@@ -15,7 +15,7 @@ import type { AppPermission } from '../../support/permission/app/controller';
 import type { ParentIdType } from '../../common/parentFolder/type';
 import { FlowNodeInputTypeEnum } from '../../core/workflow/node/constant';
 import type { WorkflowTemplateBasicType } from '@fastgpt/global/core/workflow/type';
-import type { SourceMemberType } from '../../support/user/type';
+import type { SourceMemberType, UserTagsEnum } from '../../support/user/type';
 import type { JSONSchemaInputType, JSONSchemaOutputType } from './jsonschema';
 
 export type AppSchema = {
@@ -59,6 +59,9 @@ export type AppSchema = {
   inited?: boolean;
   /** @deprecated */
   teamTags: string[];
+
+  // 软删除字段
+  deleteTime?: Date | null;
 };
 
 export type AppListItemType = {
@@ -231,6 +234,8 @@ export type AppTemplateSchemaType = {
   author?: string;
   isActive?: boolean;
   isPromoted?: boolean;
+  promoteTags?: UserTagsEnum[];
+  hideTags?: UserTagsEnum[];
   recommendText?: string;
   userGuide?: {
     type: 'markdown' | 'link';

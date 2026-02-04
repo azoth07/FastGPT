@@ -110,11 +110,13 @@ export async function getInitConfig() {
 const defaultFeConfigs: FastGPTFeConfigsType = {
 
 
+
   show_emptyChat: false,
   show_git: false,
   docUrl: '',
   openAPIDocUrl: '',
   submitPluginRequestUrl: '',
+
 
   appTemplateCourse:
     '',
@@ -127,8 +129,11 @@ const defaultFeConfigs: FastGPTFeConfigsType = {
   },
   scripts: [],
   favicon: '/favicon.ico',
-  uploadFileMaxSize: 5000,
-  chineseRedirectUrl: process.env.CHINESE_IP_REDIRECT_URL || ''
+
+  chineseRedirectUrl: process.env.CHINESE_IP_REDIRECT_URL || '',
+  uploadFileMaxSize: Number(process.env.UPLOAD_FILE_MAX_SIZE || 1000),
+  uploadFileMaxAmount: Number(process.env.UPLOAD_FILE_MAX_AMOUNT || 1000)
+
 };
 
 export async function initSystemConfig() {
@@ -151,8 +156,10 @@ export async function initSystemConfig() {
       hideChatCopyrightSetting: process.env.HIDE_CHAT_COPYRIGHT_SETTING === 'true',
       show_aiproxy: !!process.env.AIPROXY_API_ENDPOINT,
       show_coupon: process.env.SHOW_COUPON === 'true',
+      show_discount_coupon: process.env.SHOW_DISCOUNT_COUPON === 'true',
       show_dataset_enhance: licenseData?.functions?.datasetEnhance,
-      show_batch_eval: licenseData?.functions?.batchEval
+      show_batch_eval: licenseData?.functions?.batchEval,
+      payFormUrl: process.env.PAY_FORM_URL || ''
     },
     systemEnv: {
       ...fileRes.systemEnv,

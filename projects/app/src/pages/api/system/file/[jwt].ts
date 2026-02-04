@@ -20,21 +20,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           (() => {
             if (isS3ObjectKey(objectKey, 'dataset')) {
               return [
-                s3DatasetSource.getDatasetFileStream(objectKey),
+                s3DatasetSource.getFileStream(objectKey),
                 s3DatasetSource.getFileMetadata(objectKey)
               ];
             } else {
               return [
-                s3ChatSource.getChatFileStream(objectKey),
+                s3ChatSource.getFileStream(objectKey),
                 s3ChatSource.getFileMetadata(objectKey)
               ];
             }
           })()
         );
 
-        res.setHeader('Content-Type', metadata.contentType);
+        if (!stream) {
+          return jsonRes(res, {
+            code: 404,
+            error: 'File not found'
+          });
+        }
+
+        if (metadata) {
+          res.setHeader('Content-Type', metadata.contentType);
+        }
+        if (metadata?.contentLength) {
+          res.setHeader('Content-Length', metadata.contentLength);
+        }
         res.setHeader('Cache-Control', 'public, max-age=31536000');
-        res.setHeader('Content-Length', metadata.contentLength);
 
         stream.pipe(res);
 

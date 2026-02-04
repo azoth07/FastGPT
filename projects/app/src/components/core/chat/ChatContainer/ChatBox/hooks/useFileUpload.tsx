@@ -12,11 +12,11 @@ import { type UseFieldArrayReturn } from 'react-hook-form';
 import { type ChatBoxInputFormType, type UserInputFileItemType } from '../type';
 import { type AppFileSelectConfigType } from '@fastgpt/global/core/app/type';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
+import { useUserStore } from '@/web/support/user/useUserStore';
 import { type OutLinkChatAuthProps } from '@fastgpt/global/support/permission/chat';
 import { getPresignedChatFileGetUrl, getUploadChatFilePresignedUrl } from '@/web/common/file/api';
-import { POST } from '@/web/common/api/request';
 import { getUploadFileType } from '@fastgpt/global/core/app/constants';
-import { parseS3UploadError } from '@fastgpt/global/common/error/s3';
+import { putFileToS3 } from '@fastgpt/web/common/file/utils';
 
 type UseFileUploadOptions = {
   fileSelectConfig: AppFileSelectConfigType;
@@ -32,6 +32,7 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
   const { toast } = useToast();
   const { t } = useTranslation();
   const { feConfigs } = useSystemStore();
+  const { teamPlanStatus } = useUserStore();
 
   const {
     update: updateFiles,
@@ -53,8 +54,17 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
     showSelectVideo ||
     showSelectAudio ||
     showSelectCustomFileExtension;
-  const maxSelectFiles = fileSelectConfig?.maxFiles ?? 10;
-  const maxSize = (feConfigs?.uploadFileMaxSize || 1024) * 1024 * 1024; // nkb
+  // 文件数量限制：配置的maxFiles || 团队套餐 || 系统配置 || 默认值
+  const maxSelectFiles =
+    fileSelectConfig?.maxFiles ||
+    teamPlanStatus?.standardConstants?.maxUploadFileCount ||
+    feConfigs?.uploadFileMaxAmount ||
+    10;
+  // 文件大小限制（MB）：团队套餐 || 系统配置 || 默认值
+  const maxSize =
+    (teamPlanStatus?.standardConstants?.maxUploadFileSize || feConfigs?.uploadFileMaxSize || 500) *
+    1024 *
+    1024;
   const canSelectFileAmount = maxSelectFiles - fileList.length;
 
   const { icon: selectFileIcon, label: selectFileLabel } = useMemo(() => {
@@ -176,7 +186,7 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
           const fileIndex = fileList.findIndex((item) => item.id === file.id)!;
 
           // Get Upload Post Presigned URL
-          const { url, fields, maxSize } = await getUploadChatFilePresignedUrl({
+          const { url, key, headers, maxSize } = await getUploadChatFilePresignedUrl({
             filename: copyFile.rawFile.name,
             appId,
             chatId,
@@ -184,31 +194,29 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
           });
 
           // Upload File to S3
-          const formData = new FormData();
-          Object.entries(fields).forEach(([k, v]) => formData.set(k, v));
-          formData.set('file', copyFile.rawFile);
-          await POST(url, formData, {
-            headers: {
-              'Content-Type': 'multipart/form-data; charset=utf-8'
-            },
+          await putFileToS3({
+            url,
+            file: copyFile.rawFile,
+            headers,
             onUploadProgress: (e) => {
               if (!e.total) return;
               const percent = Math.round((e.loaded / e.total) * 100);
               copyFile.process = percent;
               updateFiles(fileIndex, copyFile);
             },
-            timeout: 5 * 60 * 1000 // 5 minutes
-          }).catch((error) => Promise.reject(parseS3UploadError({ t, error, maxSize })));
+            t,
+            maxSize
+          });
 
           const previewUrl = await getPresignedChatFileGetUrl({
-            key: fields.key,
+            key: key,
             appId,
             outLinkAuthData
           });
 
           // Update file url and key
           copyFile.url = previewUrl;
-          copyFile.key = fields.key;
+          copyFile.key = key;
           updateFiles(fileIndex, copyFile);
         } catch (error) {
           errorFileIndex.push(fileList.findIndex((item) => item.id === file.id)!);

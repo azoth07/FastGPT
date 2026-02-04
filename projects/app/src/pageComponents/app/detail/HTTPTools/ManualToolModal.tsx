@@ -25,7 +25,7 @@ import {
   AccordionIcon
 } from '@chakra-ui/react';
 import { useForm } from 'react-hook-form';
-import { useRequest2 } from '@fastgpt/web/hooks/useRequest';
+import { useRequest } from '@fastgpt/web/hooks/useRequest';
 import { useContextSelector } from 'use-context-selector';
 import { AppContext } from '../context';
 import FormLabel from '@fastgpt/web/components/common/MyBox/FormLabel';
@@ -148,7 +148,7 @@ const ManualToolModal = ({
     onClose: onCloseCurlImport
   } = useDisclosure();
 
-  const { runAsync: onSubmit, loading: isSubmitting } = useRequest2(
+  const { runAsync: onSubmit, loading: isSubmitting } = useRequest(
     async (data: ManualToolFormType) => {
       if (bodyType === ContentTypes.json && bodyContent) {
         try {
@@ -649,7 +649,7 @@ const CustomParamsTable = ({
       borderBottom={'none'}
       bg={'white'}
     >
-      <TableContainer overflowY={'visible'} overflowX={'unset'}>
+      <TableContainer overflowY={'visible'} overflowX={'auto'}>
         <Table size={'sm'}>
           <Thead>
             <Tr bg={'myGray.50'} h={8}>
@@ -663,8 +663,12 @@ const CustomParamsTable = ({
           <Tbody>
             {list.map((item, index) => (
               <Tr key={index} h={8}>
-                <Td px={2}>{item.key}</Td>
-                <Td px={2}>{item.description}</Td>
+                <Td px={2} maxW={'250px'} textOverflow={'ellipsis'} overflow={'hidden'}>
+                  {item.key}
+                </Td>
+                <Td px={2} maxW={20} textOverflow={'ellipsis'} overflow={'hidden'}>
+                  {item.description}
+                </Td>
                 <Td px={2}>{item.type}</Td>
                 <Td px={2}>{item.isTool ? t('common:yes') : t('common:no')}</Td>
                 <Td px={2}>

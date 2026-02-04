@@ -22,7 +22,7 @@ import { useUploadAvatar } from '@fastgpt/web/common/file/hooks/useUploadAvatar'
 import { getUploadAvatarPresignedUrl } from '@/web/common/file/api';
 import { useRouter } from 'next/router';
 import { emptyTemplates } from '@/web/core/app/templates';
-import { useRequest2 } from '@fastgpt/web/hooks/useRequest';
+import { useRequest } from '@fastgpt/web/hooks/useRequest';
 import Avatar from '@fastgpt/web/components/common/Avatar';
 import MyTooltip from '@fastgpt/web/components/common/MyTooltip';
 import { useTranslation } from 'next-i18next';
@@ -38,6 +38,7 @@ import MyImage from '@fastgpt/web/components/common/Image/MyImage';
 import LeftRadio from '@fastgpt/web/components/common/Radio/LeftRadio';
 import HeaderAuthForm from '@/components/common/secret/HeaderAuthForm';
 import { getMCPTools, postCreateHttpTools, postCreateMCPTools } from '@/web/core/app/api/tool';
+import { headerValue2StoreHeader } from '@/components/common/secret/HeaderAuthConfig';
 import type { McpToolConfigType } from '@fastgpt/global/core/app/tool/mcpTool/type';
 import AppTypeCard from '@/pageComponents/app/create/AppTypeCard';
 import type { StoreSecretValueType } from '@fastgpt/global/common/secret/type';
@@ -75,7 +76,7 @@ const CreateAppsPage = () => {
   const [creatingTemplateId, setCreatingTemplateId] = useState<string | null>(null);
   const isToolType = ToolTypeList.includes(selectedAppType);
 
-  const { data: templateData, loading: isLoadingTemplates } = useRequest2(
+  const { data: templateData, loading: isLoadingTemplates } = useRequest(
     () => getTemplateMarketItemList({ isQuickTemplate: true, type: selectedAppType }),
     {
       manual: false,
@@ -106,7 +107,7 @@ const CreateAppsPage = () => {
       }
     });
 
-  const { runAsync: runGetMCPTools, loading: isGettingMCPTools } = useRequest2(
+  const { runAsync: runGetMCPTools, loading: isGettingMCPTools } = useRequest(
     (data: { url: string; headerSecret: StoreSecretValueType }) => getMCPTools(data),
     {
       onSuccess: (res: McpToolConfigType[]) => {
@@ -116,7 +117,7 @@ const CreateAppsPage = () => {
     }
   );
 
-  const { runAsync: onClickCreate, loading: isCreating } = useRequest2(
+  const { runAsync: onClickCreate, loading: isCreating } = useRequest(
     async (
       { avatar, name, createType, mcpUrl, mcpHeaderSecret, mcpToolList }: FormType,
       templateId?: string
@@ -133,10 +134,11 @@ const CreateAppsPage = () => {
       };
 
       if (appType === AppTypeEnum.mcpToolSet) {
+        const headerSecret = headerValue2StoreHeader(mcpHeaderSecret || {});
         return postCreateMCPTools({
           ...baseParams,
           url: mcpUrl || '',
-          headerSecret: mcpHeaderSecret || {},
+          headerSecret,
           toolList: (mcpToolList || []) as McpToolConfigType[]
         });
       }
@@ -276,8 +278,8 @@ const CreateAppsPage = () => {
               </MyTooltip>
               <Input
                 flex={1}
-                h={8}
-                mr={selectedAppType !== AppTypeEnum.mcpToolSet ? 5 : 0}
+                h={'34px'}
+                mr={selectedAppType !== AppTypeEnum.mcpToolSet ? 3 : 0}
                 placeholder={t('app:unnamed_app')}
                 {...register('name')}
               />
@@ -285,6 +287,7 @@ const CreateAppsPage = () => {
                 <Button
                   isLoading={isCreating}
                   onClick={handleSubmit((data) => onClickCreate(data))}
+                  h={'34px'}
                 >
                   {t('common:Create')}
                 </Button>
@@ -420,9 +423,10 @@ const CreateAppsPage = () => {
                     h={8}
                     isLoading={isGettingMCPTools}
                     onClick={() => {
+                      const headerSecret = headerValue2StoreHeader(mcpHeaderSecret || {});
                       runGetMCPTools({
                         url: mcpUrl || '',
-                        headerSecret: mcpHeaderSecret
+                        headerSecret
                       });
                     }}
                   >

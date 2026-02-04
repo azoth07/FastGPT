@@ -14,8 +14,8 @@ import { webPushTrack } from '@/web/common/middle/tracks/utils';
 
 const TeamPlanStatusCard = () => {
   const { t } = useTranslation();
-  const { teamPlanStatus } = useUserStore();
-  const { operationalAd, loadOperationalAd, feConfigs } = useSystemStore();
+  const { teamPlanStatus, userInfo } = useUserStore();
+  const { operationalAd, loadOperationalAd, feConfigs, subPlans } = useSystemStore();
   const router = useRouter();
 
   // Load data
@@ -24,9 +24,9 @@ const TeamPlanStatusCard = () => {
       loadOperationalAd();
     }
     if (operationalAd?.id) {
-      const currentKey = `hidden-until-${operationalAd.id}`;
+      const currentKey = `logout-operational-${operationalAd.id}`;
       Object.keys(localStorage).forEach((key) => {
-        if (key.startsWith('hidden-until-') && key !== currentKey) {
+        if (key.startsWith('logout-operational-') && key !== currentKey) {
           localStorage.removeItem(key);
         }
       });
@@ -34,16 +34,23 @@ const TeamPlanStatusCard = () => {
   }, [operationalAd, loadOperationalAd]);
 
   const [hiddenUntil, setHiddenUntil] = useLocalStorageState<number | undefined>(
-    `hidden-until-${operationalAd?.id}`,
+    `logout-operational-${operationalAd?.id}`,
     {
       defaultValue: undefined
     }
   );
 
+  const isWecomTeam = userInfo?.team.isWecomTeam;
+
   const planName = useMemo(() => {
     if (!teamPlanStatus?.standard?.currentSubLevel) return '';
-    return standardSubLevelMap[teamPlanStatus.standard.currentSubLevel].label;
-  }, [teamPlanStatus?.standard?.currentSubLevel]);
+    if (isWecomTeam && teamPlanStatus.standard.currentSubLevel === StandardSubLevelEnum.free)
+      return t('common:support.wallet.subscription.standardSubLevel.trial');
+    return (
+      subPlans?.standard?.[teamPlanStatus.standard.currentSubLevel]?.name ||
+      standardSubLevelMap[teamPlanStatus.standard.currentSubLevel]?.label
+    );
+  }, [teamPlanStatus?.standard?.currentSubLevel, isWecomTeam, t, subPlans?.standard]);
 
   const aiPointsUsageMap = useMemo(() => {
     if (!teamPlanStatus) {

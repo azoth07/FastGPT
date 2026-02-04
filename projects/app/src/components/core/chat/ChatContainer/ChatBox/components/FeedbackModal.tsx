@@ -3,7 +3,7 @@ import { ModalBody, Textarea, ModalFooter, Button } from '@chakra-ui/react';
 import MyModal from '@fastgpt/web/components/common/MyModal';
 import { useRequest } from '@fastgpt/web/hooks/useRequest';
 import { useTranslation } from 'next-i18next';
-import { updateChatUserFeedback } from '@/web/core/chat/api';
+import { updateChatUserFeedback } from '@/web/core/chat/feedback/api';
 import { useContextSelector } from 'use-context-selector';
 import { WorkflowRuntimeContext } from '../../context/workflowRuntimeContext';
 
@@ -24,8 +24,8 @@ const FeedbackModal = ({
   const { t } = useTranslation();
   const outLinkAuthData = useContextSelector(WorkflowRuntimeContext, (v) => v.outLinkAuthData);
 
-  const { mutate, isLoading } = useRequest({
-    mutationFn: async () => {
+  const { runAsync, loading: isLoading } = useRequest(
+    async () => {
       const val = ref.current?.value || t('common:core.chat.feedback.No Content');
       return updateChatUserFeedback({
         appId,
@@ -35,12 +35,14 @@ const FeedbackModal = ({
         ...outLinkAuthData
       });
     },
-    onSuccess() {
-      onSuccess(ref.current?.value || t('common:core.chat.feedback.No Content'));
-    },
-    successToast: t('common:core.chat.Feedback Success'),
-    errorToast: t('common:core.chat.Feedback Failed')
-  });
+    {
+      onSuccess() {
+        onSuccess(ref.current?.value || t('common:core.chat.feedback.No Content'));
+      },
+      successToast: t('common:core.chat.Feedback Success'),
+      errorToast: t('common:core.chat.Feedback Failed')
+    }
+  );
 
   return (
     <MyModal
@@ -56,7 +58,7 @@ const FeedbackModal = ({
         <Button variant={'whiteBase'} mr={2} onClick={onClose}>
           {t('common:Close')}
         </Button>
-        <Button isLoading={isLoading} onClick={mutate}>
+        <Button isLoading={isLoading} onClick={runAsync}>
           {t('common:core.chat.Feedback Submit')}
         </Button>
       </ModalFooter>

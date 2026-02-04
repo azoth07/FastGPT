@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { defaultS3Options, Mimes } from './constants';
+import type { Mimes } from './constants';
 import type { S3BaseBucket } from './buckets/base';
 
 export const S3MetadataSchema = z.object({
@@ -15,27 +15,15 @@ export type S3Metadata = z.infer<typeof S3MetadataSchema>;
 export type ContentType = (typeof Mimes)[keyof typeof Mimes];
 export type ExtensionType = keyof typeof Mimes;
 
-export type S3OptionsType = typeof defaultS3Options;
-
-export const S3SourcesSchema = z.enum(['avatar', 'chat', 'dataset', 'temp']);
+export const S3SourcesSchema = z.enum(['avatar', 'chat', 'dataset', 'temp', 'rawText']);
 export const S3Sources = S3SourcesSchema.enum;
 export type S3SourceType = z.infer<typeof S3SourcesSchema>;
 
-export const CreatePostPresignedUrlParamsSchema = z.union([
-  // Option 1: Only rawKey
-  z.object({
-    filename: z.string().min(1),
-    rawKey: z.string().min(1),
-    metadata: z.record(z.string(), z.string()).optional()
-  }),
-  // Option 2: filename with optional source and teamId
-  z.object({
-    filename: z.string().min(1),
-    source: S3SourcesSchema.optional(),
-    teamId: z.string().length(16).optional(),
-    metadata: z.record(z.string(), z.string()).optional()
-  })
-]);
+export const CreatePostPresignedUrlParamsSchema = z.object({
+  filename: z.string().min(1),
+  rawKey: z.string().min(1),
+  metadata: z.record(z.string(), z.string()).optional()
+});
 export type CreatePostPresignedUrlParams = z.infer<typeof CreatePostPresignedUrlParamsSchema>;
 
 export const CreatePostPresignedUrlOptionsSchema = z.object({
@@ -46,7 +34,8 @@ export type CreatePostPresignedUrlOptions = z.infer<typeof CreatePostPresignedUr
 
 export const CreatePostPresignedUrlResultSchema = z.object({
   url: z.string().nonempty(),
-  fields: z.record(z.string(), z.string()),
+  key: z.string().nonempty(),
+  headers: z.record(z.string(), z.string()),
   maxSize: z.number().positive().optional() // bytes
 });
 export type CreatePostPresignedUrlResult = z.infer<typeof CreatePostPresignedUrlResultSchema>;
@@ -65,6 +54,13 @@ export const UploadImage2S3BucketParamsSchema = z.object({
   expiredTime: z.date().optional()
 });
 export type UploadImage2S3BucketParams = z.infer<typeof UploadImage2S3BucketParamsSchema>;
+
+export const UploadFileByBufferSchema = z.object({
+  buffer: z.instanceof(Buffer),
+  contentType: z.string().optional(),
+  key: z.string().nonempty()
+});
+export type UploadFileByBufferParams = z.infer<typeof UploadFileByBufferSchema>;
 
 declare global {
   var s3BucketMap: {

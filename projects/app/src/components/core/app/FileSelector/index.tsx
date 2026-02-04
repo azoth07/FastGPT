@@ -16,9 +16,9 @@ import { ChatFileTypeEnum } from '@fastgpt/global/core/chat/constants';
 import { getFileIcon } from '@fastgpt/global/common/file/icon';
 import type { AppFileSelectConfigType } from '@fastgpt/global/core/app/type';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
+import { useUserStore } from '@/web/support/user/useUserStore';
 import { getUploadFileType } from '@fastgpt/global/core/app/constants';
 import { useToast } from '@fastgpt/web/hooks/useToast';
-import { useTranslation } from 'next-i18next';
 import { useSelectFile } from '@/web/common/file/hooks/useSelectFile';
 import { getNanoid } from '@fastgpt/global/common/string/tools';
 import MyDivider from '@fastgpt/web/components/common/MyDivider';
@@ -26,10 +26,11 @@ import MyAvatar from '@fastgpt/web/components/common/Avatar';
 import { z } from 'zod';
 import { getPresignedChatFileGetUrl, getUploadChatFilePresignedUrl } from '@/web/common/file/api';
 import { useContextSelector } from 'use-context-selector';
-import { POST } from '@/web/common/api/request';
 import { getErrText } from '@fastgpt/global/common/error/utils';
 import { formatFileSize } from '@fastgpt/global/common/file/tools';
 import { WorkflowRuntimeContext } from '@/components/core/chat/ChatContainer/context/workflowRuntimeContext';
+import { useSafeTranslation } from '@fastgpt/web/hooks/useSafeTranslation';
+import { putFileToS3 } from '@fastgpt/web/common/file/utils';
 
 const FileSelector = ({
   value,
@@ -52,8 +53,9 @@ const FileSelector = ({
   isDisabled?: boolean;
 }) => {
   const { feConfigs } = useSystemStore();
+  const { teamPlanStatus } = useUserStore();
   const { toast } = useToast();
-  const { t } = useTranslation();
+  const { t } = useSafeTranslation();
 
   const appId = useContextSelector(WorkflowRuntimeContext, (v) => v.appId);
   const chatId = useContextSelector(WorkflowRuntimeContext, (v) => v.chatId);
@@ -87,8 +89,17 @@ const FileSelector = ({
     canSelectCustomFileExtension,
     customFileExtensionList
   ]);
-  const maxSelectFiles = maxFiles ?? 10;
-  const maxSize = (feConfigs?.uploadFileMaxSize || 1024) * 1024 * 1024; // nkb
+  // 文件数量限制：组件参数 || 团队套餐 || 系统配置 || 默认值
+  const maxSelectFiles =
+    maxFiles ||
+    teamPlanStatus?.standardConstants?.maxUploadFileCount ||
+    feConfigs?.uploadFileMaxAmount ||
+    10;
+  // 文件大小限制（MB）：团队套餐 || 系统配置 || 默认值
+  const maxSize =
+    (teamPlanStatus?.standardConstants?.maxUploadFileSize || feConfigs?.uploadFileMaxSize || 500) *
+    1024 *
+    1024;
   const canSelectFileAmount = maxSelectFiles - value.length;
   const isMaxSelected = canSelectFileAmount <= 0;
 
@@ -110,21 +121,17 @@ const FileSelector = ({
 
           try {
             // Get Upload Post Presigned URL
-            const { url, fields } = await getUploadChatFilePresignedUrl({
+            const { url, key, headers } = await getUploadChatFilePresignedUrl({
               filename: file.rawFile.name,
               appId,
               chatId,
               outLinkAuthData
             });
 
-            // Upload File to S3
-            const formData = new FormData();
-            Object.entries(fields).forEach(([k, v]) => formData.set(k, v));
-            formData.set('file', file.rawFile);
-            await POST(url, formData, {
-              headers: {
-                'Content-Type': 'multipart/form-data; charset=utf-8'
-              },
+            await putFileToS3({
+              url,
+              file: file.rawFile,
+              headers,
               onUploadProgress: (e) => {
                 if (!e.total) return;
                 const percent = Math.round((e.loaded / e.total) * 100);
@@ -135,10 +142,12 @@ const FileSelector = ({
                 });
                 handleChangeFiles(files);
               },
-              timeout: 5 * 60 * 1000 // 5 minutes
+              t,
+              maxSize
             });
+
             const previewUrl = await getPresignedChatFileGetUrl({
-              key: fields.key,
+              key: key,
               appId,
               outLinkAuthData
             });
@@ -147,7 +156,7 @@ const FileSelector = ({
             files.forEach((item) => {
               if (item.id === file.id) {
                 item.url = previewUrl;
-                item.key = fields.key;
+                item.key = key;
                 item.process = 100;
               }
             });
@@ -494,7 +503,7 @@ const FileSelector = ({
                   </HStack>
                   {file?.error && (
                     <Box mt={1} fontSize={'xs'} color={'red.600'}>
-                      {file?.error}
+                      {t(file.error)}
                     </Box>
                   )}
                 </Box>

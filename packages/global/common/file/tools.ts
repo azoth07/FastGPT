@@ -1,8 +1,9 @@
 import { detect } from 'jschardet';
-import { documentFileType } from './constants';
+import { imageFileType } from './constants';
 import { ChatFileTypeEnum } from '../../core/chat/constants';
 import { type UserChatItemFileItemType } from '../../core/chat/type';
 import * as fs from 'fs';
+import path from 'path';
 
 export const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 B';
@@ -61,23 +62,34 @@ export const parseUrlToFileType = (url: string): UserChatItemFileItemType | unde
     // Get filename from URL
     const filename = (() => {
       // Here is a S3 Object Key
-      if (url.startsWith('chat/')) return url.split('/').pop()?.split('-')[1];
-      return parseUrl.searchParams.get('filename') || parseUrl.pathname.split('/').pop();
+      if (url.startsWith('chat/')) {
+        const basename = path.basename(url);
+        // Return empty if no extension
+        return basename.includes('.') ? basename : '';
+      }
+
+      const fromParam = parseUrl.searchParams.get('filename');
+      if (fromParam) {
+        return fromParam;
+      }
+
+      const basename = path.basename(parseUrl.pathname);
+      // Return empty if no extension
+      return basename.includes('.') ? basename : '';
     })();
     const extension = filename?.split('.').pop()?.toLowerCase() || '';
 
-    // If it's a document type, return as file, otherwise treat as image
-    if (extension && documentFileType.includes(extension)) {
+    if (extension && imageFileType.includes(extension)) {
+      // Default to file type for non-extension files
       return {
-        type: ChatFileTypeEnum.file,
+        type: ChatFileTypeEnum.image,
         name: filename || 'null',
         url
       };
     }
-
-    // Default to image type for non-document files
+    // If it's a document type, return as file, otherwise treat as image
     return {
-      type: ChatFileTypeEnum.image,
+      type: ChatFileTypeEnum.file,
       name: filename || 'null',
       url
     };

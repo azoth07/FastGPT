@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Button, CloseButton, Flex } from '@chakra-ui/react';
 import { useContextSelector } from 'use-context-selector';
-import { useRequest2 } from '@fastgpt/web/hooks/useRequest';
+import { useRequest } from '@fastgpt/web/hooks/useRequest';
 import MyIcon from '@fastgpt/web/components/common/Icon';
 import MyPopover from '@fastgpt/web/components/common/MyPopover';
 import Avatar from '@fastgpt/web/components/common/Avatar';
@@ -15,7 +15,6 @@ import { ArrayTypeMap, NodeInputKeyEnum } from '@fastgpt/global/core/workflow/co
 import { AppContext } from '../../../../context';
 import { useTranslation } from 'next-i18next';
 import PromptEditor from '@fastgpt/web/components/common/Textarea/PromptEditor';
-import { useCreation } from 'ahooks';
 import { useToast } from '@fastgpt/web/hooks/useToast';
 import {
   FlowNodeInputTypeEnum,
@@ -27,14 +26,15 @@ import {
   JS_TEMPLATE,
   SandboxCodeTypeEnum
 } from '@fastgpt/global/core/workflow/template/system/sandbox/constants';
-import {
-  WorkflowBufferDataContext,
-  WorkflowNodeDataContext
-} from '../../../context/workflowInitContext';
+import { WorkflowBufferDataContext } from '../../../context/workflowInitContext';
 import { getEditorVariables } from '../../../utils';
 import { extractCodeFromMarkdown } from './parser';
 import { WorkflowActionsContext } from '../../../context/workflowActionsContext';
 import { useMemoEnhance } from '@fastgpt/web/hooks/useMemoEnhance';
+import type {
+  FlowNodeInputItemType,
+  FlowNodeOutputItemType
+} from '@fastgpt/global/core/workflow/type/io';
 
 export type OnOptimizeCodeProps = {
   optimizerInput: string;
@@ -44,7 +44,17 @@ export type OnOptimizeCodeProps = {
   abortController?: AbortController;
 };
 
-const NodeCopilot = ({ nodeId, trigger }: { nodeId: string; trigger: React.ReactNode }) => {
+const NodeCopilot = ({
+  nodeId,
+  inputs: realTimeInputs,
+  outputs: realTimeOutputs,
+  trigger
+}: {
+  nodeId: string;
+  inputs: FlowNodeInputItemType[];
+  outputs: FlowNodeOutputItemType[];
+  trigger: React.ReactNode;
+}) => {
   const { t } = useTranslation();
   const { toast } = useToast();
   const { llmModelList, defaultModels } = useSystemStore();
@@ -76,25 +86,23 @@ const NodeCopilot = ({ nodeId, trigger }: { nodeId: string; trigger: React.React
   }, [nodeId, systemConfigNode, getNodeById, edges, appDetail, t]);
 
   const { codeType, code, dynamicInputs, dynamicOutputs } = useMemo(() => {
-    const currentNode = getNodeById(nodeId);
-    const codeTypeInput = currentNode?.inputs?.find(
-      (input) => input.key === NodeInputKeyEnum.codeType
-    );
-    const codeInput = currentNode?.inputs?.find((input) => input.key === NodeInputKeyEnum.code);
+    const codeTypeInput = realTimeInputs?.find((input) => input.key === NodeInputKeyEnum.codeType);
+    const codeInput = realTimeInputs?.find((input) => input.key === NodeInputKeyEnum.code);
+
     return {
       codeType: codeTypeInput?.value || SandboxCodeTypeEnum.js,
       code: codeInput?.value || JS_TEMPLATE,
       dynamicInputs:
-        currentNode?.inputs?.filter(
+        realTimeInputs?.filter(
           (input) =>
             !['system_addInputParam', 'codeType', NodeInputKeyEnum.code].includes(input.key)
         ) || [],
       dynamicOutputs:
-        currentNode?.outputs?.filter(
+        realTimeOutputs?.filter(
           (output) => !['system_rawResponse', 'error', 'system_addOutputParam'].includes(output.key)
         ) || []
     };
-  }, [getNodeById, nodeId]);
+  }, [realTimeInputs, realTimeOutputs]);
 
   useEffect(() => {
     if (conversationHistory.length === 0) {
@@ -171,7 +179,7 @@ const NodeCopilot = ({ nodeId, trigger }: { nodeId: string; trigger: React.React
       return match;
     });
   };
-  const { runAsync: handleSendOptimization, loading } = useRequest2(async () => {
+  const { runAsync: handleSendOptimization, loading } = useRequest(async () => {
     if (isInputEmpty) return;
 
     const processedInput = replaceVariables(optimizerInput);
@@ -216,9 +224,8 @@ const NodeCopilot = ({ nodeId, trigger }: { nodeId: string; trigger: React.React
     try {
       const extractedResult = extractCodeFromMarkdown(codeResult);
       const { code, inputs, outputs } = extractedResult;
-      const currentNode = getNodeById(nodeId);
-      const codeInput = currentNode?.inputs?.find((input) => input.key === NodeInputKeyEnum.code);
-      if (!codeInput || !currentNode) return;
+      const codeInput = realTimeInputs?.find((input) => input.key === NodeInputKeyEnum.code);
+      if (!codeInput) return;
       onChangeNode({
         nodeId,
         type: 'updateInput',

@@ -22,6 +22,7 @@ import { getNodeErrResponse } from '../utils';
 import { splitCombineToolId } from '@fastgpt/global/core/app/tool/utils';
 import { getAppVersionById } from '../../../../core/app/version/controller';
 import { runHTTPTool } from '../../../app/http';
+import { getS3ChatSource } from '../../../../common/s3/sources/chat';
 
 type SystemInputConfigType = {
   type: SystemToolSecretInputTypeEnum;
@@ -53,7 +54,14 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
     node: { name, avatar, toolConfig, version, catchError }
   } = props;
 
+  const {
+    uid: uId,
+    chatId = '',
+    runningAppInfo: { id: appId }
+  } = props;
+
   const systemToolId = toolConfig?.systemTool?.toolId;
+  let toolInput: Record<string, any> = {};
 
   try {
     // run system tool
@@ -78,10 +86,11 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
             return dbPlugin?.inputListVal || {};
         }
       })();
+      toolInput = Object.fromEntries(
+        Object.entries(params).filter(([key]) => key !== NodeInputKeyEnum.systemInputConfig)
+      );
       const inputs = {
-        ...Object.fromEntries(
-          Object.entries(params).filter(([key]) => key !== NodeInputKeyEnum.systemInputConfig)
-        ),
+        ...toolInput,
         ...inputConfigParams
       };
 
@@ -107,7 +116,8 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
           },
           tool: {
             id: formatToolId,
-            version: version || tool.versionList?.[0]?.value || ''
+            version: version || tool.versionList?.[0]?.value || '',
+            prefix: getS3ChatSource().getToolFilePrefix({ appId, chatId, uId })
           },
           time: variables.cTime
         },
@@ -132,6 +142,7 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
           return {
             data: res.error,
             [DispatchNodeResponseKeyEnum.nodeResponse]: {
+              toolInput,
               toolRes: res.error,
               moduleLogo: avatar
             },
@@ -148,6 +159,7 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
         return {
           error: res.error,
           [DispatchNodeResponseKeyEnum.nodeResponse]: {
+            toolInput,
             error: res.error,
             moduleLogo: avatar
           },
@@ -179,6 +191,7 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
         data: result,
         [DispatchNodeResponseKeyEnum.answerText]: answerText,
         [DispatchNodeResponseKeyEnum.nodeResponse]: {
+          toolInput,
           toolRes: result,
           moduleLogo: avatar,
           totalPoints: usagePoints
@@ -213,10 +226,12 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
         });
       props.mcpClientMemory[url] = mcpClient;
 
+      toolInput = params;
       const result = await mcpClient.toolCall({ toolName, params, closeConnection: false });
       return {
         data: { [NodeOutputKeyEnum.rawResponse]: result },
         [DispatchNodeResponseKeyEnum.nodeResponse]: {
+          toolInput,
           toolRes: result,
           moduleLogo: avatar
         },
@@ -241,6 +256,7 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
         throw new Error(`HTTP tool ${toolName} not found`);
       }
 
+      toolInput = params;
       const { data, errorMsg } = await runHTTPTool({
         baseUrl: baseUrl || '',
         toolPath: httpTool.path,
@@ -262,6 +278,7 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
           return {
             error: { [NodeOutputKeyEnum.errorText]: errorMsg },
             [DispatchNodeResponseKeyEnum.nodeResponse]: {
+              toolInput,
               toolRes: errorMsg,
               moduleLogo: avatar
             },
@@ -274,6 +291,7 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
       return {
         data: { [NodeOutputKeyEnum.rawResponse]: data, ...(typeof data === 'object' ? data : {}) },
         [DispatchNodeResponseKeyEnum.nodeResponse]: {
+          toolInput,
           toolRes: data,
           moduleLogo: avatar
         },
@@ -290,6 +308,7 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
           storeSecret: headerSecret
         })
       });
+      toolInput = restParams;
       const result = await mcpClient.toolCall({ toolName, params: restParams });
 
       return {
@@ -297,6 +316,7 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
           [NodeOutputKeyEnum.rawResponse]: result
         },
         [DispatchNodeResponseKeyEnum.nodeResponse]: {
+          toolInput,
           toolRes: result,
           moduleLogo: avatar
         },
@@ -317,7 +337,8 @@ export const dispatchRunTool = async (props: RunToolProps): Promise<RunToolRespo
 
     return getNodeErrResponse({
       error,
-      customNodeResponse: {
+      [DispatchNodeResponseKeyEnum.nodeResponse]: {
+        toolInput,
         moduleLogo: avatar
       }
     });
