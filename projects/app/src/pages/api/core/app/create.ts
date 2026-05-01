@@ -107,6 +107,15 @@ async function handler(req: ApiRequestProps<CreateAppBodyType>) {
 
 export default NextAPI(handler);
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '20mb'
+    },
+    responseLimit: '20mb'
+  }
+};
+
 export const onCreateApp = async ({
   parentId,
   name,
