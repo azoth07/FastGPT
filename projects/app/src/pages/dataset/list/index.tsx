@@ -6,8 +6,8 @@ import { useTranslation } from 'next-i18next';
 import { serviceSideProps } from '@/web/common/i18n/utils';
 import FolderPath from '@/components/common/folder/Path';
 import List from '@/pageComponents/dataset/list/List';
-import { DatasetsContext } from './context';
-import DatasetContextProvider from './context';
+import { DatasetsContext } from '../../../pageComponents/dataset/list/context';
+import DatasetContextProvider from '../../../pageComponents/dataset/list/context';
 import { useContextSelector } from 'use-context-selector';
 import MultipleMenu from '@fastgpt/web/components/common/MyMenu/Multiple';
 import { AddIcon } from '@chakra-ui/icons';
@@ -194,6 +194,16 @@ const Dataset = () => {
                                         label: t('dataset:yuque_dataset'),
                                         description: t('dataset:yuque_dataset_desc'),
                                         onClick: () => onSelectDatasetType(DatasetTypeEnum.yuque)
+                                      }
+                                    ]
+                                  : []),
+                                ...(feConfigs?.show_dataset_dingtalk !== false
+                                  ? [
+                                      {
+                                        icon: 'core/dataset/dingtalkDatasetColor',
+                                        label: t('dataset:dingtalk_dataset'),
+                                        description: t('dataset:dingtalk_dataset_desc'),
+                                        onClick: () => onSelectDatasetType(DatasetTypeEnum.dingtalk)
                                       }
                                     ]
                                   : [])

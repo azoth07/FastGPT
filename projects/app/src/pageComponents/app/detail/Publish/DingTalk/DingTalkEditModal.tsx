@@ -44,8 +44,8 @@ const DingTalkEditModal = ({
         appId,
         type: PublishChannelEnum.dingtalk,
         app: {
-          clientId: e?.app?.clientId?.trim(),
-          clientSecret: e.app?.clientSecret?.trim()
+          clientId: e?.app?.clientId?.trim() ?? '',
+          clientSecret: e.app?.clientSecret?.trim() ?? ''
         }
       }),
     {
@@ -60,8 +60,8 @@ const DingTalkEditModal = ({
       updateShareChat({
         ...e,
         app: {
-          clientId: e?.app?.clientId?.trim(),
-          clientSecret: e.app?.clientSecret?.trim()
+          clientId: e?.app?.clientId?.trim() ?? '',
+          clientSecret: e.app?.clientSecret?.trim() ?? ''
         }
       }),
     {
@@ -90,7 +90,7 @@ const DingTalkEditModal = ({
             <Box color="myGray.600">{t('publish:dingtalk.api')}</Box>
             {feConfigs?.docUrl && (
               <Link
-                href={getDocPath('/docs/use-cases/external-integration/dingtalk/')}
+                href={getDocPath('/use-cases/external-integration/dingtalk/')}
                 target={'_blank'}
                 ml={2}
                 color={'primary.500'}

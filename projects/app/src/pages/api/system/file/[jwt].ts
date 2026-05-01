@@ -1,9 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { jsonRes } from '@fastgpt/service/common/response';
 import { getS3DatasetSource } from '@fastgpt/service/common/s3/sources/dataset';
-import { addLog } from '@fastgpt/service/common/system/log';
+import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
 import { jwtVerifyS3ObjectKey, isS3ObjectKey } from '@fastgpt/service/common/s3/utils';
 import { getS3ChatSource } from '@fastgpt/service/common/s3/sources/chat';
+import { getContentDisposition } from '@fastgpt/global/common/file/tools';
+import path from 'path';
+const logger = getLogger(LogCategories.INFRA.FILE);
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
@@ -39,18 +42,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           });
         }
 
-        if (metadata) {
+        if (metadata?.contentType) {
           res.setHeader('Content-Type', metadata.contentType);
         }
         if (metadata?.contentLength) {
           res.setHeader('Content-Length', metadata.contentLength);
         }
+        const filename = metadata?.filename || path.basename(objectKey) || 'file';
+        res.setHeader('Content-Disposition', getContentDisposition({ filename, type: 'inline' }));
         res.setHeader('Cache-Control', 'public, max-age=31536000');
 
         stream.pipe(res);
 
         stream.on('error', (error) => {
-          addLog.error('Error reading dataset file', { error });
+          logger.error('Error reading dataset file', { error });
           if (!res.headersSent) {
             return jsonRes(res, {
               code: 500,

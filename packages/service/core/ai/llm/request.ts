@@ -1,52 +1,63 @@
 import type {
-  ChatCompletion,
+  ChatCompletionCreateParams,
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
   ChatCompletionMessageParam,
   ChatCompletionMessageToolCall,
+  ChatCompletionTool,
   CompletionFinishReason,
   CompletionUsage,
   OpenAI,
-  StreamChatType,
-  UnStreamChatType
-} from '@fastgpt/global/core/ai/type';
+  StreamResponseType,
+  UnStreamResponseType
+} from '@fastgpt/global/core/ai/llm/type';
 import {
   computedMaxToken,
   computedTemperature,
   parseLLMStreamResponse,
   parseReasoningContent
 } from '../utils';
-import { removeDatasetCiteText } from '@fastgpt/global/core/ai/llm/utils';
+import { getLLMSupportParams, removeDatasetCiteText } from '@fastgpt/global/core/ai/llm/utils';
 import { getAIApi } from '../config';
 import type { OpenaiAccountType } from '@fastgpt/global/support/user/team/type';
-import { getNanoid } from '@fastgpt/global/common/string/tools';
+import { customNanoid, getNanoid } from '@fastgpt/global/common/string/tools';
 import { parsePromptToolCall, promptToolCallMessageRewrite } from './promptCall';
 import { getLLMModel } from '../model';
 import { ChatCompletionRequestMessageRoleEnum } from '@fastgpt/global/core/ai/constants';
 import { countGptMessagesTokens } from '../../../common/string/tiktoken/index';
 import { loadRequestMessages } from './utils';
-import { addLog } from '../../../common/system/log';
-import type { LLMModelItemType } from '@fastgpt/global/core/ai/model.d';
+import type { LLMModelItemType } from '@fastgpt/global/core/ai/model.schema';
 import { i18nT } from '../../../../web/i18n/utils';
 import { getErrText } from '@fastgpt/global/common/error/utils';
 import json5 from 'json5';
+import { getLogger, LogCategories } from '../../../common/logger';
+import { saveLLMRequestRecord } from '../record/controller';
+import type { ToolCallEventType } from './toolCall/type';
 
-export type ResponseEvents = {
-  onStreaming?: ({ text }: { text: string }) => void;
-  onReasoning?: ({ text }: { text: string }) => void;
-  onToolCall?: ({ call }: { call: ChatCompletionMessageToolCall }) => void;
-  onToolParam?: ({ tool, params }: { tool: ChatCompletionMessageToolCall; params: string }) => void;
+const getRequestId = () => {
+  return customNanoid('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_-', 16);
 };
 
-export type CreateLLMResponseProps<T extends CompletionsBodyType = CompletionsBodyType> = {
+const logger = getLogger(LogCategories.MODULE.AI.LLM);
+
+export type ResponseEvents = ToolCallEventType & {
+  onStreaming?: (e: { text: string }) => void;
+  onReasoning?: (e: { text: string }) => void;
+};
+
+export type CreateLLMResponseProps<
+  T extends ChatCompletionCreateParams = ChatCompletionCreateParams
+> = {
   throwError?: boolean;
   userKey?: OpenaiAccountType;
   body: LLMRequestBodyType<T>;
-  isAborted?: () => boolean | undefined;
+  isAborted?: () => boolean | undefined | null;
   custonHeaders?: Record<string, string>;
+  maxContinuations?: number;
 } & ResponseEvents;
 
 type LLMResponse = {
+  requestId: string; // LLM 请求追踪 ID
   error?: any;
   isStreamResponse: boolean;
   answerText: string;
@@ -60,7 +71,7 @@ type LLMResponse = {
   };
 
   requestMessages: ChatCompletionMessageParam[];
-  assistantMessage: ChatCompletionMessageParam[];
+  assistantMessage?: ChatCompletionMessageParam;
   completeMessages: ChatCompletionMessageParam[];
 };
 
@@ -68,16 +79,20 @@ type LLMResponse = {
   底层封装 LLM 调用 帮助上层屏蔽 stream 和非 stream，以及 toolChoice 和 promptTool 模式。
   工具调用无论哪种模式，都存 toolChoice 的格式，promptTool 通过修改 toolChoice 的结构，形成特定的 messages 进行调用。
 */
-export const createLLMResponse = async <T extends CompletionsBodyType>(
+export const createLLMResponse = async <T extends ChatCompletionCreateParams>(
   args: CreateLLMResponseProps<T>
 ): Promise<LLMResponse> => {
-  const { throwError = true, body, custonHeaders, userKey } = args;
+  // 生成唯一的请求追踪 ID
+  const requestId = getRequestId();
+
+  const { throwError = true, body, custonHeaders, userKey, maxContinuations = 1 } = args;
   const { messages, useVision, requestOrigin, tools, toolCallMode } = body;
+  const model = getLLMModel(body.model);
 
   // Messages process
   const requestMessages = await loadRequestMessages({
     messages,
-    useVision,
+    useVision: useVision && model.vision,
     origin: requestOrigin
   });
   // Message process
@@ -93,119 +108,270 @@ export const createLLMResponse = async <T extends CompletionsBodyType>(
     messages: rewriteMessages
   });
 
-  // console.log(JSON.stringify(requestBody, null, 2));
-  const { response, isStreamResponse } = await createChatCompletion({
-    body: requestBody,
-    modelData,
-    userKey,
-    options: {
-      headers: {
-        Accept: 'application/json, text/plain, */*',
-        ...custonHeaders
+  // Initial request and accumulate results if finish_reason is 'length'
+  let accumulatedAnswerText = '';
+  let accumulatedReasoningText = '';
+  let accumulatedToolCalls: ChatCompletionMessageToolCall[] | undefined;
+  let currentFinishReason: CompletionFinishReason = 'stop';
+  let accumulatedUsage = {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0
+  };
+  let currentError: any = undefined;
+  let currentMessages = [...requestBody.messages];
+  let continuationCount = 0;
+  let isStreamResponse = false;
+
+  try {
+    while (continuationCount < maxContinuations) {
+      // console.debug(
+      //   'LLM Request Body:',
+      //   JSON.stringify(
+      //     {
+      //       ...requestBody,
+      //       messages: currentMessages
+      //     },
+      //     null,
+      //     2
+      //   )
+      // );
+      const { response, isStreamResponse: currentIsStreamResponse } = await createChatCompletion({
+        body: {
+          ...requestBody,
+          messages: currentMessages
+        },
+        modelData,
+        userKey,
+        options: {
+          headers: {
+            Accept: 'application/json, text/plain, */*',
+            ...custonHeaders
+          }
+        }
+      });
+
+      // Save isStreamResponse from first request
+      if (continuationCount === 0) {
+        isStreamResponse = currentIsStreamResponse;
+      }
+
+      let { answerText, reasoningText, toolCalls, finish_reason, usage, error } =
+        await (async () => {
+          if (currentIsStreamResponse) {
+            return createStreamResponse({
+              response,
+              body,
+              isAborted: args.isAborted,
+              onStreaming: args.onStreaming,
+              onReasoning: args.onReasoning,
+              onToolCall: args.onToolCall,
+              onToolParam: args.onToolParam
+            });
+          } else {
+            return createCompleteResponse({
+              response,
+              body,
+              onStreaming: args.onStreaming,
+              onReasoning: args.onReasoning,
+              onToolCall: args.onToolCall
+            });
+          }
+        })();
+
+      // Format toolCalls
+      // 1. Auto complete arguments, avoid model not support "" arguments
+      toolCalls = toolCalls?.map((tool) => ({
+        ...tool,
+        function: {
+          ...tool.function,
+          arguments: tool.function.arguments || '{}'
+        }
+      }));
+
+      // Accumulate results
+      accumulatedAnswerText += answerText;
+      accumulatedReasoningText += reasoningText;
+      if (toolCalls?.length) {
+        accumulatedToolCalls = [...(accumulatedToolCalls || []), ...toolCalls];
+      }
+      currentFinishReason = finish_reason;
+      currentError = error;
+
+      // Accumulate usage
+      if (usage) {
+        accumulatedUsage.prompt_tokens += usage.prompt_tokens || 0;
+        accumulatedUsage.completion_tokens += usage.completion_tokens || 0;
+        accumulatedUsage.total_tokens += usage.total_tokens || 0;
+      }
+
+      // Check if we need to continue
+      // TODO: 输出超出模型输出上限
+      if (finish_reason === 'length' && !error) {
+        // Append assistant message and user continuation message
+        currentMessages = currentMessages.slice(0, requestBody.messages.length);
+        currentMessages = [
+          ...currentMessages,
+          ...(accumulatedToolCalls
+            ? [
+                {
+                  role: ChatCompletionRequestMessageRoleEnum.Assistant as 'assistant',
+                  tool_calls: accumulatedToolCalls
+                }
+              ]
+            : []),
+          {
+            role: ChatCompletionRequestMessageRoleEnum.Assistant as 'assistant',
+            ...(accumulatedAnswerText && { content: accumulatedAnswerText }),
+            ...(accumulatedReasoningText && { reasoning_content: accumulatedReasoningText })
+          },
+          {
+            role: ChatCompletionRequestMessageRoleEnum.User as 'user',
+            content: '[继续输出]'
+          }
+        ];
+
+        logger.debug(`Continue LLM response due to length limit`, {
+          continuationCount,
+          completionTokens: usage?.completion_tokens
+        });
+        continuationCount++;
+      } else {
+        // Stop condition reached
+        break;
       }
     }
-  });
 
-  let { answerText, reasoningText, toolCalls, finish_reason, usage, error } = await (async () => {
-    if (isStreamResponse) {
-      return createStreamResponse({
-        response,
-        body,
-        isAborted: args.isAborted,
-        onStreaming: args.onStreaming,
-        onReasoning: args.onReasoning,
-        onToolCall: args.onToolCall,
-        onToolParam: args.onToolParam
-      });
-    } else {
-      return createCompleteResponse({
-        response,
-        body,
-        onStreaming: args.onStreaming,
-        onReasoning: args.onReasoning,
-        onToolCall: args.onToolCall
-      });
+    // Use accumulated results
+    let { answerText, reasoningText, toolCalls, finish_reason, usage, error } = {
+      answerText: accumulatedAnswerText,
+      reasoningText: accumulatedReasoningText,
+      toolCalls: accumulatedToolCalls,
+      finish_reason: currentFinishReason,
+      usage: accumulatedUsage,
+      error: currentError
+    };
+
+    const assistantMessage: ChatCompletionMessageParam = {
+      role: ChatCompletionRequestMessageRoleEnum.Assistant as 'assistant',
+      ...(answerText && { content: answerText }),
+      ...(reasoningText && { reasoning_content: reasoningText }),
+      ...(toolCalls?.length && { tool_calls: toolCalls })
+    };
+
+    // requestBody 运行时是经 LLMRequestBodyType narrow 进来的 FastGPT 数据，
+    // 但类型层 InferCompletionsBody 落到了 SDK 形态（messages/tools 是 v6 后的 union）
+    const inputTokens =
+      usage?.prompt_tokens ||
+      (await countGptMessagesTokens(
+        requestBody.messages as ChatCompletionMessageParam[],
+        requestBody.tools as ChatCompletionTool[] | undefined
+      ));
+    const outputTokens =
+      usage?.completion_tokens || (await countGptMessagesTokens([assistantMessage]));
+
+    // 异步保存 LLM 请求追踪记录（fire-and-forget）
+    void saveLLMRequestRecord({
+      requestId,
+      body: requestBody,
+      response: {
+        ...(answerText && { answerText }),
+        ...(reasoningText && { reasoningText }),
+        ...(toolCalls?.length && { toolCalls }),
+        finish_reason,
+        usage: {
+          inputTokens,
+          outputTokens
+        },
+        error
+      }
+    });
+
+    if (error) {
+      finish_reason = 'error';
+
+      if (throwError) {
+        throw error;
+      }
     }
-  })();
 
-  const assistantMessage: ChatCompletionMessageParam[] = [
-    ...(answerText || reasoningText
-      ? [
-          {
-            role: ChatCompletionRequestMessageRoleEnum.Assistant as 'assistant',
-            content: answerText,
-            reasoning_text: reasoningText
-          }
-        ]
-      : []),
-    ...(toolCalls?.length
-      ? [
-          {
-            role: ChatCompletionRequestMessageRoleEnum.Assistant as 'assistant',
-            tool_calls: toolCalls
-          }
-        ]
-      : [])
-  ];
+    const getEmptyResponseTip = () => {
+      if (userKey?.baseUrl) {
+        logger.warn(`User LLM response empty`, {
+          baseUrl: userKey?.baseUrl,
+          requestBody,
+          finish_reason
+        });
+        return `您的 OpenAI key 没有响应: ${JSON.stringify(body)}`;
+      } else {
+        logger.error(`LLM response empty`, {
+          message: '',
+          data: requestBody,
+          finish_reason
+        });
+      }
+      return i18nT('chat:LLM_model_response_empty');
+    };
+    const isNotResponse =
+      !answerText &&
+      !reasoningText &&
+      !toolCalls?.length &&
+      !error &&
+      (finish_reason === 'stop' || !finish_reason);
+    const responseEmptyTip = isNotResponse ? getEmptyResponseTip() : undefined;
 
-  // Usage count
-  const inputTokens =
-    usage?.prompt_tokens || (await countGptMessagesTokens(requestBody.messages, requestBody.tools));
-  const outputTokens = usage?.completion_tokens || (await countGptMessagesTokens(assistantMessage));
+    return {
+      error,
+      isStreamResponse,
+      responseEmptyTip,
+      answerText,
+      reasoningText,
+      toolCalls,
+      finish_reason,
+      usage: {
+        inputTokens: error ? 0 : inputTokens,
+        outputTokens: error ? 0 : outputTokens
+      },
+      requestId, // 返回请求追踪 ID
 
-  if (error) {
-    finish_reason = 'error';
+      requestMessages,
+      assistantMessage,
+      completeMessages: [...requestMessages, assistantMessage]
+    };
+  } catch (error) {
+    // 异步保存 LLM 请求追踪记录（fire-and-forget）
+    void saveLLMRequestRecord({
+      requestId,
+      body: requestBody,
+      response: {
+        error: getErrText(error)
+      }
+    });
 
     if (throwError) {
       throw error;
     }
+
+    return {
+      error,
+      requestId, // 返回请求追踪 ID
+      isStreamResponse: false,
+      answerText: '',
+      reasoningText: '',
+      finish_reason: 'error',
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0
+      },
+      // requestBody.messages 在类型层是 SDK v6 的联合（含 custom tool），运行时 FastGPT 仅产 function 形态
+      requestMessages: requestBody.messages as ChatCompletionMessageParam[],
+      completeMessages: [...requestBody.messages] as ChatCompletionMessageParam[]
+    };
   }
-
-  const getEmptyResponseTip = () => {
-    if (userKey?.baseUrl) {
-      addLog.warn(`User LLM response empty`, {
-        baseUrl: userKey?.baseUrl,
-        requestBody,
-        finish_reason
-      });
-      return `您的 OpenAI key 没有响应: ${JSON.stringify(body)}`;
-    } else {
-      addLog.error(`LLM response empty`, {
-        message: '',
-        data: requestBody,
-        finish_reason
-      });
-    }
-    return i18nT('chat:LLM_model_response_empty');
-  };
-  const isNotResponse =
-    !answerText &&
-    !reasoningText &&
-    !toolCalls?.length &&
-    !error &&
-    (finish_reason === 'stop' || !finish_reason);
-  const responseEmptyTip = isNotResponse ? getEmptyResponseTip() : undefined;
-
-  return {
-    error,
-    isStreamResponse,
-    responseEmptyTip,
-    answerText,
-    reasoningText,
-    toolCalls,
-    finish_reason,
-    usage: {
-      inputTokens: error ? 0 : inputTokens,
-      outputTokens: error ? 0 : outputTokens
-    },
-
-    requestMessages,
-    assistantMessage,
-    completeMessages: [...requestMessages, ...assistantMessage]
-  };
 };
 
-type CompleteParams = Pick<CreateLLMResponseProps<CompletionsBodyType>, 'body'> & ResponseEvents;
+type CompleteParams = Pick<CreateLLMResponseProps<ChatCompletionCreateParams>, 'body'> &
+  ResponseEvents;
 
 type CompleteResponse = Pick<
   LLMResponse,
@@ -224,8 +390,8 @@ export const createStreamResponse = async ({
   onToolCall,
   onToolParam
 }: CompleteParams & {
-  response: StreamChatType;
-  isAborted?: () => boolean | undefined;
+  response: StreamResponseType;
+  isAborted?: CreateLLMResponseProps['isAborted'];
 }): Promise<CompleteResponse> => {
   const { retainDatasetCite = true, tools, toolCallMode = 'toolChoice', model } = body;
   const modelData = getLLMModel(model);
@@ -283,7 +449,7 @@ export const createStreamResponse = async ({
                 // New tool, add to list.
                 if (tools.find((item) => item.function.name === callingTool!.name)) {
                   const call: ChatCompletionMessageToolCall = {
-                    id: getNanoid(),
+                    id: toolCall.id || getNanoid(6),
                     type: 'function',
                     function: callingTool!
                   };
@@ -298,7 +464,7 @@ export const createStreamResponse = async ({
                 if (currentTool && arg) {
                   currentTool.function.arguments += arg;
 
-                  onToolParam?.({ tool: currentTool, params: arg });
+                  onToolParam?.({ call: currentTool, argsDelta: arg });
                 }
               }
             });
@@ -440,7 +606,7 @@ export const createCompleteResponse = async ({
   onStreaming,
   onReasoning,
   onToolCall
-}: CompleteParams & { response: ChatCompletion }): Promise<CompleteResponse> => {
+}: CompleteParams & { response: UnStreamResponseType }): Promise<CompleteResponse> => {
   const { tools, toolCallMode = 'toolChoice', retainDatasetCite = true } = body;
   const modelData = getLLMModel(body.model);
 
@@ -474,8 +640,12 @@ export const createCompleteResponse = async ({
   const { toolCalls } = (() => {
     if (tools?.length) {
       if (toolCallMode === 'toolChoice') {
+        // openai v6 的 tool_calls 是 function | custom 联合，FastGPT 仅消费 function 形态。
         return {
-          toolCalls: response.choices?.[0]?.message?.tool_calls || []
+          toolCalls:
+            response.choices?.[0]?.message?.tool_calls?.filter(
+              (call): call is ChatCompletionMessageToolCall => call.type === 'function'
+            ) || []
         };
       }
 
@@ -516,16 +686,18 @@ export const createCompleteResponse = async ({
   };
 };
 
-type CompletionsBodyType =
-  | ChatCompletionCreateParamsNonStreaming
-  | ChatCompletionCreateParamsStreaming;
 type InferCompletionsBody<T> = T extends { stream: true }
   ? ChatCompletionCreateParamsStreaming
   : T extends { stream: false }
     ? ChatCompletionCreateParamsNonStreaming
-    : ChatCompletionCreateParamsNonStreaming | ChatCompletionCreateParamsStreaming;
+    : ChatCompletionCreateParams;
 
-type LLMRequestBodyType<T> = Omit<T, 'model' | 'stop' | 'response_format' | 'messages'> & {
+// tools 同步用 FastGPT narrow 后的 ChatCompletionTool（function-only），
+// 避免 SDK 联合类型透过 T['tools'] 漏到下游。
+type LLMRequestBodyType<T> = Omit<
+  T,
+  'model' | 'stop' | 'response_format' | 'messages' | 'tools'
+> & {
   model: string | LLMModelItemType;
   stop?: string;
   response_format?: {
@@ -533,6 +705,7 @@ type LLMRequestBodyType<T> = Omit<T, 'model' | 'stop' | 'response_format' | 'mes
     json_schema?: string;
   };
   messages: ChatCompletionMessageParam[];
+  tools?: ChatCompletionTool[];
 
   // Custom field
   retainDatasetCite?: boolean;
@@ -540,7 +713,7 @@ type LLMRequestBodyType<T> = Omit<T, 'model' | 'stop' | 'response_format' | 'mes
   useVision?: boolean;
   requestOrigin?: string;
 };
-const llmCompletionsBodyFormat = async <T extends CompletionsBodyType>({
+const llmCompletionsBodyFormat = async <T extends ChatCompletionCreateParams>({
   retainDatasetCite,
   useVision,
   requestOrigin,
@@ -602,17 +775,36 @@ const llmCompletionsBodyFormat = async <T extends CompletionsBodyType>({
         : undefined,
     response_format,
     stop: formatStop?.length ? formatStop : undefined,
-    ...(toolCallMode === 'toolChoice' && {
-      tools,
-      tool_choice,
-      parallel_tool_calls
-    })
+    ...(toolCallMode === 'toolChoice' &&
+      tools?.length && {
+        tools,
+        tool_choice,
+        parallel_tool_calls
+      })
   } as T;
 
   // Filter undefined/null value
   requestBody = Object.fromEntries(
     Object.entries(requestBody).filter(([_, value]) => value !== null && value !== undefined)
   ) as T;
+
+  const supportParams = getLLMSupportParams(modelData);
+
+  if (!supportParams.temperature) {
+    delete requestBody.temperature;
+  }
+  if (!supportParams.topP) {
+    delete requestBody.top_p;
+  }
+  if (!supportParams.stop) {
+    delete requestBody.stop;
+  }
+  if (!supportParams.responseFormat) {
+    delete requestBody.response_format;
+  }
+  if (!supportParams.reasoningEffort) {
+    delete requestBody.reasoning_effort;
+  }
 
   // field map
   if (modelData.fieldMap) {
@@ -648,11 +840,11 @@ const createChatCompletion = async ({
   options?: OpenAI.RequestOptions;
 }): Promise<
   | {
-      response: StreamChatType;
+      response: StreamResponseType;
       isStreamResponse: true;
     }
   | {
-      response: UnStreamChatType;
+      response: UnStreamResponseType;
       isStreamResponse: false;
     }
 > => {
@@ -668,16 +860,16 @@ const createChatCompletion = async ({
       timeout: formatTimeout
     });
 
-    addLog.debug(`Start create chat completion`, {
-      model: body.model
-    });
+    logger.debug('Start create chat completion', { model: body.model });
 
     const response = await ai.chat.completions.create(body, {
       ...options,
-      ...(modelData.requestUrl ? { path: modelData.requestUrl } : {}),
+      ...(modelData.requestUrl && !userKey ? { path: modelData.requestUrl } : {}),
       headers: {
         ...options?.headers,
-        ...(modelData.requestAuth ? { Authorization: `Bearer ${modelData.requestAuth}` } : {})
+        ...(modelData.requestAuth && !userKey
+          ? { Authorization: `Bearer ${modelData.requestAuth}` }
+          : {})
       }
     });
 
@@ -699,17 +891,14 @@ const createChatCompletion = async ({
     };
   } catch (error) {
     if (userKey?.baseUrl) {
-      addLog.warn(`User ai api error`, {
-        message: getErrText(error),
+      logger.warn('User AI API error', {
         baseUrl: userKey?.baseUrl,
-        data: body
+        request: body,
+        error
       });
       return Promise.reject(`您的 OpenAI key 出错了: ${getErrText(error)}`);
     } else {
-      addLog.error(`LLM response error`, {
-        message: getErrText(error),
-        data: body
-      });
+      logger.error('LLM response error', { request: body, error });
     }
     return Promise.reject(error);
   }

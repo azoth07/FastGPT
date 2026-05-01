@@ -15,12 +15,12 @@ import { useTranslation } from 'next-i18next';
 import { getInitOutLinkChatInfo } from '@/web/core/chat/api';
 import { getChatTitleFromChatMessage } from '@fastgpt/global/core/chat/utils';
 import { MongoOutLink } from '@fastgpt/service/support/outLink/schema';
-import { addLog } from '@fastgpt/service/common/system/log';
+import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
 
 import NextHead from '@/components/common/NextHead';
 import { useContextSelector } from 'use-context-selector';
 import ChatContextProvider, { ChatContext } from '@/web/core/chat/context/chatContext';
-import { GetChatTypeEnum } from '@/global/core/chat/constants';
+import { GetChatTypeEnum } from '@fastgpt/global/core/chat/constants';
 import { useMount } from 'ahooks';
 import { useRequest } from '@fastgpt/web/hooks/useRequest';
 import { getNanoid } from '@fastgpt/global/common/string/tools';
@@ -35,13 +35,16 @@ import ChatRecordContextProvider, {
 import { useChatStore } from '@/web/core/chat/context/useChatStore';
 import { ChatSourceEnum } from '@fastgpt/global/core/chat/constants';
 import { useI18nLng } from '@fastgpt/web/hooks/useI18n';
-import { type AppSchema } from '@fastgpt/global/core/app/type';
+import { type AppSchemaType } from '@fastgpt/global/core/app/type';
 import ChatQuoteList from '@/pageComponents/chat/ChatQuoteList';
 import { useToast } from '@fastgpt/web/hooks/useToast';
 import { ChatTypeEnum } from '@/components/core/chat/ChatContainer/ChatBox/constants';
 import { ChatSidebarPaneEnum } from '@/pageComponents/chat/constants';
 import ChatHistorySidebar from '@/pageComponents/chat/slider/ChatSliderSidebar';
 import ChatSliderMobileDrawer from '@/pageComponents/chat/slider/ChatSliderMobileDrawer';
+import { useMemoEnhance } from '@fastgpt/web/hooks/useMemoEnhance';
+
+const logger = getLogger(LogCategories.MODULE.CHAT.ITEM);
 
 const CustomPluginRunBox = dynamic(() => import('@/pageComponents/chat/CustomPluginRunBox'));
 
@@ -57,6 +60,7 @@ type Props = {
   isShowCite: boolean;
   isShowFullText: boolean;
   showRunningStatus: boolean;
+  showSkillReferences: boolean;
 };
 
 const OutLink = (props: Props) => {
@@ -69,6 +73,7 @@ const OutLink = (props: Props) => {
     authToken,
     customUid,
     showWorkorder,
+    hideMenu = '0',
     ...customVariables
   } = router.query as {
     shareId: string;
@@ -76,6 +81,7 @@ const OutLink = (props: Props) => {
     showHead: '0' | '1';
     authToken: string;
     showWorkorder: '0' | '1';
+    hideMenu: '0' | '1';
     [key: string]: string;
   };
   const { isPc } = useSystem();
@@ -175,7 +181,8 @@ const OutLink = (props: Props) => {
           responseChatItemId,
           chatId: completionChatId,
           ...outLinkAuthData,
-          retainDatasetCite: isShowCite
+          retainDatasetCite: isShowCite,
+          showSkillReferences: props.showSkillReferences
         },
         onMessage: generatingMessage,
         abortCtrl: controller
@@ -214,6 +221,7 @@ const OutLink = (props: Props) => {
       customVariables,
       outLinkAuthData,
       isShowCite,
+      props.showSkillReferences,
       onUpdateHistoryTitle,
       setChatBoxData,
       forbidLoadChat,
@@ -279,6 +287,7 @@ const OutLink = (props: Props) => {
                     totalRecordsCount={totalRecordsCount}
                     showHistory={showHistory === '1'}
                     reserveSpace={showWorkorder !== undefined}
+                    hideMenu={hideMenu === '1'}
                   />
                 ) : null}
                 {/* chat box */}
@@ -297,6 +306,7 @@ const OutLink = (props: Props) => {
                       appId={appId}
                       chatId={chatId}
                       outLinkAuthData={outLinkAuthData}
+                      enableAutoResume
                       feedbackType={'user'}
                       onStartChat={startChat}
                       chatType={ChatTypeEnum.share}
@@ -331,10 +341,10 @@ const Render = (props: Props) => {
   const { source, chatId, setSource, setAppId, setOutLinkAuthData } = useChatStore();
   const { setUserDefaultLng } = useI18nLng();
 
-  const chatHistoryProviderParams = useMemo(() => {
+  const chatHistoryProviderParams = useMemoEnhance(() => {
     return { shareId, outLinkUid: authToken || customUid || localUId || '' };
   }, [authToken, customUid, localUId, shareId]);
-  const chatRecordProviderParams = useMemo(() => {
+  const chatRecordProviderParams = useMemoEnhance(() => {
     return {
       appId,
       shareId,
@@ -384,7 +394,7 @@ const Render = (props: Props) => {
     }
   });
 
-  return source === ChatSourceEnum.share ? (
+  return source === ChatSourceEnum.share && chatHistoryProviderParams.outLinkUid ? (
     <ChatContextProvider params={chatHistoryProviderParams}>
       <ChatItemContextProvider
         showRouteToDatasetDetail={false}
@@ -393,6 +403,7 @@ const Render = (props: Props) => {
         isShowCite={props.isShowCite}
         isShowFullText={props.isShowFullText}
         showRunningStatus={props.showRunningStatus}
+        showSkillReferences={props.showSkillReferences}
       >
         <ChatRecordContextProvider params={chatRecordProviderParams}>
           <OutLink {...props} />
@@ -417,12 +428,15 @@ export async function getServerSideProps(context: any) {
         {
           shareId
         },
-        'appId canDownloadSource showCite showFullText showRunningStatus'
+        'appId canDownloadSource showCite showFullText showRunningStatus showSkillReferences'
       )
-        .populate<{ associatedApp: AppSchema }>('associatedApp', 'name avatar intro')
+        .populate<{ associatedApp: AppSchemaType }>('associatedApp', 'name avatar intro')
         .lean();
     } catch (error) {
-      addLog.error('getServerSideProps', error);
+      logger.error('getServerSideProps failed', {
+        error,
+        shareId
+      });
       return undefined;
     }
   })();
@@ -437,6 +451,7 @@ export async function getServerSideProps(context: any) {
       isShowCite: app?.showCite ?? false,
       isShowFullText: app?.showFullText ?? false,
       showRunningStatus: app?.showRunningStatus ?? false,
+      showSkillReferences: app?.showSkillReferences ?? false,
       shareId: shareId ?? '',
       authToken: authToken ?? '',
       customUid,

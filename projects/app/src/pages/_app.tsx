@@ -17,6 +17,8 @@ import SystemStoreContextProvider from '@fastgpt/web/context/useSystem';
 import { useRouter } from 'next/router';
 import { errorLogger } from '@/web/common/utils/errorLogger';
 
+import '@scalar/api-reference-react/style.css';
+
 type NextPageWithLayout = NextPage & {
   setLayout?: (page: ReactElement) => JSX.Element;
 };
@@ -24,8 +26,7 @@ type AppPropsWithLayout = AppProps & {
   Component: NextPageWithLayout;
 };
 
-// 哪些路由有自定义 Head
-const routesWithCustomHead = ['/chat', '/chat/share', '/app/detail/', '/dataset/detail'];
+const routesWithCustomHead = ['/chat', '/chat/share', '/app/detail', '/dataset/detail'];
 // 哪些路由不需要 Layout
 const routesWithoutLayout = ['/openapi'];
 

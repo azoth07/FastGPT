@@ -1,4 +1,4 @@
-import { S3Sources } from '../../type';
+import { S3Sources } from '../../contracts/type';
 import { S3PrivateBucket } from '../../buckets/private';
 import streamConsumer from 'node:stream/consumers';
 import {
@@ -13,16 +13,19 @@ import {
   type UploadParams,
   UploadParamsSchema
 } from './type';
-import { MongoS3TTL } from '../../schema';
+import { MongoS3TTL } from '../../models/ttl';
 import { addHours } from 'date-fns';
-import { addLog } from '../../../system/log';
+import { getLogger, LogCategories } from '../../../logger';
 import { detectFileEncoding } from '@fastgpt/global/common/file/tools';
-import { readS3FileContentByBuffer } from '../../../file/read/utils';
+import { readFileContentByBuffer } from '../../../file/read/utils';
 import path from 'node:path';
-import { Mimes } from '../../constants';
+import { resolveMimeType } from '../../utils/mime';
+import { datasetAllowedExtensions } from '../../utils/uploadConstraints';
 import { getFileS3Key, truncateFilename } from '../../utils';
 import type { S3RawTextSource } from '../rawText';
 import { getS3RawTextSource } from '../rawText';
+
+const logger = getLogger(LogCategories.INFRA.S3);
 
 export class S3DatasetSource extends S3PrivateBucket {
   private rawTextSource: S3RawTextSource;
@@ -48,7 +51,13 @@ export class S3DatasetSource extends S3PrivateBucket {
     const { fileKey } = getFileS3Key.dataset({ datasetId, filename });
     return await this.createPresignedPutUrl(
       { rawKey: fileKey, filename },
-      { expiredHours: 3, maxFileSize }
+      {
+        expiredHours: 3,
+        maxFileSize,
+        uploadConstraints: {
+          allowedExtensions: datasetAllowedExtensions
+        }
+      }
     );
   }
 
@@ -109,11 +118,15 @@ export class S3DatasetSource extends S3PrivateBucket {
 
     const start = Date.now();
     const buffer = await streamConsumer.buffer(downloadResponse.body);
-    addLog.debug('get dataset file buffer', { time: Date.now() - start });
+    logger.debug('S3 dataset file downloaded', {
+      key: fileId,
+      durationMs: Date.now() - start,
+      size: buffer.length
+    });
 
     const encoding = detectFileEncoding(buffer);
     const { fileParsedPrefix } = getFileS3Key.s3Key(fileId);
-    const { rawText } = await readS3FileContentByBuffer({
+    const { rawText } = await readFileContentByBuffer({
       teamId,
       tmbId,
       extension,
@@ -157,7 +170,7 @@ export class S3DatasetSource extends S3PrivateBucket {
     await this.client.uploadObject({
       key,
       body: 'buffer' in file ? file.buffer : file.stream,
-      contentType: contentType || Mimes[path.extname(truncatedFilename) as keyof typeof Mimes],
+      contentType: contentType || resolveMimeType([truncatedFilename]),
       metadata: {
         uploadTime: new Date().toISOString(),
         originFilename: encodeURIComponent(truncatedFilename)

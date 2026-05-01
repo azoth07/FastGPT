@@ -1,5 +1,5 @@
 import { S3BaseBucket } from './base';
-import { createDefaultStorageOptions } from '../constants';
+import { createDefaultStorageOptions } from '../config/constants';
 import {
   type IAwsS3CompatibleStorageOptions,
   type ICosStorageOptions,
@@ -8,29 +8,31 @@ import {
   MinioStorageAdapter,
   type IStorageOptions
 } from '@fastgpt-sdk/storage';
-import { addLog } from '../../system/log';
+import { getLogger, LogCategories } from '../../logger';
+
+const logger = getLogger(LogCategories.INFRA.S3);
 
 export class S3PublicBucket extends S3BaseBucket {
   constructor() {
-    const { vendor, publicBucket, externalBaseUrl, credentials, region, ...options } =
-      createDefaultStorageOptions();
+    const storageOptions = createDefaultStorageOptions();
+    const { vendor, publicBucket, externalEndpoint, credentials, region } = storageOptions;
 
-    const { config, externalConfig } = (() => {
+    const getConfig = () => {
       if (vendor === 'minio') {
         const config = {
           region,
           vendor,
           credentials,
-          endpoint: options.endpoint!,
-          maxRetries: options.maxRetries!,
-          forcePathStyle: options.forcePathStyle,
-          publicAccessExtraSubPath: options.publicAccessExtraSubPath
+          endpoint: storageOptions.endpoint,
+          maxRetries: storageOptions.maxRetries,
+          forcePathStyle: storageOptions.forcePathStyle,
+          publicAccessExtraSubPath: storageOptions.publicAccessExtraSubPath
         } as Omit<IAwsS3CompatibleStorageOptions, 'bucket'>;
         return {
           config,
           externalConfig: {
             ...config,
-            endpoint: externalBaseUrl
+            endpoint: externalEndpoint
           }
         };
       } else if (vendor === 'aws-s3') {
@@ -38,16 +40,16 @@ export class S3PublicBucket extends S3BaseBucket {
           region,
           vendor,
           credentials,
-          endpoint: options.endpoint!,
-          maxRetries: options.maxRetries!,
-          forcePathStyle: options.forcePathStyle,
-          publicAccessExtraSubPath: options.publicAccessExtraSubPath
+          endpoint: storageOptions.endpoint,
+          maxRetries: storageOptions.maxRetries,
+          forcePathStyle: storageOptions.forcePathStyle,
+          publicAccessExtraSubPath: storageOptions.publicAccessExtraSubPath
         } as Omit<IAwsS3CompatibleStorageOptions, 'bucket'>;
         return {
           config,
           externalConfig: {
             ...config,
-            endpoint: externalBaseUrl
+            endpoint: externalEndpoint
           }
         };
       } else if (vendor === 'cos') {
@@ -56,10 +58,10 @@ export class S3PublicBucket extends S3BaseBucket {
             region,
             vendor,
             credentials,
-            proxy: options.proxy,
-            domain: options.domain,
-            protocol: options.protocol,
-            useAccelerate: options.useAccelerate
+            proxy: storageOptions.proxy,
+            domain: storageOptions.domain,
+            protocol: storageOptions.protocol,
+            useAccelerate: storageOptions.useAccelerate
           } as Omit<ICosStorageOptions, 'bucket'>
         };
       } else if (vendor === 'oss') {
@@ -68,21 +70,23 @@ export class S3PublicBucket extends S3BaseBucket {
             region,
             vendor,
             credentials,
-            endpoint: options.endpoint!,
-            cname: options.cname,
-            internal: options.internal,
-            secure: options.secure,
-            enableProxy: options.enableProxy
+            endpoint: storageOptions.endpoint!,
+            cname: storageOptions.cname,
+            internal: storageOptions.internal,
+            secure: storageOptions.secure,
+            enableProxy: storageOptions.enableProxy
           } as Omit<IOssStorageOptions, 'bucket'>
         };
       }
       throw new Error(`Unsupported storage vendor: ${vendor}`);
-    })();
+    };
+
+    const { config, externalConfig } = getConfig();
 
     const client = createStorage({ bucket: publicBucket, ...config });
 
     let externalClient: ReturnType<typeof createStorage> | undefined = undefined;
-    if (externalBaseUrl) {
+    if (externalEndpoint) {
       externalClient = createStorage({
         bucket: publicBucket,
         ...externalConfig
@@ -99,11 +103,17 @@ export class S3PublicBucket extends S3BaseBucket {
         }
 
         client.ensurePublicBucketPolicy().catch((error) => {
-          addLog.info(`Failed to ensure public bucket policy "${client.bucketName}":`, { error });
+          logger.warn('Failed to ensure public bucket policy', {
+            bucketName: client.bucketName,
+            error
+          });
         });
       })
       .catch((error) => {
-        addLog.error(`Failed to ensure bucket "${client.bucketName}" exists:`, error);
+        logger.error('Failed to ensure public bucket exists', {
+          bucketName: client.bucketName,
+          error
+        });
       });
 
     externalClient
@@ -114,16 +124,17 @@ export class S3PublicBucket extends S3BaseBucket {
         }
 
         externalClient.ensurePublicBucketPolicy().catch((error) => {
-          addLog.info(`Failed to ensure public bucket policy "${externalClient.bucketName}":`, {
+          logger.warn('Failed to ensure external public bucket policy', {
+            bucketName: externalClient.bucketName,
             error
           });
         });
       })
       .catch((error) => {
-        addLog.error(
-          `Failed to ensure external bucket "${externalClient.bucketName}" exists:`,
+        logger.error('Failed to ensure external public bucket exists', {
+          bucketName: externalClient.bucketName,
           error
-        );
+        });
       });
   }
 

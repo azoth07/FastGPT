@@ -269,7 +269,7 @@ export const useDebug = () => {
                 key={item.key}
                 label={item.label}
                 required={item.required}
-                placeholder={t(item.placeholder || item.description)}
+                description={t(item.placeholder || item.description)}
                 inputType={nodeInputTypeToInputType(item.renderTypeList)}
                 form={variablesForm}
                 fieldName={`nodeVariables.${item.key}`}
@@ -284,8 +284,8 @@ export const useDebug = () => {
                 key={item.key}
                 label={item.label}
                 required={item.required}
-                placeholder={t(item.description)}
-                inputType={variableInputTypeToInputType(item.type)}
+                description={t(item.description)}
+                inputType={variableInputTypeToInputType(item.type, item.valueType)}
                 form={variablesForm}
                 fieldName={`variables.${item.key}`}
                 bg={'myGray.50'}
@@ -297,8 +297,8 @@ export const useDebug = () => {
                 key={item.key}
                 label={item.label}
                 required={item.required}
-                placeholder={t(item.description)}
-                inputType={variableInputTypeToInputType(item.type)}
+                description={t(item.description)}
+                inputType={variableInputTypeToInputType(item.type, item.valueType)}
                 form={variablesForm}
                 fieldName={`variables.${item.key}`}
                 bg={'myGray.50'}
@@ -310,8 +310,8 @@ export const useDebug = () => {
                 key={item.key}
                 label={item.label}
                 required={item.required}
-                placeholder={item.description}
-                inputType={variableInputTypeToInputType(item.type)}
+                description={item.description}
+                inputType={variableInputTypeToInputType(item.type, item.valueType)}
                 form={variablesForm}
                 fieldName={`variables.${item.key}`}
                 bg={'myGray.50'}

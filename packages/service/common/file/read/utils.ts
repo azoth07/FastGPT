@@ -2,7 +2,6 @@ import FormData from 'form-data';
 import fs from 'fs';
 import type { ReadFileResponse } from '../../../worker/readFile/type';
 import { axios } from '../../api/axios';
-import { addLog } from '../../system/log';
 import { batchRun } from '@fastgpt/global/common/system/utils';
 import { matchMdImg } from '@fastgpt/global/common/string/markdown';
 import { createPdfParseUsage } from '../../../support/wallet/usage/controller';
@@ -10,7 +9,10 @@ import { useDoc2xServer } from '../../../thirdProvider/doc2x';
 import { useTextinServer } from '../../../thirdProvider/textin';
 import { readRawContentFromBuffer } from '../../../worker/function';
 import { uploadImage2S3Bucket } from '../../s3/utils';
-import { Mimes } from '../../s3/constants';
+import { normalizeMimeType, resolveMimeExtension, resolveMimeType } from '../../s3/utils/mime';
+import { getLogger, LogCategories } from '../../logger';
+
+const logger = getLogger(LogCategories.MODULE.DATASET.FILE);
 
 export type readRawTextByLocalFileParams = {
   teamId: string;
@@ -29,7 +31,7 @@ export const readRawTextByLocalFile = async (params: readRawTextByLocalFileParam
 
   const buffer = await fs.promises.readFile(path);
 
-  return readS3FileContentByBuffer({
+  return readFileContentByBuffer({
     extension,
     customPdfParse: params.customPdfParse,
     getFormatText: params.getFormatText,
@@ -45,7 +47,7 @@ export const readRawTextByLocalFile = async (params: readRawTextByLocalFileParam
   });
 };
 
-export const readS3FileContentByBuffer = async ({
+export const readFileContentByBuffer = async ({
   teamId,
   tmbId,
 
@@ -86,7 +88,7 @@ export const readS3FileContentByBuffer = async ({
     if (!url) return systemParse();
 
     const start = Date.now();
-    addLog.info('Parsing files from an external service');
+    logger.info('Start parsing file via external service', { extension });
 
     const data = new FormData();
     data.append('file', buffer, {
@@ -108,7 +110,10 @@ export const readS3FileContentByBuffer = async ({
       return Promise.reject(response.error);
     }
 
-    addLog.info(`Custom file parsing is complete, time: ${Date.now() - start}ms`);
+    logger.info('External file parsing completed', {
+      extension,
+      durationMs: Date.now() - start
+    });
 
     const rawText = response.markdown;
     const { text, imageList } = matchMdImg(rawText);
@@ -181,7 +186,7 @@ export const readS3FileContentByBuffer = async ({
   };
 
   const start = Date.now();
-  addLog.debug(`Start parse file`, { extension });
+  logger.debug('Start parsing file', { extension });
 
   let { rawText, formatText, imageList } = await (async () => {
     if (extension === 'pdf') {
@@ -190,32 +195,41 @@ export const readS3FileContentByBuffer = async ({
     return await systemParse();
   })();
 
-  addLog.debug(`Parse file success, time: ${Date.now() - start}ms. `);
+  logger.debug('File parsing completed', { extension, durationMs: Date.now() - start });
 
   // markdown data format
   if (imageList && imageList.length > 0) {
-    addLog.debug(`Processing ${imageList.length} images from parsed document`);
+    logger.debug('Processing parsed document images', {
+      extension,
+      imageCount: imageList.length
+    });
 
     await batchRun(imageList, async (item) => {
       const src = await (async () => {
         if (!imageKeyOptions) return '';
         try {
           const { prefix, expiredTime } = imageKeyOptions;
-          const ext = `.${item.mime.split('/')[1].replace('x-', '')}`;
+          const mimetype = normalizeMimeType(item.mime);
+          const ext = resolveMimeExtension(mimetype);
+          const filename = `${item.uuid}${ext}`;
 
           return await uploadImage2S3Bucket('private', {
-            base64Img: `data:${item.mime};base64,${item.base64}`,
-            uploadKey: `${prefix}/${item.uuid}${ext}`,
-            mimetype: Mimes[ext as keyof typeof Mimes],
-            filename: `${item.uuid}${ext}`,
+            base64Img: `data:${mimetype};base64,${item.base64}`,
+            uploadKey: `${prefix}/${filename}`,
+            mimetype: resolveMimeType([filename], mimetype),
+            filename,
             expiredTime
           });
         } catch (error) {
+          logger.warn('Failed to upload parsed image to S3', {
+            extension,
+            imageUuid: item.uuid,
+            error
+          });
           return `[Image Upload Failed: ${item.uuid}]`;
         }
       })();
       rawText = rawText.replace(item.uuid, src);
-      // rawText = rawText.replace(item.uuid, jwtSignS3ObjectKey(src, addDays(new Date(), 90)));
       if (formatText) {
         formatText = formatText.replace(item.uuid, src);
       }

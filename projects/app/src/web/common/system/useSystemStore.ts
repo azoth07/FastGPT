@@ -7,11 +7,11 @@ import type {
   RerankModelItemType,
   EmbeddingModelItemType,
   STTModelType
-} from '@fastgpt/global/core/ai/model.d';
+} from '@fastgpt/global/core/ai/model.schema';
 import type { InitDateResponse } from '@/pages/api/common/system/getInitData';
 import { type FastGPTFeConfigsType } from '@fastgpt/global/common/system/types';
 import { type SubPlanType } from '@fastgpt/global/support/wallet/sub/type';
-import { ModelTypeEnum } from '@fastgpt/global/core/ai/model';
+import { ModelTypeEnum } from '@fastgpt/global/core/ai/constants';
 import type { TeamErrEnum } from '@fastgpt/global/common/error/code/team';
 import type { SystemDefaultModelType } from '@fastgpt/service/core/ai/type';
 import {
@@ -22,7 +22,7 @@ import {
 } from '@fastgpt/global/core/ai/provider';
 import { getMyModels, getOperationalAd } from './api';
 
-type LoginStoreType = { provider: `${OAuthEnum}`; lastRoute: string; state: string };
+type LoginStoreType = { provider: OAuthEnum; lastRoute: string; state: string };
 
 export type NotSufficientModalType =
   | TeamErrEnum.datasetSizeNotEnough
@@ -59,10 +59,9 @@ type State = {
 
   modelProviders: Record<langType, ModelProviderItemType[]>;
   modelProviderMap: Record<langType, Record<string, ModelProviderItemType>>;
-  aiproxyIdMap: NonNullable<InitDateResponse['aiproxyIdMap']>;
+  aiproxyChannels: NonNullable<InitDateResponse['aiproxyChannels']>;
   defaultModels: SystemDefaultModelType;
   llmModelList: LLMModelItemType[];
-  datasetModelList: LLMModelItemType[];
   embeddingModelList: EmbeddingModelItemType[];
   ttsModelList: TTSModelType[];
   reRankModelList: RerankModelItemType[];
@@ -163,10 +162,9 @@ export const useSystemStore = create<State>()(
           'zh-CN': {},
           'zh-Hant': {}
         },
-        aiproxyIdMap: {},
+        aiproxyChannels: [],
         defaultModels: {},
         llmModelList: [],
-        datasetModelList: [],
         embeddingModelList: [],
         ttsModelList: [],
         reRankModelList: [],
@@ -233,12 +231,11 @@ export const useSystemStore = create<State>()(
               state.modelProviders = ModelProviderListCache ?? state.modelProviders;
               state.modelProviderMap = ModelProviderMapCache ?? state.modelProviderMap;
             }
-            state.aiproxyIdMap = res.aiproxyIdMap ?? state.aiproxyIdMap;
+            state.aiproxyChannels = res.aiproxyChannels ?? state.aiproxyChannels;
 
             state.llmModelList =
               res.activeModelList?.filter((item) => item.type === ModelTypeEnum.llm) ??
               state.llmModelList;
-            state.datasetModelList = state.llmModelList.filter((item) => item.datasetProcess);
             state.embeddingModelList =
               res.activeModelList?.filter((item) => item.type === ModelTypeEnum.embedding) ??
               state.embeddingModelList;
@@ -269,10 +266,9 @@ export const useSystemStore = create<State>()(
 
           modelProviders: state.modelProviders,
           modelProviderMap: state.modelProviderMap,
-          aiproxyIdMap: state.aiproxyIdMap,
+          aiproxyChannels: state.aiproxyChannels,
           defaultModels: state.defaultModels,
           llmModelList: state.llmModelList,
-          datasetModelList: state.datasetModelList,
           embeddingModelList: state.embeddingModelList,
           ttsModelList: state.ttsModelList,
           reRankModelList: state.reRankModelList,

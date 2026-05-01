@@ -8,9 +8,13 @@ import { AuthUserTypeEnum, ReadPermissionVal } from '@fastgpt/global/support/per
 import { authApp } from '@fastgpt/service/support/permission/app/auth';
 import { MongoChatItem } from '@fastgpt/service/core/chat/chatItemSchema';
 import { DatasetErrEnum } from '@fastgpt/global/common/error/code/dataset';
-import { getFlatAppResponses } from '@/global/core/chat/utils';
+import { getFlatAppResponses } from '@fastgpt/global/core/chat/utils';
 import { MongoChatItemResponse } from '@fastgpt/service/core/chat/chatItemResponseSchema';
 import { ChatRoleEnum } from '@fastgpt/global/core/chat/constants';
+import type { HelperBotTypeEnum } from '@fastgpt/global/core/chat/helperBot/type';
+import { MongoHelperBotChat } from '@fastgpt/service/core/chat/HelperBot/chatSchema';
+import { authCert } from '@fastgpt/service/support/permission/auth/common';
+import { MongoApp } from '@fastgpt/service/core/app/schema';
 
 /* 
   检查chat的权限：
@@ -26,6 +30,7 @@ import { ChatRoleEnum } from '@fastgpt/global/core/chat/constants';
 export const defaultResponseShow = {
   showCite: true,
   showRunningStatus: true,
+  showSkillReferences: true,
   showFullText: true,
   canDownloadSource: true
 };
@@ -52,11 +57,12 @@ export async function authChatCrud({
     chatId?: string;
   }): Promise<{
   teamId: string;
-  tmbId: string;
-  uid: string;
+  tmbId: string; // 本轮鉴权的 uid
+  uid: string; // chat 里的实际的 uid（outlinkUid??tmbId)
   chat?: ChatSchemaType;
   showCite: boolean;
   showRunningStatus: boolean;
+  showSkillReferences: boolean;
   showFullText: boolean;
   canDownloadSource: boolean;
   authType?: `${AuthUserTypeEnum}`;
@@ -64,8 +70,29 @@ export async function authChatCrud({
   if (!appId) return Promise.reject(ChatErrEnum.unAuthChat);
 
   if (spaceTeamId && teamToken) {
-    const { uid, tmbId } = await authTeamSpaceToken({ teamId: spaceTeamId, teamToken });
-    if (!chatId)
+    const { uid, tmbId, tags } = await authTeamSpaceToken({
+      teamId: spaceTeamId,
+      teamToken
+    });
+
+    // Verify app belongs to the authenticated team and tag-based access
+    const app = await MongoApp.findOne(
+      {
+        _id: appId,
+        teamId: spaceTeamId,
+        $or: [
+          { teamTags: { $size: 0 } },
+          { teamTags: { $exists: false } },
+          { teamTags: { $in: tags } }
+        ]
+      },
+      'teamId'
+    ).lean();
+    if (!app) {
+      return Promise.reject(ChatErrEnum.unAuthChat);
+    }
+
+    if (!chatId) {
       return {
         teamId: spaceTeamId,
         tmbId,
@@ -73,6 +100,7 @@ export async function authChatCrud({
         ...defaultResponseShow,
         authType: AuthUserTypeEnum.teamDomain
       };
+    }
 
     const chat = await MongoChat.findOne({ appId, chatId }).lean();
     if (!chat) {
@@ -85,7 +113,8 @@ export async function authChatCrud({
       };
     }
 
-    if (chat.outLinkUid !== uid) return Promise.reject(ChatErrEnum.unAuthChat);
+    if (String(chat.teamId) !== spaceTeamId || chat.outLinkUid !== uid)
+      return Promise.reject(ChatErrEnum.unAuthChat);
 
     return {
       teamId: spaceTeamId,
@@ -114,6 +143,7 @@ export async function authChatCrud({
 
         showCite: outLinkConfig.showCite ?? false,
         showRunningStatus: outLinkConfig.showRunningStatus ?? true,
+        showSkillReferences: outLinkConfig.showSkillReferences ?? false,
         showFullText: outLinkConfig.showFullText ?? false,
         canDownloadSource: outLinkConfig.canDownloadSource ?? false,
         authType: AuthUserTypeEnum.outLink
@@ -129,6 +159,7 @@ export async function authChatCrud({
         uid,
         showCite: outLinkConfig.showCite ?? false,
         showRunningStatus: outLinkConfig.showRunningStatus ?? true,
+        showSkillReferences: outLinkConfig.showSkillReferences ?? false,
         showFullText: outLinkConfig.showFullText ?? false,
         canDownloadSource: outLinkConfig.canDownloadSource ?? false,
         authType: AuthUserTypeEnum.outLink
@@ -142,6 +173,7 @@ export async function authChatCrud({
       uid,
       showCite: outLinkConfig.showCite ?? false,
       showRunningStatus: outLinkConfig.showRunningStatus ?? true,
+      showSkillReferences: outLinkConfig.showSkillReferences ?? false,
       showFullText: outLinkConfig.showFullText ?? false,
       canDownloadSource: outLinkConfig.canDownloadSource ?? false,
       authType: AuthUserTypeEnum.outLink
@@ -185,7 +217,7 @@ export async function authChatCrud({
       teamId,
       tmbId,
       chat,
-      uid: tmbId,
+      uid: chat.outLinkUid ?? chat.tmbId,
       ...defaultResponseShow,
       authType
     };
@@ -196,7 +228,7 @@ export async function authChatCrud({
       teamId,
       tmbId,
       chat,
-      uid: tmbId,
+      uid: chat.outLinkUid ?? chat.tmbId,
       ...defaultResponseShow,
       authType
     };
@@ -269,4 +301,19 @@ export const authCollectionInChat = async ({
     }
   } catch (error) {}
   return Promise.reject(DatasetErrEnum.unAuthDatasetFile);
+};
+
+export const authHelperBotChatCrud = async ({
+  type,
+  chatId,
+  ...props
+}: AuthModeType & {
+  type: `${HelperBotTypeEnum}`;
+  chatId: string;
+}) => {
+  const { userId, teamId, tmbId } = await authCert(props);
+
+  const chat = await MongoHelperBotChat.findOne({ type, userId, chatId }).lean();
+
+  return { chat, userId, teamId, tmbId };
 };

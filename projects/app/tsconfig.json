@@ -4,6 +4,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
+      "#fastgpt/app/test/*": ["./test/*"],
       "@test/*": ["../../test/*"]
     }
   },
@@ -11,9 +12,17 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-    "**/*.d.ts",
-    "../../packages/**/*.d.ts",
-    "../../test/list.test.ts"
+    "../../packages/**/*.ts",
+    "../../packages/**/*.tsx"
   ],
-  "exclude": ["**/*.test.ts"]
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "../../packages/**/vitest.config.ts",
+    "../../packages/**/vitest.integration.config.ts",
+    "../../packages/**/test/**",
+    ".next",
+    "dist",
+    "coverage"
+  ]
 }

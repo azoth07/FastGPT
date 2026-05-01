@@ -1,7 +1,8 @@
 import { connectionMongo, getMongoModel } from '../../common/mongo';
+import { getLogger, LogCategories } from '../../common/logger';
 const { Schema } = connectionMongo;
-import { type ChatSchemaType } from '@fastgpt/global/core/chat/type.d';
-import { ChatSourceEnum } from '@fastgpt/global/core/chat/constants';
+import { type ChatSchemaType } from '@fastgpt/global/core/chat/type';
+import { ChatGenerateStatusEnum, ChatSourceEnum } from '@fastgpt/global/core/chat/constants';
 import {
   TeamCollectionName,
   TeamMemberCollectionName
@@ -92,6 +93,11 @@ const ChatSchema = new Schema({
   hasBadFeedback: Boolean,
   hasUnreadGoodFeedback: Boolean,
   hasUnreadBadFeedback: Boolean,
+  // Error count (redundant field for performance)
+  errorCount: {
+    type: Number,
+    default: 0
+  },
 
   searchKey: String,
   deleteTime: {
@@ -100,14 +106,28 @@ const ChatSchema = new Schema({
     select: false
   },
 
-  // @deprecated
+  chatGenerateStatus: {
+    type: Number,
+    enum: [
+      ChatGenerateStatusEnum.generating,
+      ChatGenerateStatusEnum.done,
+      ChatGenerateStatusEnum.error
+    ],
+    default: ChatGenerateStatusEnum.done
+  },
+  hasBeenRead: {
+    type: Boolean,
+    default: false
+  },
+
+  /** @deprecated */
   userId: Schema.Types.ObjectId
 });
 
 try {
   ChatSchema.index({ chatId: 1 });
   // Delete by appid; init chat; update chat; auth chat;
-  ChatSchema.index({ appId: 1, chatId: 1 });
+  ChatSchema.index({ appId: 1, chatId: 1 }, { unique: true });
 
   // Clear history(share),Init 4121
   ChatSchema.index(
@@ -138,6 +158,15 @@ try {
   ChatSchema.index({ appId: 1, tmbId: 1, updateTime: -1 });
   // clearHistory(API)
   ChatSchema.index({ appId: 1, source: 1, tmbId: 1, updateTime: -1 });
+  // Periodic cleanup for chats stuck in generating state.
+  ChatSchema.index(
+    { chatGenerateStatus: 1, updateTime: 1 },
+    {
+      partialFilterExpression: {
+        chatGenerateStatus: ChatGenerateStatusEnum.generating
+      }
+    }
+  );
 
   /* 反馈过滤的索引 */
   // 2. Has good feedback filter
@@ -192,12 +221,26 @@ try {
       }
     }
   );
+  // Has error filter
+  ChatSchema.index(
+    {
+      appId: 1,
+      errorCount: 1,
+      updateTime: -1
+    },
+    {
+      partialFilterExpression: {
+        errorCount: { $gt: 0 }
+      }
+    }
+  );
 
   // timer, clear history
   ChatSchema.index({ updateTime: -1, teamId: 1 });
   ChatSchema.index({ teamId: 1, updateTime: -1 });
 } catch (error) {
-  console.log(error);
+  const logger = getLogger(LogCategories.INFRA.MONGO);
+  logger.error('Failed to build chat indexes', { error });
 }
 
 export const MongoChat = getMongoModel<ChatSchemaType>(chatCollectionName, ChatSchema);

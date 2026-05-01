@@ -14,7 +14,7 @@ import MyBox from '@fastgpt/web/components/common/MyBox';
 import MyIcon from '@fastgpt/web/components/common/Icon';
 import { ChatFileTypeEnum } from '@fastgpt/global/core/chat/constants';
 import { getFileIcon } from '@fastgpt/global/common/file/icon';
-import type { AppFileSelectConfigType } from '@fastgpt/global/core/app/type';
+import type { AppFileSelectConfigType } from '@fastgpt/global/core/app/type/config.schema';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
 import { useUserStore } from '@/web/support/user/useUserStore';
 import { getUploadFileType } from '@fastgpt/global/core/app/constants';
@@ -23,7 +23,7 @@ import { useSelectFile } from '@/web/common/file/hooks/useSelectFile';
 import { getNanoid } from '@fastgpt/global/common/string/tools';
 import MyDivider from '@fastgpt/web/components/common/MyDivider';
 import MyAvatar from '@fastgpt/web/components/common/Avatar';
-import { z } from 'zod';
+import z from 'zod';
 import { getPresignedChatFileGetUrl, getUploadChatFilePresignedUrl } from '@/web/common/file/api';
 import { useContextSelector } from 'use-context-selector';
 import { getErrText } from '@fastgpt/global/common/error/utils';
@@ -44,13 +44,15 @@ const FileSelector = ({
   customFileExtensionList,
   canLocalUpload,
   canUrlUpload,
-  isDisabled = false
+  isDisabled = false,
+  isInvalid = false
 }: AppFileSelectConfigType & {
   value: UserInputFileItemType[];
   onChange: (e: any[]) => void;
   canLocalUpload?: boolean;
   canUrlUpload?: boolean;
   isDisabled?: boolean;
+  isInvalid?: boolean;
 }) => {
   const { feConfigs } = useSystemStore();
   const { teamPlanStatus } = useUserStore();
@@ -60,6 +62,10 @@ const FileSelector = ({
   const appId = useContextSelector(WorkflowRuntimeContext, (v) => v.appId);
   const chatId = useContextSelector(WorkflowRuntimeContext, (v) => v.chatId);
   const outLinkAuthData = useContextSelector(WorkflowRuntimeContext, (v) => v.outLinkAuthData);
+  const runtimeFileSelectConfig = useContextSelector(
+    WorkflowRuntimeContext,
+    (v) => v.runtimeFileSelectConfig
+  );
   const setFileUploadingCount = useContextSelector(
     WorkflowRuntimeContext,
     (v) => v.setFileUploadingCount
@@ -92,12 +98,12 @@ const FileSelector = ({
   // 文件数量限制：组件参数 || 团队套餐 || 系统配置 || 默认值
   const maxSelectFiles =
     maxFiles ||
-    teamPlanStatus?.standardConstants?.maxUploadFileCount ||
+    teamPlanStatus?.standard?.maxUploadFileCount ||
     feConfigs?.uploadFileMaxAmount ||
     10;
   // 文件大小限制（MB）：团队套餐 || 系统配置 || 默认值
   const maxSize =
-    (teamPlanStatus?.standardConstants?.maxUploadFileSize || feConfigs?.uploadFileMaxSize || 500) *
+    (teamPlanStatus?.standard?.maxUploadFileSize || feConfigs?.uploadFileMaxSize || 500) *
     1024 *
     1024;
   const canSelectFileAmount = maxSelectFiles - value.length;
@@ -125,6 +131,7 @@ const FileSelector = ({
               filename: file.rawFile.name,
               appId,
               chatId,
+              fileSelectConfig: runtimeFileSelectConfig,
               outLinkAuthData
             });
 
@@ -174,7 +181,14 @@ const FileSelector = ({
         })
       );
     },
-    [handleChangeFiles, setFileUploadingCount, appId, chatId, outLinkAuthData]
+    [
+      handleChangeFiles,
+      setFileUploadingCount,
+      appId,
+      chatId,
+      runtimeFileSelectConfig,
+      outLinkAuthData
+    ]
   );
 
   // Selector props
@@ -382,7 +396,7 @@ const FileSelector = ({
             px={3}
             py={[4, 7]}
             border={'1.5px dashed'}
-            borderColor={'myGray.250'}
+            borderColor={isInvalid ? 'red.500' : 'myGray.250'}
             borderRadius={'md'}
             userSelect={'none'}
             {...(isMaxSelected || disabled
@@ -394,9 +408,13 @@ const FileSelector = ({
                   cursor: 'pointer',
                   _hover: {
                     bg: 'primary.50',
-                    borderColor: 'primary.600'
+                    borderColor: isInvalid ? 'red.500' : 'primary.600'
                   },
-                  borderColor: isDragging ? 'primary.600' : 'borderColor.high',
+                  borderColor: isInvalid
+                    ? 'red.500'
+                    : isDragging
+                      ? 'primary.600'
+                      : 'borderColor.high',
                   onDragEnter: handleDragEnter,
                   onDragOver: (e) => e.preventDefault(),
                   onDragLeave: handleDragLeave,
@@ -436,17 +454,25 @@ const FileSelector = ({
               />
               <Input
                 isDisabled={isMaxSelected || disabled}
+                isInvalid={isInvalid}
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
                 onBlur={(e) => handleAddUrl(e.target.value)}
                 border={'1.5px dashed'}
-                borderColor={'myGray.250'}
+                borderColor={isInvalid ? 'red.500' : 'myGray.250'}
                 borderRadius={'md'}
                 pl={8}
                 py={1.5}
                 placeholder={
                   isMaxSelected ? t('file:reached_max_file_count') : t('chat:click_to_add_url')
                 }
+                _hover={{
+                  borderColor: isInvalid ? 'red.500' : 'myGray.300'
+                }}
+                _focus={{
+                  borderColor: isInvalid ? 'red.500' : 'primary.600',
+                  boxShadow: isInvalid ? '0 0 0 1px var(--chakra-colors-red-500)' : undefined
+                }}
               />
             </InputGroup>
           </Box>
@@ -480,15 +506,29 @@ const FileSelector = ({
                     {/* Status icon */}
                     <>
                       {!!file?.url || !!file?.error || file.process === undefined ? (
-                        <IconButton
-                          size={'xsSquare'}
-                          borderRadius={'xs'}
-                          variant={'transparentDanger'}
-                          aria-label={'Delete file'}
-                          icon={<MyIcon name={'close'} w={'1rem'} />}
-                          onClick={() => handleDeleteFile(file?.id)}
-                          isDisabled={disabled}
-                        />
+                        <HStack spacing={1}>
+                          {/* View button - 查看文件 */}
+                          {file?.url && (
+                            <IconButton
+                              size={'xsSquare'}
+                              variant={'grayGhost'}
+                              aria-label={'View file'}
+                              icon={<MyIcon name={'common/viewLight'} w={'1rem'} />}
+                              onClick={() => window.open(file.url, '_blank')}
+                            />
+                          )}
+                          {/* Delete button - 只在未禁用时显示 */}
+                          {!disabled && (
+                            <IconButton
+                              size={'xsSquare'}
+                              borderRadius={'xs'}
+                              variant={'transparentDanger'}
+                              aria-label={'Delete file'}
+                              icon={<MyIcon name={'close'} w={'1rem'} />}
+                              onClick={() => handleDeleteFile(file?.id)}
+                            />
+                          )}
+                        </HStack>
                       ) : (
                         <HStack w={'24px'} h={'24px'} justifyContent={'center'}>
                           <CircularProgress

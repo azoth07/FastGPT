@@ -19,7 +19,7 @@ import { useLoading } from '@fastgpt/web/hooks/useLoading';
 import { getShareChatList, delShareChatById } from '@/web/support/outLink/api';
 import { formatTimeToChatTime } from '@fastgpt/global/common/string/time';
 import { defaultOutLinkForm } from '@/web/core/app/constants';
-import type { OutLinkEditType, OffiAccountAppType } from '@fastgpt/global/support/outLink/type.d';
+import type { OutLinkEditType, OffiAccountAppType } from '@fastgpt/global/support/outLink/type';
 import { PublishChannelEnum } from '@fastgpt/global/support/outLink/constant';
 import { useTranslation } from 'next-i18next';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
@@ -75,7 +75,7 @@ const OffiAccount = ({ appId }: { appId: string }) => {
 
           {feConfigs?.docUrl && (
             <Link
-              href={getDocPath('/docs/use-cases/external-integration/official_account')}
+              href={getDocPath('/use-cases/external-integration/official_account')}
               target={'_blank'}
               ml={2}
               color={'primary.500'}

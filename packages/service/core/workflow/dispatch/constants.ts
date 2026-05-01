@@ -1,10 +1,11 @@
 import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
 import { dispatchAppRequest } from './abandoned/runApp';
+import { dispatchLoop } from './abandoned/runLoop';
 import { dispatchClassifyQuestion } from './ai/classifyQuestion';
 import { dispatchContentExtract } from './ai/extract';
-import { dispatchRunTools } from './ai/tool/index';
-import { dispatchStopToolCall } from './ai/tool/stopTool';
-import { dispatchToolParams } from './ai/tool/toolParams';
+import { dispatchRunTools } from './ai/toolcall/index';
+import { dispatchStopToolCall } from './ai/toolcall/stopTool';
+import { dispatchToolParams } from './ai/toolcall/toolParams';
 import { dispatchChatCompletion } from './ai/chat';
 import { dispatchCodeSandbox } from './tools/codeSandbox';
 import { dispatchDatasetConcat } from './dataset/concat';
@@ -13,9 +14,12 @@ import { dispatchSystemConfig } from './init/systemConfig';
 import { dispatchWorkflowStart } from './init/workflowStart';
 import { dispatchFormInput } from './interactive/formInput';
 import { dispatchUserSelect } from './interactive/userSelect';
-import { dispatchLoop } from './loop/runLoop';
 import { dispatchLoopEnd } from './loop/runLoopEnd';
 import { dispatchLoopStart } from './loop/runLoopStart';
+import { dispatchParallelRun } from './parallelRun/runParallelRun';
+import { dispatchLoopRun } from './loopRun/runLoopRun';
+import { dispatchLoopRunStart } from './loopRun/runLoopRunStart';
+import { dispatchLoopRunBreak } from './loopRun/runLoopRunBreak';
 import { dispatchRunPlugin } from './plugin/run';
 import { dispatchRunAppNode } from './child/runApp';
 import { dispatchPluginInput } from './plugin/runInput';
@@ -30,24 +34,32 @@ import { dispatchIfElse } from './tools/runIfElse';
 import { dispatchLafRequest } from './tools/runLaf';
 import { dispatchUpdateVariable } from './tools/runUpdateVar';
 import { dispatchTextEditor } from './tools/textEditor';
+import { dispatchRunAgent } from './ai/agent';
 
 export const callbackMap: Record<FlowNodeTypeEnum, Function> = {
   [FlowNodeTypeEnum.workflowStart]: dispatchWorkflowStart,
-  [FlowNodeTypeEnum.answerNode]: dispatchAnswer,
-  [FlowNodeTypeEnum.chatNode]: dispatchChatCompletion,
-  [FlowNodeTypeEnum.datasetSearchNode]: dispatchDatasetSearch,
-  [FlowNodeTypeEnum.datasetConcatNode]: dispatchDatasetConcat,
-  [FlowNodeTypeEnum.classifyQuestion]: dispatchClassifyQuestion,
-  [FlowNodeTypeEnum.contentExtract]: dispatchContentExtract,
-  [FlowNodeTypeEnum.httpRequest468]: dispatchHttp468Request,
+
+  // Child
   [FlowNodeTypeEnum.appModule]: dispatchRunAppNode,
   [FlowNodeTypeEnum.pluginModule]: dispatchRunPlugin,
   [FlowNodeTypeEnum.pluginInput]: dispatchPluginInput,
   [FlowNodeTypeEnum.pluginOutput]: dispatchPluginOutput,
+
+  // AI
+  [FlowNodeTypeEnum.agent]: dispatchRunAgent,
+  [FlowNodeTypeEnum.chatNode]: dispatchChatCompletion,
+  [FlowNodeTypeEnum.datasetSearchNode]: dispatchDatasetSearch,
+  [FlowNodeTypeEnum.classifyQuestion]: dispatchClassifyQuestion,
+  [FlowNodeTypeEnum.contentExtract]: dispatchContentExtract,
   [FlowNodeTypeEnum.queryExtension]: dispatchQueryExtension,
-  [FlowNodeTypeEnum.agent]: dispatchRunTools,
+  // Tool call
+  [FlowNodeTypeEnum.toolCall]: dispatchRunTools,
   [FlowNodeTypeEnum.stopTool]: dispatchStopToolCall,
   [FlowNodeTypeEnum.toolParams]: dispatchToolParams,
+
+  [FlowNodeTypeEnum.answerNode]: dispatchAnswer,
+  [FlowNodeTypeEnum.datasetConcatNode]: dispatchDatasetConcat,
+  [FlowNodeTypeEnum.httpRequest468]: dispatchHttp468Request,
   [FlowNodeTypeEnum.lafModule]: dispatchLafRequest,
   [FlowNodeTypeEnum.ifElseNode]: dispatchIfElse,
   [FlowNodeTypeEnum.variableUpdate]: dispatchUpdateVariable,
@@ -56,9 +68,12 @@ export const callbackMap: Record<FlowNodeTypeEnum, Function> = {
   [FlowNodeTypeEnum.customFeedback]: dispatchCustomFeedback,
   [FlowNodeTypeEnum.readFiles]: dispatchReadFiles,
   [FlowNodeTypeEnum.userSelect]: dispatchUserSelect,
-  [FlowNodeTypeEnum.loop]: dispatchLoop,
-  [FlowNodeTypeEnum.loopStart]: dispatchLoopStart,
-  [FlowNodeTypeEnum.loopEnd]: dispatchLoopEnd,
+  [FlowNodeTypeEnum.parallelRun]: dispatchParallelRun,
+  [FlowNodeTypeEnum.loopRun]: dispatchLoopRun,
+  [FlowNodeTypeEnum.loopRunStart]: dispatchLoopRunStart,
+  [FlowNodeTypeEnum.loopRunBreak]: dispatchLoopRunBreak,
+  [FlowNodeTypeEnum.nestedStart]: dispatchLoopStart,
+  [FlowNodeTypeEnum.nestedEnd]: dispatchLoopEnd,
   [FlowNodeTypeEnum.formInput]: dispatchFormInput,
   [FlowNodeTypeEnum.tool]: dispatchRunTool,
 
@@ -70,6 +85,8 @@ export const callbackMap: Record<FlowNodeTypeEnum, Function> = {
   [FlowNodeTypeEnum.comment]: () => Promise.resolve(),
   [FlowNodeTypeEnum.toolSet]: () => Promise.resolve(),
 
-  // @deprecated
-  [FlowNodeTypeEnum.runApp]: dispatchAppRequest
+  /** @deprecated */
+  [FlowNodeTypeEnum.runApp]: dispatchAppRequest,
+  /** @deprecated 已被 loopRun 替代 */
+  [FlowNodeTypeEnum.loop]: dispatchLoop
 };

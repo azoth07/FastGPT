@@ -1,16 +1,27 @@
 import { MongoDatasetTraining } from './schema';
-import type { PushDatasetDataResponse } from '@fastgpt/global/core/dataset/api.d';
+import type {
+  PushDataChunkType,
+  PushDataResponseType
+} from '@fastgpt/global/openapi/core/dataset/data/api';
 import { TrainingModeEnum } from '@fastgpt/global/core/dataset/constants';
 import { type ClientSession } from '../../../common/mongo';
 import { getLLMModel, getEmbeddingModel, getVlmModel } from '../../ai/model';
-import { addLog } from '../../../common/system/log';
 import { mongoSessionRun } from '../../../common/mongo/sessionRun';
-import { type PushDataToTrainingQueueProps } from '@fastgpt/global/core/dataset/training/type';
 import { i18nT } from '../../../../web/i18n/utils';
 import { getLLMMaxChunkSize } from '../../../../global/core/dataset/training/utils';
 import { retryFn } from '@fastgpt/global/common/system/utils';
+import { getLogger, LogCategories } from '../../../common/logger';
+import { checkTimerLock, deleteTimerLock } from '../../../common/system/timerLock/utils';
+
+const logger = getLogger(LogCategories.MODULE.DATASET.TRAINING);
 
 export const lockTrainingDataByTeamId = async (teamId: string): Promise<any> => {
+  const timerId = `lock_training_data--${teamId}`;
+
+  // 5 分钟闸门：并发/多节点调用时，只有首个抢到锁的会执行；TTL 作为兜底
+  const acquired = await checkTimerLock({ timerId, lockMinuted: 30 });
+  if (!acquired) return;
+
   try {
     await MongoDatasetTraining.updateMany(
       {
@@ -20,10 +31,15 @@ export const lockTrainingDataByTeamId = async (teamId: string): Promise<any> => 
         lockTime: new Date('2999/5/5')
       }
     );
-  } catch (error) {}
+  } catch (error) {
+    logger.error('lockTrainingDataByTeamId failed', { teamId, error });
+  } finally {
+    // 执行完立即释放锁
+    await deleteTimerLock({ timerId }).catch(() => {});
+  }
 };
 
-export async function pushDataListToTrainingQueue({
+export const pushDataListToTrainingQueue = async ({
   teamId,
   tmbId,
   datasetId,
@@ -36,7 +52,24 @@ export async function pushDataListToTrainingQueue({
   mode = TrainingModeEnum.chunk,
   indexSize,
   session
-}: PushDataToTrainingQueueProps): Promise<PushDatasetDataResponse> {
+}: {
+  teamId: string;
+  tmbId: string;
+  datasetId: string;
+  collectionId: string;
+
+  data: PushDataChunkType[];
+  mode?: TrainingModeEnum;
+
+  agentModel: string;
+  vectorModel: string;
+  vlmModel?: string;
+
+  indexSize?: number;
+
+  billId: string;
+  session?: ClientSession;
+}): Promise<PushDataResponseType> => {
   const vectorModelData = getEmbeddingModel(vectorModel);
   if (!vectorModelData) {
     return Promise.reject(i18nT('common:error_embedding_not_config'));
@@ -139,7 +172,10 @@ export async function pushDataListToTrainingQueue({
       // ordered: true 模式下,成功必定等于批次大小
       insertedCount += result.insertedCount;
 
-      addLog.debug(`Training data insert progress: ${insertedCount}/${dataToInsert.length}`);
+      logger.debug('Training data insert progress', {
+        insertedCount,
+        total: dataToInsert.length
+      });
     }
 
     return insertedCount;
@@ -150,7 +186,10 @@ export async function pushDataListToTrainingQueue({
   let start = Date.now();
 
   if (data.length > chunkSize) {
-    addLog.info(`Large dataset detected (${data.length} items), using chunked transactions`);
+    logger.info('Large dataset detected, using chunked transactions', {
+      itemCount: data.length,
+      chunkSize
+    });
 
     let totalInserted = 0;
 
@@ -165,7 +204,7 @@ export async function pushDataListToTrainingQueue({
       });
     }
 
-    addLog.info(`Chunked transactions completed in ${Date.now() - start}ms`);
+    logger.info('Chunked transactions completed', { durationMs: Date.now() - start });
 
     return { insertLen: totalInserted };
   }
@@ -173,16 +212,16 @@ export async function pushDataListToTrainingQueue({
   // 小数据量单事务处理
   if (session) {
     const insertedCount = await insertDataIterative(data, session);
-    addLog.info(`Single transaction completed in ${Date.now() - start}ms`);
+    logger.info('Single transaction completed', { durationMs: Date.now() - start });
     return { insertLen: insertedCount };
   } else {
     const insertedCount = await mongoSessionRun(async (session) => {
       return insertDataIterative(data, session);
     });
-    addLog.info(`Single transaction completed in ${Date.now() - start}ms`);
+    logger.info('Single transaction completed', { durationMs: Date.now() - start });
     return { insertLen: insertedCount };
   }
-}
+};
 
 export const pushDatasetToParseQueue = async ({
   teamId,

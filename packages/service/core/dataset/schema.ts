@@ -12,7 +12,8 @@ import {
   TeamCollectionName,
   TeamMemberCollectionName
 } from '@fastgpt/global/support/user/team/constant';
-import type { DatasetSchemaType } from '@fastgpt/global/core/dataset/type.d';
+import type { DatasetSchemaType } from '@fastgpt/global/core/dataset/type';
+import { getLogger, LogCategories } from '../../common/logger';
 
 export const DatasetCollectionName = 'datasets';
 
@@ -151,7 +152,8 @@ try {
   DatasetSchema.index({ type: 1 }); // Admin count
   DatasetSchema.index({ deleteTime: 1 }); // 添加软删除字段索引
 } catch (error) {
-  console.log(error);
+  const logger = getLogger(LogCategories.INFRA.MONGO);
+  logger.error('Failed to build dataset indexes', { error });
 }
 
 export const MongoDataset = getMongoModel<DatasetSchemaType>(DatasetCollectionName, DatasetSchema);

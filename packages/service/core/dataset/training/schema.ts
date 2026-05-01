@@ -11,6 +11,7 @@ import {
 } from '@fastgpt/global/support/user/team/constant';
 import { DatasetDataIndexTypeEnum } from '@fastgpt/global/core/dataset/data/constants';
 import { DatasetDataCollectionName } from '../data/schema';
+import { getLogger, LogCategories } from '../../../common/logger';
 
 export const DatasetTrainingCollectionName = 'dataset_trainings';
 
@@ -34,7 +35,10 @@ const TrainingDataSchema = new Schema({
     ref: DatasetColCollectionName,
     required: true
   },
-  billId: String,
+  billId: {
+    type: String,
+    required: true
+  },
   mode: {
     type: String,
     enum: Object.values(TrainingModeEnum),
@@ -115,15 +119,11 @@ TrainingDataSchema.virtual('data', {
   justOne: true
 });
 
-try {
-  // lock training data(teamId); delete training data
-  TrainingDataSchema.index({ teamId: 1, datasetId: 1 });
-  // get training data and sort
-  TrainingDataSchema.index({ mode: 1, retryCount: 1, lockTime: 1, weight: -1 });
-  TrainingDataSchema.index({ expireAt: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60 }); // 7 days
-} catch (error) {
-  console.log(error);
-}
+// lock training data(teamId); delete training data
+TrainingDataSchema.index({ teamId: 1, datasetId: 1 });
+// get training data and sort
+TrainingDataSchema.index({ mode: 1, retryCount: 1, lockTime: 1, weight: -1 });
+TrainingDataSchema.index({ expireAt: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60 }); // 7 days
 
 export const MongoDatasetTraining = getMongoModel<DatasetTrainingSchemaType>(
   DatasetTrainingCollectionName,

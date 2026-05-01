@@ -1,17 +1,19 @@
 import type { NextApiResponse } from 'next';
 import { NextAPI } from '@/service/middleware/entry';
 import { MongoAppVersion } from '@fastgpt/service/core/app/version/schema';
-import { type PaginationProps, type PaginationResponse } from '@fastgpt/web/common/fetch/type';
+import { type PaginationProps, type PaginationResponse } from '@fastgpt/global/openapi/api';
 import { type ApiRequestProps } from '@fastgpt/service/type/next';
 import { authApp } from '@fastgpt/service/support/permission/app/auth';
 import { ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
 import { parsePaginationRequest } from '@fastgpt/service/common/api/pagination';
-import { getSystemToolByIdAndVersionId } from '@fastgpt/service/core/app/tool/controller';
+import {
+  getSystemToolById,
+  getSystemToolByIdAndVersionId
+} from '@fastgpt/service/core/app/tool/controller';
 import { AppToolSourceEnum } from '@fastgpt/global/core/app/tool/constants';
 import { PluginErrEnum } from '@fastgpt/global/common/error/code/plugin';
 import { Types } from '@fastgpt/service/common/mongo';
 import { splitCombineToolId } from '@fastgpt/global/core/app/tool/utils';
-import { getMCPParentId } from '@fastgpt/global/core/app/tool/mcpTool/utils';
 
 export type getToolVersionListProps = PaginationProps<{
   pluginId?: string;
@@ -36,11 +38,11 @@ async function handler(
     };
   }
 
-  const { source, pluginId: formatPluginId } = splitCombineToolId(pluginId);
+  const { source, authAppId } = splitCombineToolId(pluginId);
 
   // System tool plugin
   if (source === AppToolSourceEnum.systemTool) {
-    const item = await getSystemToolByIdAndVersionId(formatPluginId);
+    const item = await getSystemToolByIdAndVersionId(pluginId);
 
     return {
       total: 0,
@@ -54,19 +56,22 @@ async function handler(
 
   // Workflow plugin
   const appId = await (async () => {
-    if (source === AppToolSourceEnum.personal || source === AppToolSourceEnum.mcp) {
-      const appId = getMCPParentId(formatPluginId);
+    if (authAppId) {
       const { app } = await authApp({
-        appId,
+        appId: authAppId,
         req,
         per: ReadPermissionVal,
         authToken: true
       });
       return app._id;
     } else {
-      const item = await getSystemToolByIdAndVersionId(formatPluginId);
-      if (!item) return Promise.reject(PluginErrEnum.unAuth);
-      return item.associatedPluginId;
+      // Get appId from pluginId
+      const tool = await getSystemToolById(pluginId);
+
+      if (!tool.associatedPluginId) {
+        return Promise.reject(PluginErrEnum.unExist);
+      }
+      return tool.associatedPluginId;
     }
   })();
 

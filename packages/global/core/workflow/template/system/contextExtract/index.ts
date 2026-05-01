@@ -11,7 +11,6 @@ import {
   FlowNodeTemplateTypeEnum
 } from '../../../constants';
 import { Input_Template_SelectAIModel, Input_Template_History } from '../../input';
-import { LLMModelTypeEnum } from '../../../../ai/constants';
 import { i18nT } from '../../../../../../web/i18n/utils';
 import { Output_Template_Error_Message } from '../../output';
 
@@ -29,13 +28,10 @@ export const ContextExtractModule: FlowNodeTemplateType = {
   showStatus: true,
   isTool: true,
   catchError: false,
-  courseUrl: '/docs/introduction/guide/dashboard/workflow/content_extract/',
+  courseUrl: '/introduction/guide/dashboard/workflow/content_extract/',
   version: '4.9.2',
   inputs: [
-    {
-      ...Input_Template_SelectAIModel,
-      llmModelType: LLMModelTypeEnum.extractFields
-    },
+    Input_Template_SelectAIModel,
     {
       key: NodeInputKeyEnum.description,
       renderTypeList: [FlowNodeInputTypeEnum.textarea, FlowNodeInputTypeEnum.reference],

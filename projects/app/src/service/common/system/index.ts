@@ -1,7 +1,6 @@
-import { initHttpAgent } from '@fastgpt/service/common/middle/httpAgent';
 import fs, { existsSync } from 'fs';
-import type { FastGPTFeConfigsType } from '@fastgpt/global/common/system/types/index.d';
-import type { FastGPTConfigFileType } from '@fastgpt/global/common/system/types/index.d';
+import type { FastGPTFeConfigsType } from '@fastgpt/global/common/system/types/index';
+import type { FastGPTConfigFileType } from '@fastgpt/global/common/system/types/index';
 import { getFastGPTConfigFromDB } from '@fastgpt/service/common/system/config/controller';
 import { isProduction } from '@fastgpt/global/common/system/constants';
 import { initFastGPTConfig } from '@fastgpt/service/common/system/tools';
@@ -22,6 +21,10 @@ import type {
 } from '@fastgpt/global/support/wallet/usage/api';
 import { getSystemToolTags } from '@fastgpt/service/core/app/tool/api';
 import { isProVersion } from '@fastgpt/service/common/system/constants';
+import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
+import { env } from '@fastgpt/service/env';
+
+const logger = getLogger(LogCategories.SYSTEM);
 
 export const readConfigData = async (name: string) => {
   const splitName = name.split('.');
@@ -80,7 +83,6 @@ export function initGlobalVariables() {
   global.datasetParseQueueLen = global.datasetParseQueueLen ?? 0;
   global.qaQueueLen = global.qaQueueLen ?? 0;
   global.vectorQueueLen = global.vectorQueueLen ?? 0;
-  initHttpAgent();
   initPlusRequest();
 }
 
@@ -96,9 +98,9 @@ export async function getInitConfig() {
 
         global.systemVersion = packageJson?.version;
       }
-      console.log(`System Version: ${global.systemVersion}`);
+      logger.info('System version resolved', { systemVersion: global.systemVersion });
     } catch (error) {
-      console.log(error);
+      logger.error('System version resolve failed', { error });
 
       global.systemVersion = '0.0.0';
     }
@@ -109,14 +111,11 @@ export async function getInitConfig() {
 
 const defaultFeConfigs: FastGPTFeConfigsType = {
 
-
-
   show_emptyChat: false,
   show_git: false,
   docUrl: '',
   openAPIDocUrl: '',
   submitPluginRequestUrl: '',
-
 
   appTemplateCourse:
     '',
@@ -125,7 +124,8 @@ const defaultFeConfigs: FastGPTFeConfigsType = {
     '',
   limit: {
     exportDatasetLimitMinutes: 0,
-    websiteSyncLimitMinuted: 0
+    websiteSyncLimitMinuted: 0,
+    workflowParallelRunMaxConcurrency: env.WORKFLOW_PARALLEL_MAX_CONCURRENCY
   },
   scripts: [],
   favicon: '/favicon.ico',
@@ -152,6 +152,11 @@ export async function initSystemConfig() {
       ...fileRes?.feConfigs,
       ...defaultFeConfigs,
       ...(fastgptConfig.feConfigs || {}),
+      limit: {
+        ...fileRes?.feConfigs?.limit,
+        ...defaultFeConfigs.limit,
+        ...(fastgptConfig.feConfigs?.limit || {})
+      },
       isPlus: !!licenseData,
       hideChatCopyrightSetting: process.env.HIDE_CHAT_COPYRIGHT_SETTING === 'true',
       show_aiproxy: !!process.env.AIPROXY_API_ENDPOINT,
@@ -159,7 +164,11 @@ export async function initSystemConfig() {
       show_discount_coupon: process.env.SHOW_DISCOUNT_COUPON === 'true',
       show_dataset_enhance: licenseData?.functions?.datasetEnhance,
       show_batch_eval: licenseData?.functions?.batchEval,
-      payFormUrl: process.env.PAY_FORM_URL || ''
+      show_agent_sandbox: !!env.AGENT_SANDBOX_PROVIDER,
+      show_skill: env.SHOW_SKILL,
+      payFormUrl: process.env.PAY_FORM_URL || '',
+
+      agentSandboxFree: process.env.AGENT_SANDBOX_FREE_TIP === 'true'
     },
     systemEnv: {
       ...fileRes.systemEnv,
@@ -171,11 +180,13 @@ export async function initSystemConfig() {
   // set config
   initFastGPTConfig(config);
 
-  console.log({
-    feConfigs: global.feConfigs,
-    systemEnv: global.systemEnv,
-    subPlans: global.subPlans,
-    licenseData: global.licenseData
+  logger.info('System config loaded', {
+    fastgpt: {
+      feConfigs: global.feConfigs,
+      systemEnv: global.systemEnv,
+      subPlans: global.subPlans,
+      licenseData: global.licenseData
+    }
   });
 }
 
@@ -202,7 +213,7 @@ export async function initSystemPluginTags() {
       await MongoPluginToolTag.bulkWrite(bulkOps);
     }
   } catch (error) {
-    console.error('Error initializing system plugin tags:', error);
+    logger.error('Error initializing system plugin tags:', { error });
   }
 }
 
@@ -226,6 +237,6 @@ export async function initAppTemplateTypes() {
       })
     );
   } catch (error) {
-    console.error('Error initializing system templates:', error);
+    logger.error('Error initializing system templates:', { error });
   }
 }

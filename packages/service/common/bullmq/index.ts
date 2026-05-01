@@ -3,12 +3,17 @@ import {
   type Processor,
   Queue,
   type QueueOptions,
+  UnrecoverableError,
   Worker,
   type WorkerOptions
 } from 'bullmq';
-import { addLog } from '../system/log';
+import './type';
+import { getLogger, LogCategories } from '../logger';
 import { newQueueRedisConnection, newWorkerRedisConnection } from '../redis';
 import { delay } from '@fastgpt/global/common/system/utils';
+import { getErrText } from '@fastgpt/global/common/error/utils';
+
+const logger = getLogger(LogCategories.INFRA.QUEUE);
 
 const defaultWorkerOpts: Omit<ConnectionOptions, 'connection'> = {
   removeOnComplete: {
@@ -23,12 +28,18 @@ export enum QueueNames {
   datasetSync = 'datasetSync',
   evaluation = 'evaluation',
   s3FileDelete = 's3FileDelete',
+  collectionUpdate = 'collectionUpdate',
 
   // Delete Queue
   datasetDelete = 'datasetDelete',
   appDelete = 'appDelete',
   teamDelete = 'teamDelete',
-  // @deprecated
+
+  // Publish
+  wechatPoll = 'wechatPoll',
+  wechatReply = 'wechatReply',
+
+  /** @deprecated */
   websiteSync = 'websiteSync'
 }
 
@@ -61,7 +72,10 @@ export function getQueue<DataType, ReturnType = void>(
 
   // default error handler, to avoid unhandled exceptions
   newQueue.on('error', (error) => {
-    addLog.error(`MQ Queue] error`, error);
+    logger.error('BullMQ queue error', {
+      name,
+      error
+    });
   });
   queues.set(name, newQueue);
   return newQueue;
@@ -90,18 +104,18 @@ export function getWorker<DataType, ReturnType = void>(
 
     // Worker is ready to process jobs (fired on initial connection and after reconnection)
     newWorker.on('ready', () => {
-      addLog.info(`[MQ Worker] ready`, { name });
+      logger.info('BullMQ worker ready', { name });
     });
     // default error handler, to avoid unhandled exceptions
     newWorker.on('error', async (error) => {
-      addLog.error(`[MQ Worker] error`, {
-        message: error.message,
-        data: { name }
+      logger.error('BullMQ worker error', {
+        name,
+        error
       });
     });
     // Critical: Worker has been closed - remove from pool and restart
     newWorker.on('closed', async () => {
-      addLog.warn(`[MQ Worker] closed, attempting restart...`);
+      logger.warn('BullMQ worker closed, attempting restart', { name });
 
       // Clean up: remove all listeners to prevent memory leaks
       newWorker.removeAllListeners();
@@ -112,16 +126,19 @@ export function getWorker<DataType, ReturnType = void>(
           // Call getWorker to create a new worker (now workers.get(name) returns undefined)
           const worker = createWorker();
           workers.set(name, worker);
-          addLog.info(`[MQ Worker] restarted successfully`);
+          logger.info('BullMQ worker restarted successfully', { name });
           break;
         } catch (error) {
-          addLog.error(`[MQ Worker] failed to restart, retrying...`, error);
+          logger.error('BullMQ worker restart failed, will retry', {
+            name,
+            error
+          });
           await delay(1000);
         }
       }
     });
     newWorker.on('paused', async () => {
-      addLog.warn(`[MQ Worker] paused`);
+      logger.warn('BullMQ worker paused', { name });
       await delay(1000);
       newWorker.resume();
     });
@@ -134,4 +151,5 @@ export function getWorker<DataType, ReturnType = void>(
   return newWorker;
 }
 
-export * from 'bullmq';
+export { Queue, UnrecoverableError, Worker, delay };
+export type { ConnectionOptions, Job, Processor, QueueOptions, WorkerOptions } from 'bullmq';

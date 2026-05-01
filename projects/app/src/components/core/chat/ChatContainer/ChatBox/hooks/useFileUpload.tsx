@@ -10,13 +10,15 @@ import { clone } from 'lodash';
 import { getErrText } from '@fastgpt/global/common/error/utils';
 import { type UseFieldArrayReturn } from 'react-hook-form';
 import { type ChatBoxInputFormType, type UserInputFileItemType } from '../type';
-import { type AppFileSelectConfigType } from '@fastgpt/global/core/app/type';
+import { type AppFileSelectConfigType } from '@fastgpt/global/core/app/type/config.schema';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
 import { useUserStore } from '@/web/support/user/useUserStore';
 import { type OutLinkChatAuthProps } from '@fastgpt/global/support/permission/chat';
 import { getPresignedChatFileGetUrl, getUploadChatFilePresignedUrl } from '@/web/common/file/api';
 import { getUploadFileType } from '@fastgpt/global/core/app/constants';
 import { putFileToS3 } from '@fastgpt/web/common/file/utils';
+import { WorkflowRuntimeContext } from '../../context/workflowRuntimeContext';
+import { useContextSelector } from 'use-context-selector';
 
 type UseFileUploadOptions = {
   fileSelectConfig: AppFileSelectConfigType;
@@ -33,6 +35,10 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
   const { t } = useTranslation();
   const { feConfigs } = useSystemStore();
   const { teamPlanStatus } = useUserStore();
+  const runtimeFileSelectConfig = useContextSelector(
+    WorkflowRuntimeContext,
+    (v) => v.runtimeFileSelectConfig
+  );
 
   const {
     update: updateFiles,
@@ -57,12 +63,12 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
   // 文件数量限制：配置的maxFiles || 团队套餐 || 系统配置 || 默认值
   const maxSelectFiles =
     fileSelectConfig?.maxFiles ||
-    teamPlanStatus?.standardConstants?.maxUploadFileCount ||
+    teamPlanStatus?.standard?.maxUploadFileCount ||
     feConfigs?.uploadFileMaxAmount ||
     10;
   // 文件大小限制（MB）：团队套餐 || 系统配置 || 默认值
   const maxSize =
-    (teamPlanStatus?.standardConstants?.maxUploadFileSize || feConfigs?.uploadFileMaxSize || 500) *
+    (teamPlanStatus?.standard?.maxUploadFileSize || feConfigs?.uploadFileMaxSize || 500) *
     1024 *
     1024;
   const canSelectFileAmount = maxSelectFiles - fileList.length;
@@ -190,6 +196,7 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
             filename: copyFile.rawFile.name,
             appId,
             chatId,
+            fileSelectConfig: runtimeFileSelectConfig,
             outLinkAuthData
           });
 
@@ -231,7 +238,18 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
     );
 
     removeFiles(errorFileIndex);
-  }, [appId, chatId, fileList, outLinkAuthData, removeFiles, replaceFiles, t, toast, updateFiles]);
+  }, [
+    appId,
+    chatId,
+    fileList,
+    outLinkAuthData,
+    removeFiles,
+    replaceFiles,
+    runtimeFileSelectConfig,
+    t,
+    toast,
+    updateFiles
+  ]);
 
   const sortFileList = useMemo(() => {
     // Sort: Document, image

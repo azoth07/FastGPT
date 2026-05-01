@@ -1,5 +1,5 @@
 import { MongoOutLink } from '@fastgpt/service/support/outLink/schema';
-import type { OutLinkEditType } from '@fastgpt/global/support/outLink/type.d';
+import type { OutLinkEditType } from '@fastgpt/global/support/outLink/type';
 import { authOutLinkCrud } from '@fastgpt/service/support/permission/publish/authLink';
 import { ManagePermissionVal } from '@fastgpt/global/support/permission/constant';
 import type { ApiRequestProps } from '@fastgpt/service/type/next';
@@ -16,7 +16,7 @@ export type OutLinkUpdateQuery = {};
 // responseDetail?: boolean; // 是否开启详细回复
 // immediateResponse?: string; // 立即回复的内容
 // defaultResponse?: string; // 默认回复的内容
-// limit?: OutLinkSchema<T>['limit']; // 限制
+// limit?: OutLinkSchemaType<T>['limit']; // 限制
 // app?: T; // 平台的配置
 // }
 export type OutLinkUpdateBody = OutLinkEditType;
@@ -26,8 +26,17 @@ export type OutLinkUpdateResponse = string;
 async function handler(
   req: ApiRequestProps<OutLinkUpdateBody, OutLinkUpdateQuery>
 ): Promise<OutLinkUpdateResponse> {
-  const { _id, name, showCite, limit, app, canDownloadSource, showRunningStatus, showFullText } =
-    req.body;
+  const {
+    _id,
+    name,
+    showCite,
+    limit,
+    app,
+    canDownloadSource,
+    showRunningStatus,
+    showSkillReferences,
+    showFullText
+  } = req.body;
 
   if (!_id) {
     return Promise.reject(CommonErrEnum.missingParams);
@@ -50,6 +59,7 @@ async function handler(
     showCite,
     canDownloadSource,
     showRunningStatus,
+    showSkillReferences,
     showFullText,
     limit,
     app

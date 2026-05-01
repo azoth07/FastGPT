@@ -44,8 +44,8 @@ const FeiShuEditModal = ({
         appId,
         type: PublishChannelEnum.feishu,
         app: {
-          appId: e?.app?.appId?.trim(),
-          appSecret: e.app?.appSecret?.trim(),
+          appId: e?.app?.appId?.trim() ?? '',
+          appSecret: e.app?.appSecret?.trim() ?? '',
           encryptKey: e.app?.encryptKey?.trim()
         }
       }),
@@ -61,8 +61,8 @@ const FeiShuEditModal = ({
       updateShareChat({
         ...e,
         app: {
-          appId: e?.app?.appId?.trim(),
-          appSecret: e.app?.appSecret?.trim(),
+          appId: e?.app?.appId?.trim() ?? '',
+          appSecret: e.app?.appSecret?.trim() ?? '',
           encryptKey: e.app?.encryptKey?.trim()
         }
       }),
@@ -90,7 +90,7 @@ const FeiShuEditModal = ({
             <Box color="myGray.600">{t('publish:feishu_api')}</Box>
             {feConfigs?.docUrl && (
               <Link
-                href={getDocPath('/docs/use-cases/external-integration/feishu/')}
+                href={getDocPath('/use-cases/external-integration/feishu/')}
                 target={'_blank'}
                 ml={2}
                 color={'primary.500'}

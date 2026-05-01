@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { RenderInputProps } from '../type';
-import { Box, Button, Flex, Grid, Switch, useDisclosure, useTheme } from '@chakra-ui/react';
+import { Box, Button, Flex, Grid, Switch, useDisclosure } from '@chakra-ui/react';
 import { type SelectedDatasetType } from '@fastgpt/global/core/workflow/type/io';
 import Avatar from '@fastgpt/web/components/common/Avatar';
 import { useTranslation } from 'next-i18next';
@@ -97,9 +97,9 @@ export const SelectDatasetRender = React.memo(function SelectDatasetRender({
           <DatasetSelectModal
             defaultSelectedDatasets={selectedDatasets.map((item) => ({
               datasetId: item.datasetId,
-              vectorModel: item.vectorModel,
               name: item.name,
-              avatar: item.avatar
+              avatar: item.avatar,
+              vectorModel: item.vectorModel
             }))}
             onChange={(e) => {
               onChangeNode({

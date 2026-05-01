@@ -1,6 +1,6 @@
 import type { ApiRequestProps } from '@fastgpt/service/type/next';
 import { NextAPI } from '@/service/middleware/entry';
-import { addLog } from '@fastgpt/service/common/system/log';
+import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
 import { readRawTextByLocalFile } from '@fastgpt/service/common/file/read/utils';
 import { authDataset } from '@fastgpt/service/support/permission/dataset/auth';
 import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
@@ -13,14 +13,11 @@ import { i18nT } from '@fastgpt/web/i18n/utils';
 import { isCSVFile } from '@fastgpt/global/common/file/utils';
 import { multer } from '@fastgpt/service/common/file/multer';
 import { getS3DatasetSource } from '@fastgpt/service/common/s3/sources/dataset';
+import { CreateBackupCollectionFormSchema } from '@fastgpt/global/openapi/core/dataset/collection/createApi';
+import { checkDatasetIndexLimit } from '@fastgpt/service/support/permission/teamLimit';
+const logger = getLogger(LogCategories.MODULE.DATASET.COLLECTION);
 
-export type backupQuery = {};
-
-export type backupBody = {};
-
-export type backupResponse = {};
-
-async function handler(req: ApiRequestProps<backupBody, backupQuery>) {
+async function handler(req: ApiRequestProps) {
   const filepaths: string[] = [];
 
   try {
@@ -30,6 +27,7 @@ async function handler(req: ApiRequestProps<backupBody, backupQuery>) {
     });
     filepaths.push(result.fileMetadata.path);
     const filename = decodeURIComponent(result.fileMetadata.originalname);
+    const { datasetId, parentId } = CreateBackupCollectionFormSchema.parse(result.data);
 
     if (!isCSVFile(filename)) {
       return Promise.reject('File must be a CSV file');
@@ -40,7 +38,13 @@ async function handler(req: ApiRequestProps<backupBody, backupQuery>) {
       authToken: true,
       authApiKey: true,
       per: WritePermissionVal,
-      datasetId: result.data.datasetId
+      datasetId
+    });
+
+    // Check dataset limit
+    await checkDatasetIndexLimit({
+      teamId,
+      insertLen: 1
     });
 
     const { rawText } = await readRawTextByLocalFile({
@@ -70,6 +74,7 @@ async function handler(req: ApiRequestProps<backupBody, backupQuery>) {
         teamId,
         tmbId,
         datasetId: dataset._id,
+        parentId,
         name: filename,
         type: DatasetCollectionTypeEnum.file,
         fileId,
@@ -79,7 +84,7 @@ async function handler(req: ApiRequestProps<backupBody, backupQuery>) {
 
     return {};
   } catch (error) {
-    addLog.error(`Backup dataset collection create error: ${error}`);
+    logger.error(`Backup dataset collection create error: ${error}`);
     return Promise.reject(error);
   } finally {
     multer.clearDiskTempFiles(filepaths);

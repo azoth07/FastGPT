@@ -1,7 +1,7 @@
 import z from 'zod';
 import { ObjectIdSchema } from '../../../../common/type/mongo';
 import { OutLinkChatAuthSchema } from '../../../../support/permission/chat';
-import { ChatSourceEnum } from '../../../../core/chat/constants';
+import { ChatGenerateStatusEnum, ChatSourceEnum } from '../../../../core/chat/constants';
 import { PaginationSchema, PaginationResponseSchema } from '../../../api';
 
 // Get chat histories schema
@@ -17,25 +17,49 @@ export type GetHistoriesBodyType = z.infer<typeof GetHistoriesBodySchema>;
 export const GetHistoriesResponseSchema = PaginationResponseSchema(
   z.object({
     chatId: z.string(),
-    updateTime: z.date(),
+    updateTime: z.coerce.date(),
     appId: z.string(),
     customTitle: z.string().optional(),
     title: z.string(),
-    top: z.boolean().optional()
+    top: z.boolean().optional(),
+    chatGenerateStatus: z.enum(ChatGenerateStatusEnum).optional(),
+    hasBeenRead: z.boolean().optional()
   })
 );
 export type GetHistoriesResponseType = z.infer<typeof GetHistoriesResponseSchema>;
 
+export const GetHistoryStatusBodySchema = OutLinkChatAuthSchema.extend({
+  appId: ObjectIdSchema.optional().describe('应用ID'),
+  chatIds: z.array(z.string().min(1)).min(1).max(200).describe('需要刷新状态的对话 ID 列表')
+});
+export type GetHistoryStatusBodyType = z.infer<typeof GetHistoryStatusBodySchema>;
+
+export const GetHistoryStatusResponseSchema = z.object({
+  list: z.array(
+    z.object({
+      chatId: z.string(),
+      updateTime: z.coerce.date(),
+      chatGenerateStatus: z.enum(ChatGenerateStatusEnum).optional(),
+      hasBeenRead: z.boolean().optional()
+    })
+  )
+});
+export type GetHistoryStatusResponseType = z.infer<typeof GetHistoryStatusResponseSchema>;
+
+export const MarkChatReadBodySchema = OutLinkChatAuthSchema.extend({
+  appId: ObjectIdSchema.describe('应用ID'),
+  chatId: z.string().min(1).describe('对话ID')
+});
+export type MarkChatReadBodyType = z.infer<typeof MarkChatReadBodySchema>;
+
 // Update chat history schema
-export const UpdateHistoryBodySchema = OutLinkChatAuthSchema.and(
-  z.object({
-    appId: ObjectIdSchema.describe('应用ID'),
-    chatId: z.string().min(1).describe('对话ID'),
-    title: z.string().optional().describe('标题'),
-    customTitle: z.string().optional().describe('自定义标题'),
-    top: z.boolean().optional().describe('是否置顶')
-  })
-);
+export const UpdateHistoryBodySchema = OutLinkChatAuthSchema.extend({
+  appId: ObjectIdSchema.describe('应用ID'),
+  chatId: z.string().min(1).describe('对话ID'),
+  title: z.string().optional().describe('标题'),
+  customTitle: z.string().optional().describe('自定义标题'),
+  top: z.boolean().optional().describe('是否置顶')
+});
 export type UpdateHistoryBodyType = z.infer<typeof UpdateHistoryBodySchema>;
 
 // Delete single chat history schema

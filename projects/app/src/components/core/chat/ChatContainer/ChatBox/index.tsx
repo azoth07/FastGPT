@@ -9,9 +9,9 @@ import React, {
 import Script from 'next/script';
 import type {
   AIChatItemValueItemType,
-  ChatSiteItemType,
   UserChatItemValueItemType
-} from '@fastgpt/global/core/chat/type.d';
+} from '@fastgpt/global/core/chat/type';
+import type { ChatSiteItemType } from './type';
 import { useToast } from '@fastgpt/web/hooks/useToast';
 import { getErrText } from '@fastgpt/global/common/error/utils';
 import { Box, Checkbox, Flex } from '@chakra-ui/react';
@@ -26,25 +26,22 @@ import {
   updateChatUserFeedback,
   updateFeedbackReadStatus
 } from '@/web/core/chat/feedback/api';
-import { delChatRecordById } from '@/web/core/chat/api';
+import { delChatRecordById } from '@/web/core/chat/record/api';
+import { postMarkChatRead } from '@/web/core/chat/history/api';
 import type { AdminMarkType } from './components/SelectMarkCollection';
 import MyTooltip from '@fastgpt/web/components/common/MyTooltip';
 import { postQuestionGuide } from '@/web/core/ai/api';
-import type { ChatBoxInputType, ChatBoxInputFormType, SendPromptFnType } from './type.d';
+import type { ChatBoxInputType, ChatBoxInputFormType, SendPromptFnType } from './type';
 import type { StartChatFnProps, generatingMessageProps } from '../type';
 import ChatInput from './Input/ChatInput';
 import ChatBoxDivider from '../../Divider';
 import { type OutLinkChatAuthProps } from '@fastgpt/global/support/permission/chat';
 import { getNanoid } from '@fastgpt/global/common/string/tools';
-import {
-  ChatItemValueTypeEnum,
-  ChatRoleEnum,
-  ChatStatusEnum
-} from '@fastgpt/global/core/chat/constants';
+import { ChatRoleEnum, ChatStatusEnum } from '@fastgpt/global/core/chat/constants';
 import {
   getInteractiveByHistories,
   formatChatValue2InputType,
-  setInteractiveResultToHistories
+  rewriteHistoriesByInteractiveResponse
 } from './utils';
 import { ChatTypeEnum, textareaMinH } from './constants';
 import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
@@ -52,7 +49,11 @@ import ChatProvider, { ChatBoxContext, type ChatProviderProps } from './Provider
 import { WorkflowRuntimeContext } from '../context/workflowRuntimeContext';
 import ChatItem from './components/ChatItem';
 import dynamic from 'next/dynamic';
-import type { StreamResponseType } from '@/web/common/api/fetch';
+import {
+  streamResumeFetch,
+  type ResumeStreamErrorType,
+  type StreamResponseType
+} from '@/web/common/api/fetch';
 import { useContextSelector } from 'use-context-selector';
 import { useSystem } from '@fastgpt/web/hooks/useSystem';
 import { useCreation, useDebounceEffect, useMemoizedFn, useThrottleFn } from 'ahooks';
@@ -60,6 +61,7 @@ import MyIcon from '@fastgpt/web/components/common/Icon';
 import { mergeChatResponseData } from '@fastgpt/global/core/chat/utils';
 import { getWebReqUrl } from '@fastgpt/web/common/system/utils';
 import { ChatRecordContext } from '@/web/core/chat/context/chatRecordContext';
+import { ChatContext } from '@/web/core/chat/context/chatContext';
 import { ChatItemContext } from '@/web/core/chat/context/chatItemContext';
 import TimeBox from './components/TimeBox';
 import MyBox from '@fastgpt/web/components/common/MyBox';
@@ -68,6 +70,8 @@ import { valueTypeFormat } from '@fastgpt/global/core/workflow/runtime/utils';
 import { formatTime2YMDHMS } from '@fastgpt/global/common/string/time';
 import { TeamErrEnum } from '@fastgpt/global/common/error/code/team';
 import { useMemoEnhance } from '@fastgpt/web/hooks/useMemoEnhance';
+import { cloneDeep } from 'lodash';
+import { ChatGenerateStatusEnum } from '@fastgpt/global/core/chat/constants';
 
 const FeedbackModal = dynamic(() => import('./components/FeedbackModal'));
 const SelectMarkCollection = dynamic(() => import('./components/SelectMarkCollection'));
@@ -85,6 +89,28 @@ enum FeedbackTypeEnum {
   hidden = 'hidden'
 }
 
+type HumanChatSiteItemType = Extract<ChatSiteItemType, { obj: ChatRoleEnum.Human }>;
+
+const isAbortByLeave = (reason: unknown) => {
+  return reason === 'leave' || (reason instanceof Error && reason.message === 'leave');
+};
+
+const shouldCreateResumeAiPlaceholder = (event: SseResponseEventEnum) => {
+  return [
+    SseResponseEventEnum.flowNodeResponse,
+    SseResponseEventEnum.flowNodeStatus,
+    SseResponseEventEnum.answer,
+    SseResponseEventEnum.fastAnswer,
+    SseResponseEventEnum.toolCall,
+    SseResponseEventEnum.toolParams,
+    SseResponseEventEnum.toolResponse,
+    SseResponseEventEnum.interactive,
+    SseResponseEventEnum.plan,
+    SseResponseEventEnum.stepTitle,
+    SseResponseEventEnum.workflowDuration
+  ].includes(event);
+};
+
 type Props = OutLinkChatAuthProps &
   ChatProviderProps & {
     isReady: boolean;
@@ -93,6 +119,7 @@ type Props = OutLinkChatAuthProps &
     showVoiceIcon?: boolean;
     active?: boolean; // can use
     showWorkorder?: boolean;
+    enableAutoResume?: boolean;
 
     onStartChat?: (e: StartChatFnProps) => Promise<
       StreamResponseType & {
@@ -100,6 +127,8 @@ type Props = OutLinkChatAuthProps &
       }
     >;
     onTriggerRefresh?: () => void;
+    // TODO: 待优化。 自定义删除消息的实现，不传则使用默认的 delChatRecordById
+    onDeleteChatItem?: (contentId: string, delFile?: boolean) => Promise<void>;
   };
 
 const ChatBox = ({
@@ -109,9 +138,11 @@ const ChatBox = ({
   showVoiceIcon = true,
   active = true,
   showWorkorder,
+  enableAutoResume = false,
   onStartChat,
   chatType,
-  onTriggerRefresh
+  onTriggerRefresh,
+  onDeleteChatItem
 }: Props) => {
   const ScrollContainerRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
@@ -122,6 +153,8 @@ const ChatBox = ({
   const chatController = useRef(new AbortController());
   const questionGuideController = useRef(new AbortController());
   const pluginController = useRef(new AbortController());
+  const resumeController = useRef<AbortController>();
+  const resumedChatIdRef = useRef<string>();
 
   const [isLoading, setIsLoading] = useState(false);
   const [feedbackId, setFeedbackId] = useState<string>();
@@ -132,6 +165,7 @@ const ChatBox = ({
   const appAvatar = useContextSelector(ChatItemContext, (v) => v.chatBoxData?.app?.avatar);
   const userAvatar = useContextSelector(ChatItemContext, (v) => v.chatBoxData?.userAvatar);
   const chatBoxData = useContextSelector(ChatItemContext, (v) => v.chatBoxData);
+  const setChatBoxData = useContextSelector(ChatItemContext, (v) => v.setChatBoxData);
   const ChatBoxRef = useContextSelector(ChatItemContext, (v) => v.ChatBoxRef);
   const variablesForm = useContextSelector(ChatItemContext, (v) => v.variablesForm);
   const resetVariables = useContextSelector(ChatItemContext, (v) => v.resetVariables);
@@ -146,6 +180,8 @@ const ChatBox = ({
 
   const appId = useContextSelector(WorkflowRuntimeContext, (v) => v.appId);
   const chatId = useContextSelector(WorkflowRuntimeContext, (v) => v.chatId);
+  const activeChatIdRef = useRef<string | undefined>(chatId);
+  activeChatIdRef.current = chatId;
   const outLinkAuthData = useContextSelector(WorkflowRuntimeContext, (v) => v.outLinkAuthData);
   const welcomeText = useContextSelector(ChatBoxContext, (v) => v.welcomeText);
   const variableList = useContextSelector(ChatBoxContext, (v) => v.variableList);
@@ -156,8 +192,63 @@ const ChatBox = ({
   const splitText2Audio = useContextSelector(ChatBoxContext, (v) => v.splitText2Audio);
   const isChatting = useContextSelector(ChatBoxContext, (v) => v.isChatting);
 
+  const setHistories = useContextSelector(ChatContext, (v) => v.setHistories);
+  const loadHistories = useContextSelector(ChatContext, (v) => v.loadHistories);
+
+  const syncSidebarChatGenerateStatus = useMemoizedFn(
+    (
+      status: ChatGenerateStatusEnum,
+      options?: { hasBeenRead?: boolean; targetChatId?: string }
+    ) => {
+      const targetChatId = options?.targetChatId ?? chatId;
+      if (!targetChatId) return;
+      setHistories((prev) => {
+        const idx = prev.findIndex((h) => h.chatId === targetChatId);
+        if (idx === -1) {
+          queueMicrotask(loadHistories);
+          return [
+            {
+              chatId: targetChatId,
+              appId,
+              title: chatBoxData.title || t('common:core.chat.New Chat'),
+              customTitle: '',
+              top: false,
+              updateTime: new Date(),
+              chatGenerateStatus: status,
+              hasBeenRead: options?.hasBeenRead ?? status !== ChatGenerateStatusEnum.generating
+            },
+            ...prev
+          ];
+        }
+        return prev.map((h) =>
+          h.chatId === targetChatId
+            ? {
+                ...h,
+                chatGenerateStatus: status,
+                updateTime: new Date(),
+                ...(options?.hasBeenRead !== undefined ? { hasBeenRead: options.hasBeenRead } : {})
+              }
+            : h
+        );
+      });
+    }
+  );
+
+  const resumeTargetAiDataId = useMemo(() => {
+    for (let i = chatRecords.length - 1; i >= 0; i--) {
+      const row = chatRecords[i];
+      if (row.obj === ChatRoleEnum.AI && row.dataId) {
+        return row.dataId as string;
+      }
+    }
+    return undefined;
+  }, [chatRecords]);
+
   // Workflow running, there are user input or selection
-  const lastInteractive = useMemo(() => getInteractiveByHistories(chatRecords), [chatRecords]);
+  const { interactive: lastInteractive, canSendQuery } = useMemo(
+    () => getInteractiveByHistories(chatRecords),
+    [chatRecords]
+  );
 
   const showExternalVariable = useMemo(() => {
     const map: Record<string, boolean> = {
@@ -243,6 +334,7 @@ const ChatBox = ({
 
   const generatingMessage = useMemoizedFn(
     ({
+      responseValueId,
       event,
       text = '',
       reasoningText,
@@ -250,21 +342,35 @@ const ChatBox = ({
       name,
       tool,
       interactive,
-      autoTTSResponse,
+      plan,
+      stepId,
+      stepTitle,
+      sandboxStatus,
+      skill,
       variables,
       nodeResponse,
-      durationSeconds
+      durationSeconds,
+      autoTTSResponse
     }: generatingMessageProps & { autoTTSResponse?: boolean }) => {
       setChatRecords((state) =>
         state.map((item, index) => {
           if (index !== state.length - 1) return item;
           if (item.obj !== ChatRoleEnum.AI) return item;
 
-          autoTTSResponse && splitText2Audio(formatChatValue2InputType(item.value).text || '');
+          if (autoTTSResponse) {
+            splitText2Audio(formatChatValue2InputType(item.value).text || '');
+          }
 
-          const lastValue: AIChatItemValueItemType = JSON.parse(
-            JSON.stringify(item.value[item.value.length - 1])
-          );
+          const updateIndex = (() => {
+            if (!responseValueId) return item.value.length - 1;
+            const index = item.value.findIndex((item) => item.id === responseValueId);
+            if (index !== -1) return index;
+            return item.value.length - 1;
+          })();
+          const updateValue: AIChatItemValueItemType = cloneDeep(item.value[updateIndex]);
+          if (stepId) {
+            updateValue.stepId = stepId;
+          }
 
           if (event === SseResponseEventEnum.flowNodeResponse && nodeResponse) {
             return {
@@ -273,100 +379,199 @@ const ChatBox = ({
                 ? [...item.responseData, nodeResponse]
                 : [nodeResponse]
             };
-          } else if (event === SseResponseEventEnum.flowNodeStatus && status) {
+          }
+          if (event === SseResponseEventEnum.flowNodeStatus && status) {
             return {
               ...item,
               status,
               moduleName: name
             };
-          } else if (reasoningText) {
-            if (lastValue.type === ChatItemValueTypeEnum.reasoning && lastValue.reasoning) {
-              lastValue.reasoning.content += reasoningText;
-              return {
-                ...item,
-                value: item.value.slice(0, -1).concat(lastValue)
-              };
-            } else {
-              const val: AIChatItemValueItemType = {
-                type: ChatItemValueTypeEnum.reasoning,
-                reasoning: {
-                  content: reasoningText
-                }
-              };
-              return {
-                ...item,
-                value: item.value.concat(val)
-              };
-            }
-          } else if (
-            (event === SseResponseEventEnum.answer || event === SseResponseEventEnum.fastAnswer) &&
-            text
-          ) {
-            if (!lastValue || !lastValue.text) {
-              const newValue: AIChatItemValueItemType = {
-                type: ChatItemValueTypeEnum.text,
-                text: {
-                  content: text
-                }
-              };
-              return {
-                ...item,
-                value: item.value.concat(newValue)
-              };
-            } else {
-              lastValue.text.content += text;
-              return {
-                ...item,
-                value: item.value.slice(0, -1).concat(lastValue)
-              };
-            }
-          } else if (event === SseResponseEventEnum.toolCall && tool) {
-            const val: AIChatItemValueItemType = {
-              type: ChatItemValueTypeEnum.tool,
-              tools: [tool]
-            };
-            return {
-              ...item,
-              value: item.value.concat(val)
-            };
-          } else if (
-            event === SseResponseEventEnum.toolParams &&
-            tool &&
-            lastValue.type === ChatItemValueTypeEnum.tool &&
-            lastValue?.tools
-          ) {
-            lastValue.tools = lastValue.tools.map((item) => {
-              if (item.id === tool.id) {
-                item.params += tool.params;
+          }
+          if (event === SseResponseEventEnum.sandboxStatus && sandboxStatus) {
+            const getSandboxPhaseLabel = (): string => {
+              const { phase, isWarmStart, skillName } = sandboxStatus;
+              if (phase === 'deployingSkills') {
+                return t('chat:sandbox_status_deployingSkills', { skillName: skillName ?? '' });
               }
-              return item;
-            });
+              if (
+                phase === 'downloadingPackage' ||
+                phase === 'uploadingPackage' ||
+                phase === 'extractingPackage'
+              ) {
+                return t(`chat:sandbox_status_${phase}` as any, { skillName: skillName ?? '' });
+              }
+              if (phase === 'ready') {
+                return t(
+                  isWarmStart ? 'chat:sandbox_status_ready_warm' : 'chat:sandbox_status_ready_cold'
+                );
+              }
+              return t(`chat:sandbox_status_${phase}` as any);
+            };
             return {
               ...item,
-              value: item.value.slice(0, -1).concat(lastValue)
+              status: 'loading' as const,
+              moduleName: getSandboxPhaseLabel()
             };
-          } else if (event === SseResponseEventEnum.toolResponse && tool) {
-            // replace tool response
-            return {
-              ...item,
-              value: item.value.map((val) => {
-                if (val.type === ChatItemValueTypeEnum.tool && val.tools) {
-                  const tools = val.tools.map((item) =>
-                    item.id === tool.id ? { ...item, response: tool.response } : item
-                  );
-                  return {
-                    ...val,
-                    tools
-                  };
-                }
-                return val;
-              })
-            };
-          } else if (event === SseResponseEventEnum.updateVariables && variables) {
-            resetVariables({ variables });
-          } else if (event === SseResponseEventEnum.interactive) {
+          }
+          if (event === SseResponseEventEnum.skillCall && skill) {
+            // 去重检查：避免同一个 skill 在同一步骤中重复展示
+            const alreadyExists = item.value.some(
+              (v) =>
+                v.stepId === stepId && v.skills?.some((s) => s.skillMdPath === skill.skillMdPath)
+            );
+            if (alreadyExists) return item;
+
+            const skillId = skill.id || responseValueId || getNanoid(10);
             const val: AIChatItemValueItemType = {
-              type: ChatItemValueTypeEnum.interactive,
+              id: responseValueId,
+              stepId,
+              skills: [
+                {
+                  id: skillId,
+                  skillName: skill.skillName,
+                  skillAvatar: skill.skillAvatar || '',
+                  description: skill.description,
+                  skillMdPath: skill.skillMdPath
+                }
+              ]
+            };
+            return {
+              ...item,
+              value: [...item.value, val]
+            };
+          }
+          if (event === SseResponseEventEnum.answer || event === SseResponseEventEnum.fastAnswer) {
+            if (reasoningText) {
+              if (updateValue?.reasoning && updateValue.stepId === stepId) {
+                updateValue.reasoning.content += reasoningText;
+                return {
+                  ...item,
+                  value: [
+                    ...item.value.slice(0, updateIndex),
+                    updateValue,
+                    ...item.value.slice(updateIndex + 1)
+                  ]
+                };
+              } else {
+                const val: AIChatItemValueItemType = {
+                  id: responseValueId,
+                  reasoning: {
+                    content: reasoningText
+                  }
+                };
+                return {
+                  ...item,
+                  value: [...item.value, val]
+                };
+              }
+            }
+            if (text) {
+              if (updateValue?.text && updateValue.stepId === stepId) {
+                updateValue.text.content += text;
+                return {
+                  ...item,
+                  value: [
+                    ...item.value.slice(0, updateIndex),
+                    updateValue,
+                    ...item.value.slice(updateIndex + 1)
+                  ]
+                };
+              } else {
+                const newValue: AIChatItemValueItemType = {
+                  id: responseValueId,
+                  text: {
+                    content: text
+                  }
+                };
+                return {
+                  ...item,
+                  value: item.value.concat(newValue)
+                };
+              }
+            }
+          }
+
+          // Tool call
+          if (event === SseResponseEventEnum.toolCall && tool) {
+            const val: AIChatItemValueItemType = {
+              id: responseValueId,
+              tool
+            };
+            return {
+              ...item,
+              value: [...item.value, val]
+            };
+          }
+          if (event === SseResponseEventEnum.toolParams && tool && updateValue.tool) {
+            if (tool.params) {
+              updateValue.tool.params += tool.params;
+              return {
+                ...item,
+                value: [
+                  ...item.value.slice(0, updateIndex),
+                  updateValue,
+                  ...item.value.slice(updateIndex + 1)
+                ]
+              };
+            }
+            return item;
+          }
+          if (event === SseResponseEventEnum.toolResponse && tool && updateValue.tool) {
+            if (tool.response) {
+              // replace tool response
+              if (typeof updateValue.tool.response !== 'string') {
+                updateValue.tool.response = '';
+              }
+              updateValue.tool.response += tool.response;
+
+              return {
+                ...item,
+                value: [
+                  ...item.value.slice(0, updateIndex),
+                  updateValue,
+                  ...item.value.slice(updateIndex + 1)
+                ]
+              };
+            }
+            return item;
+          }
+
+          // Agent
+          if (event === SseResponseEventEnum.plan && plan) {
+            return {
+              ...item,
+              value: [
+                ...item.value,
+                {
+                  id: responseValueId,
+                  stepId,
+                  plan
+                }
+              ]
+            };
+          }
+          if (event === SseResponseEventEnum.stepTitle && stepTitle) {
+            return {
+              ...item,
+              value: [
+                ...item.value,
+                {
+                  id: responseValueId,
+                  stepId,
+                  stepTitle: {
+                    ...stepTitle,
+                    folded: false
+                  }
+                }
+              ]
+            };
+          }
+
+          if (event === SseResponseEventEnum.updateVariables && variables) {
+            resetVariables({ variables });
+          }
+          if (event === SseResponseEventEnum.interactive && interactive) {
+            const val: AIChatItemValueItemType = {
               interactive
             };
 
@@ -374,7 +579,9 @@ const ChatBox = ({
               ...item,
               value: item.value.concat(val)
             };
-          } else if (event === SseResponseEventEnum.workflowDuration && durationSeconds) {
+          }
+
+          if (event === SseResponseEventEnum.workflowDuration && durationSeconds) {
             return {
               ...item,
               durationSeconds: item.durationSeconds
@@ -439,7 +646,73 @@ const ChatBox = ({
     chatController.current?.abort(new Error(reason));
     questionGuideController.current?.abort(new Error(reason));
     pluginController.current?.abort(new Error(reason));
+    resumeController.current?.abort(new Error(reason));
   });
+
+  const hasMeaningfulAiOutput = useMemoizedFn((chat?: ChatSiteItemType) => {
+    if (!chat || chat.obj !== ChatRoleEnum.AI) return false;
+    if (chat.responseData?.length) return true;
+
+    return chat.value.some((item) => {
+      if (item.text?.content) return true;
+      if (item.reasoning?.content) return true;
+      if (item.tool?.params || item.tool?.response) return true;
+      if (item.plan || item.stepTitle || item.interactive) return true;
+      return false;
+    });
+  });
+
+  const getResumeUnavailablePlaceholderText = useMemoizedFn(() =>
+    t('chat:resume_placeholder_generating')
+  );
+
+  const upsertResumeAiPlaceholder = useMemoizedFn(
+    (responseChatId: string, text = '', status: `${ChatStatusEnum}` = ChatStatusEnum.loading) => {
+      setChatRecords((state) => {
+        const lastItem = state[state.length - 1];
+        if (lastItem?.dataId === responseChatId && lastItem.obj === ChatRoleEnum.AI) {
+          if (!text) {
+            return state;
+          }
+
+          return state.map((item, index) =>
+            index !== state.length - 1
+              ? item
+              : {
+                  ...item,
+                  value: [
+                    {
+                      text: {
+                        content: text
+                      }
+                    }
+                  ],
+                  status,
+                  ...(status === ChatStatusEnum.finish ? { time: new Date() } : {})
+                }
+          );
+        }
+
+        return [
+          ...state,
+          {
+            id: responseChatId,
+            dataId: responseChatId,
+            obj: ChatRoleEnum.AI,
+            value: [
+              {
+                text: {
+                  content: text
+                }
+              }
+            ],
+            status,
+            ...(status === ChatStatusEnum.finish ? { time: new Date() } : {})
+          }
+        ];
+      });
+    }
+  );
 
   /**
    * user confirm send prompt
@@ -449,8 +722,8 @@ const ChatBox = ({
       text = '',
       files = [],
       history = chatRecords,
+      interactive,
       autoTTSResponse = false,
-      isInteractivePrompt = false,
       hideInUI = false
     }) => {
       variablesForm.handleSubmit(
@@ -513,45 +786,44 @@ const ChatBox = ({
             setAudioPlayingChatId(responseChatId);
           }
 
+          const currentHumanChat: HumanChatSiteItemType = {
+            id: humanChatId,
+            dataId: humanChatId,
+            obj: ChatRoleEnum.Human,
+            time: new Date(),
+            hideInUI,
+            value: [
+              ...files.map((file) => ({
+                file: {
+                  type: file.type,
+                  name: file.name,
+                  url: file.url,
+                  icon: file.icon || '',
+                  key: file.key || ''
+                }
+              })),
+              ...(text
+                ? [
+                    {
+                      text: {
+                        content: text
+                      }
+                    }
+                  ]
+                : [])
+            ] as UserChatItemValueItemType[],
+            status: ChatStatusEnum.finish
+          };
+
           const newChatList: ChatSiteItemType[] = [
             ...history,
-            {
-              id: humanChatId,
-              dataId: humanChatId,
-              obj: ChatRoleEnum.Human,
-              time: new Date(),
-              hideInUI,
-              value: [
-                ...files.map((file) => ({
-                  type: ChatItemValueTypeEnum.file,
-                  file: {
-                    type: file.type,
-                    name: file.name,
-                    url: file.url,
-                    icon: file.icon || '',
-                    key: file.key || ''
-                  }
-                })),
-                ...(text
-                  ? [
-                      {
-                        type: ChatItemValueTypeEnum.text,
-                        text: {
-                          content: text
-                        }
-                      }
-                    ]
-                  : [])
-              ] as UserChatItemValueItemType[],
-              status: ChatStatusEnum.finish
-            },
+            currentHumanChat,
             {
               id: responseChatId,
               dataId: responseChatId,
               obj: ChatRoleEnum.AI,
               value: [
                 {
-                  type: ChatItemValueTypeEnum.text,
                   text: {
                     content: ''
                   }
@@ -561,11 +833,28 @@ const ChatBox = ({
             }
           ];
 
+          resumedChatIdRef.current = chatId;
+
+          setChatBoxData((state) =>
+            state.chatId === chatId
+              ? {
+                  ...state,
+                  chatGenerateStatus: ChatGenerateStatusEnum.generating,
+                  hasBeenRead: false
+                }
+              : state
+          );
+          syncSidebarChatGenerateStatus(ChatGenerateStatusEnum.generating, { hasBeenRead: false });
+
           // Update histories(Interactive input does not require new session rounds)
           setChatRecords(
-            isInteractivePrompt
+            interactive
               ? // 把交互的结果存储到对话记录中，交互模式下，不需要新的会话轮次
-                setInteractiveResultToHistories(newChatList.slice(0, -2), text)
+                rewriteHistoriesByInteractiveResponse({
+                  histories: newChatList,
+                  interactive,
+                  interactiveVal: text
+                })
               : newChatList
           );
 
@@ -574,12 +863,13 @@ const ChatBox = ({
           setQuestionGuide([]);
           scrollToBottom('smooth', 100);
 
+          const abortSignal = new AbortController();
+
           try {
             // create abort obj
-            const abortSignal = new AbortController();
             chatController.current = abortSignal;
 
-            // 这里，无论是否为交互模式，最后都是 Human 的消息。
+            // 这里，无论是否为交互模式，都要确保最后一条消息都是 Human 的消息。
             const messages = chats2GPTMessages({
               messages: newChatList.slice(0, -1).map((item) => {
                 if (item.obj === ChatRoleEnum.Human) {
@@ -594,7 +884,7 @@ const ChatBox = ({
             });
 
             const { responseText } = await onStartChat({
-              messages, // 保证最后一条是 Human 的消息
+              messages,
               responseChatItemId: responseChatId,
               controller: abortSignal,
               generatingMessage: (e) => generatingMessage({ ...e, autoTTSResponse }),
@@ -610,9 +900,12 @@ const ChatBox = ({
                 const responseData = mergeChatResponseData(item.responseData || []);
                 // Check node response error
                 if (!abortSignal?.signal?.aborted) {
-                  const err =
-                    responseData[responseData.length - 1]?.error ||
-                    responseData[responseData.length - 1]?.errorText;
+                  // `.error` is dispatcher-injected only on uncaught failures — scan all items
+                  // so uncaught errors in nested/mid-workflow nodes still surface. Last-entry
+                  // `.errorText` covers the misconfigured "catchError=true, no handler wired"
+                  // case where only errorText was set.
+                  const uncaughtErr = responseData.find((r) => r.error)?.error;
+                  const err = uncaughtErr ?? responseData[responseData.length - 1]?.errorText;
                   if (err) {
                     toast({
                       title: t(getErrText(err)),
@@ -629,7 +922,7 @@ const ChatBox = ({
                 };
               });
 
-              const lastInteractive = getInteractiveByHistories(state);
+              const { interactive: lastInteractive } = getInteractiveByHistories(state);
               if (lastInteractive?.type === 'paymentPause' && !lastInteractive.params.continue) {
                 setNotSufficientModalType(TeamErrEnum.aiPointsNotEnough);
               }
@@ -639,7 +932,7 @@ const ChatBox = ({
 
             setTimeout(() => {
               // If there is no interactive mode, create a question guide
-              if (!getInteractiveByHistories(newChatHistories)) {
+              if (!getInteractiveByHistories(newChatHistories).interactive) {
                 createQuestionGuide();
               }
 
@@ -649,7 +942,35 @@ const ChatBox = ({
 
             // tts audio
             autoTTSResponse && splitText2Audio(responseText, true);
+            const finishedInActiveChat = activeChatIdRef.current === chatId;
+            setChatBoxData((state) =>
+              state.chatId === chatId
+                ? {
+                    ...state,
+                    chatGenerateStatus: ChatGenerateStatusEnum.done,
+                    hasBeenRead: finishedInActiveChat
+                  }
+                : state
+            );
+
+            if (finishedInActiveChat) {
+              void postMarkChatRead({
+                appId,
+                chatId,
+                ...outLinkAuthData
+              })
+                .catch(() => {})
+                .finally(() => {
+                  syncSidebarChatGenerateStatus(ChatGenerateStatusEnum.done, { hasBeenRead: true });
+                });
+            } else {
+              syncSidebarChatGenerateStatus(ChatGenerateStatusEnum.done, { hasBeenRead: false });
+            }
           } catch (err: any) {
+            if (isAbortByLeave(err)) {
+              return;
+            }
+
             console.log('Chat error', err);
             toast({
               title: t(getErrText(err, t('common:core.chat.error.Chat error') as any)),
@@ -675,6 +996,33 @@ const ChatBox = ({
               // 这里的 newChatList 没包含用户交互输入的内容，所以重置后刚好是正确的。
               setChatRecords(newChatList.slice(0, newChatList.length - 2));
             }
+
+            const finishedInActiveChat = activeChatIdRef.current === chatId;
+            setChatBoxData((state) =>
+              state.chatId === chatId
+                ? {
+                    ...state,
+                    chatGenerateStatus: ChatGenerateStatusEnum.error,
+                    hasBeenRead: finishedInActiveChat
+                  }
+                : state
+            );
+
+            if (finishedInActiveChat) {
+              void postMarkChatRead({
+                appId,
+                chatId,
+                ...outLinkAuthData
+              })
+                .catch(() => {})
+                .finally(() => {
+                  syncSidebarChatGenerateStatus(ChatGenerateStatusEnum.error, {
+                    hasBeenRead: true
+                  });
+                });
+            } else {
+              syncSidebarChatGenerateStatus(ChatGenerateStatusEnum.error, { hasBeenRead: false });
+            }
           }
 
           autoTTSResponse && finishSegmentedAudio();
@@ -689,6 +1037,9 @@ const ChatBox = ({
   // retry input
   const onDelMessage = useCallback(
     (contentId: string, delFile = true) => {
+      if (onDeleteChatItem) {
+        return onDeleteChatItem(contentId, delFile);
+      }
       return delChatRecordById({
         appId,
         chatId,
@@ -697,7 +1048,7 @@ const ChatBox = ({
         ...outLinkAuthData
       });
     },
-    [appId, chatId, outLinkAuthData]
+    [appId, chatId, outLinkAuthData, onDeleteChatItem]
   );
   const retryInput = useMemoizedFn((dataId?: string) => {
     if (!dataId || !onDelMessage) return;
@@ -904,25 +1255,240 @@ const ChatBox = ({
   useEffect(() => {
     setQuestionGuide([]);
     setValue('chatStarted', false);
+    resumedChatIdRef.current = undefined;
     abortRequest('leave');
   }, [chatId, appId, abortRequest, setValue]);
 
-  const canSendPrompt = onStartChat && chatStarted && active && !lastInteractive;
+  useEffect(() => {
+    if (
+      !enableAutoResume ||
+      !isReady ||
+      !isChatRecordsLoaded ||
+      !appId ||
+      !chatId ||
+      isChatting ||
+      chatBoxData.chatGenerateStatus !== ChatGenerateStatusEnum.generating ||
+      resumedChatIdRef.current === chatId
+    ) {
+      return;
+    }
+
+    resumedChatIdRef.current = chatId;
+
+    const resumeForChatId = chatId;
+    const responseChatId = resumeTargetAiDataId ?? getNanoid(24);
+    const controller = new AbortController();
+    resumeController.current = controller;
+    scrollToBottom('auto');
+    let resumeFinalStatus = ChatGenerateStatusEnum.done;
+
+    (async () => {
+      try {
+        const { responseText, completedChat, resumeUnavailable } = await streamResumeFetch({
+          appId,
+          chatId,
+          outLinkAuthData,
+          controller,
+          onResumeUnavailable: () => {
+            if (resumeForChatId !== activeChatIdRef.current) return;
+            resumeFinalStatus = ChatGenerateStatusEnum.generating;
+            upsertResumeAiPlaceholder(
+              responseChatId,
+              getResumeUnavailablePlaceholderText(),
+              ChatStatusEnum.loading
+            );
+          },
+          onmessage: (message) => {
+            if (resumeForChatId !== activeChatIdRef.current) return;
+            if (shouldCreateResumeAiPlaceholder(message.event)) {
+              upsertResumeAiPlaceholder(responseChatId);
+            }
+            generatingMessage(message);
+          }
+        });
+
+        if (resumeForChatId !== activeChatIdRef.current) return;
+
+        if (completedChat) {
+          resumeFinalStatus = completedChat.chatGenerateStatus;
+          setChatRecords(
+            completedChat.records.list.map((item) => ({
+              ...item,
+              status: ChatStatusEnum.finish
+            }))
+          );
+          return;
+        }
+
+        if (resumeUnavailable) {
+          resumeFinalStatus = ChatGenerateStatusEnum.generating;
+          upsertResumeAiPlaceholder(
+            responseChatId,
+            getResumeUnavailablePlaceholderText(),
+            ChatStatusEnum.loading
+          );
+          return;
+        }
+
+        setChatRecords((state) => {
+          const currentLastItem = state[state.length - 1];
+          if (
+            currentLastItem?.dataId !== responseChatId ||
+            currentLastItem.obj !== ChatRoleEnum.AI
+          ) {
+            return state;
+          }
+
+          const next = state.map((item, index) => {
+            if (index !== state.length - 1) return item;
+            return {
+              ...item,
+              status: ChatStatusEnum.finish,
+              time: new Date(),
+              responseData: mergeChatResponseData(item.responseData || [])
+            };
+          });
+
+          const updatedLastItem = next[next.length - 1];
+          if (
+            updatedLastItem?.dataId === responseChatId &&
+            !hasMeaningfulAiOutput(updatedLastItem) &&
+            !responseText
+          ) {
+            return next.slice(0, -1);
+          }
+
+          return next;
+        });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (resumeForChatId !== activeChatIdRef.current) return;
+
+        const isStreamError = (error as ResumeStreamErrorType | undefined)?.isStreamError === true;
+        resumeFinalStatus = isStreamError
+          ? ChatGenerateStatusEnum.error
+          : ChatGenerateStatusEnum.done;
+
+        setChatRecords((state) => {
+          const currentLastItem = state[state.length - 1];
+          if (
+            currentLastItem?.dataId !== responseChatId ||
+            currentLastItem.obj !== ChatRoleEnum.AI
+          ) {
+            return state;
+          }
+
+          const next = state.map((item, index) => {
+            if (index !== state.length - 1) return item;
+            return {
+              ...item,
+              status: ChatStatusEnum.finish,
+              time: new Date()
+            };
+          });
+
+          const updatedLastItem = next[next.length - 1];
+          if (
+            updatedLastItem?.dataId === responseChatId &&
+            !hasMeaningfulAiOutput(updatedLastItem)
+          ) {
+            return next.slice(0, -1);
+          }
+
+          return next;
+        });
+
+        if (isStreamError) {
+          toast({
+            title: t(getErrText(error, t('common:core.chat.error.Chat error') as any)),
+            status: 'error',
+            duration: 5000,
+            isClosable: true
+          });
+        }
+      } finally {
+        resumeController.current = undefined;
+        const finishedInActiveChat = activeChatIdRef.current === resumeForChatId;
+        const leftWhileResuming =
+          controller.signal.aborted && isAbortByLeave(controller.signal.reason);
+
+        if (leftWhileResuming) {
+          return;
+        }
+
+        setChatBoxData((state) =>
+          state.chatId === resumeForChatId
+            ? {
+                ...state,
+                chatGenerateStatus: resumeFinalStatus,
+                hasBeenRead: finishedInActiveChat
+              }
+            : state
+        );
+
+        if (finishedInActiveChat) {
+          void postMarkChatRead({
+            appId,
+            chatId: resumeForChatId,
+            ...outLinkAuthData
+          })
+            .catch(() => {})
+            .finally(() => {
+              syncSidebarChatGenerateStatus(resumeFinalStatus, {
+                hasBeenRead: true,
+                targetChatId: resumeForChatId
+              });
+            });
+        } else {
+          syncSidebarChatGenerateStatus(resumeFinalStatus, {
+            hasBeenRead: false,
+            targetChatId: resumeForChatId
+          });
+        }
+      }
+    })();
+  }, [
+    enableAutoResume,
+    isReady,
+    isChatRecordsLoaded,
+    appId,
+    chatId,
+    isChatting,
+    chatBoxData.chatGenerateStatus,
+    generatingMessage,
+    hasMeaningfulAiOutput,
+    getResumeUnavailablePlaceholderText,
+    outLinkAuthData,
+    resumeTargetAiDataId,
+    scrollToBottom,
+    setChatBoxData,
+    setChatRecords,
+    syncSidebarChatGenerateStatus,
+    upsertResumeAiPlaceholder,
+    t,
+    toast
+  ]);
+
+  const canSendPrompt = onStartChat && chatStarted && active && canSendQuery;
 
   // Add listener
   useEffect(() => {
     const windowMessage = ({ data }: MessageEvent<{ type: 'sendPrompt'; text: string }>) => {
       if (data?.type === 'sendPrompt' && data?.text) {
         sendPrompt({
-          text: data.text
+          text: data.text,
+          interactive: lastInteractive
         });
       }
     };
     window.addEventListener('message', windowMessage);
 
-    const fn: SendPromptFnType = (e) => {
-      if (canSendPrompt || e.isInteractivePrompt) {
-        sendPrompt(e);
+    const fn = ({ focus = false, ...e }: ChatBoxInputType & { focus?: boolean }) => {
+      if (canSendPrompt || focus) {
+        sendPrompt({
+          ...e,
+          interactive: lastInteractive
+        });
       }
     };
     eventBus.on(EventNameEnum.sendQuestion, fn);
@@ -936,7 +1502,7 @@ const ChatBox = ({
       eventBus.off(EventNameEnum.sendQuestion);
       eventBus.off(EventNameEnum.editQuestion);
     };
-  }, [isReady, resetInputVal, sendPrompt, canSendPrompt]);
+  }, [isReady, resetInputVal, sendPrompt, canSendPrompt, lastInteractive]);
 
   // Auto send prompt
   useDebounceEffect(
@@ -950,7 +1516,8 @@ const ChatBox = ({
       ) {
         sendPrompt({
           text: chatBoxData?.app?.chatConfig?.autoExecute?.defaultPrompt || 'AUTO_EXECUTE',
-          hideInUI: true
+          hideInUI: true,
+          interactive: lastInteractive
         });
       }
     },
@@ -1051,7 +1618,7 @@ const ChatBox = ({
       const prevIsDeleted = index > 0 ? !!chatRecords[index - 1].deleteTime : false;
       const nextIsDeleted =
         index < chatRecords.length - 1 ? !!chatRecords[index + 1].deleteTime : false;
-      console.log(isDeleted, 2323);
+
       if (isDeleted && !prevIsDeleted) {
         // 开始新的删除组
         currentGroup = {
@@ -1104,8 +1671,9 @@ const ChatBox = ({
 
     return result;
   }, [chatType, chatRecords, expandedDeletedGroups]);
-
   //chat history
+  const hasPlanCheck =
+    lastInteractive?.type === 'agentPlanCheck' && !lastInteractive.params.confirmed;
   const RecordsBox = useMemo(() => {
     return (
       <Box id={'history'}>
@@ -1143,7 +1711,6 @@ const ChatBox = ({
                   <Box py={item.hideInUI ? 0 : 6}>
                     {item.obj === ChatRoleEnum.Human && !item.hideInUI && (
                       <ChatItem
-                        type={item.obj}
                         avatar={userAvatar}
                         chat={item}
                         onRetry={retryInput(item.dataId)}
@@ -1153,7 +1720,6 @@ const ChatBox = ({
                     )}
                     {item.obj === ChatRoleEnum.AI && (
                       <ChatItem
-                        type={item.obj}
                         avatar={appAvatar}
                         chat={item}
                         isLastChild={index === processedRecords.length - 1}
@@ -1333,6 +1899,7 @@ const ChatBox = ({
 
               <ChatInput
                 onSendMessage={sendPrompt}
+                lastInteractive={lastInteractive}
                 onStop={() => abortRequest('stop')}
                 TextareaDom={TextareaDom}
                 resetInputVal={resetInputVal}

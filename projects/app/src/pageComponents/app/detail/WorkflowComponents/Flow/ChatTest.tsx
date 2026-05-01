@@ -1,4 +1,4 @@
-import type { StoreNodeItemType } from '@fastgpt/global/core/workflow/type/node.d';
+import type { StoreNodeItemType } from '@fastgpt/global/core/workflow/type/node';
 import React, { useMemo } from 'react';
 import { SmallCloseIcon } from '@chakra-ui/icons';
 import { Box, Flex, IconButton } from '@chakra-ui/react';
@@ -24,6 +24,8 @@ import ChatQuoteList from '@/pageComponents/chat/ChatQuoteList';
 import VariablePopover from '@/components/core/chat/ChatContainer/components/VariablePopover';
 import { useCopyData } from '@fastgpt/web/hooks/useCopyData';
 import { ChatTypeEnum } from '@/components/core/chat/ChatContainer/ChatBox/constants';
+import { useSandboxEditor, useSandboxStatus } from '@/pageComponents/chat/SandboxEditor/hook';
+import { getAppChatConfig, getGuideModule } from '@fastgpt/global/core/workflow/utils';
 
 type Props = {
   isOpen: boolean;
@@ -39,10 +41,21 @@ const ChatTest = ({ isOpen, nodes = [], edges = [], onClose, chatId }: Props) =>
   const isPlugin = appDetail.type === AppTypeEnum.workflowTool;
   const { copyData } = useCopyData();
 
+  // 与画布「用户引导」节点一致：合并当前 appDetail.chatConfig 与本次调试用的系统配置节点，避免未发布时与编辑态不一致
+  const chatConfigForDebug = useMemo(
+    () =>
+      getAppChatConfig({
+        chatConfig: appDetail.chatConfig,
+        systemConfigNode: getGuideModule(nodes),
+        isPublicFetch: true
+      }),
+    [appDetail.chatConfig, nodes]
+  );
+
   const { restartChat, ChatContainer } = useChatTest({
     nodes,
     edges,
-    chatConfig: appDetail.chatConfig,
+    chatConfig: chatConfigForDebug,
     isReady: isOpen
   });
   const pluginRunTab = useContextSelector(ChatItemContext, (v) => v.pluginRunTab);
@@ -52,6 +65,16 @@ const ChatTest = ({ isOpen, nodes = [], edges = [], onClose, chatId }: Props) =>
 
   const isVariableVisible = useContextSelector(ChatItemContext, (v) => v.isVariableVisible);
   const chatRecords = useContextSelector(ChatRecordContext, (v) => v.chatRecords);
+
+  // Sandbox: Status Hook 负责网络同步，UI Hook 负责弹窗渲染
+  const { SandboxEntryIcon } = useSandboxStatus({
+    appId: appDetail._id,
+    chatId
+  });
+  const { SandboxEditorModal, onOpenSandboxModal } = useSandboxEditor({
+    appId: appDetail._id,
+    chatId
+  });
 
   return (
     <Flex h={'full'}>
@@ -135,8 +158,11 @@ const ChatTest = ({ isOpen, nodes = [], edges = [], onClose, chatId }: Props) =>
             </Flex>
             {!isVariableVisible && <VariablePopover chatType={ChatTypeEnum.test} />}
             <Box flex={1} />
+
+            <SandboxEntryIcon mr={2} onOpen={onOpenSandboxModal} />
             <MyTooltip label={t('common:core.chat.Restart')}>
               <IconButton
+                mr={2}
                 className="chat"
                 size={'smSquare'}
                 icon={<MyIcon name={'common/clearLight'} w={'14px'} />}
@@ -148,7 +174,6 @@ const ChatTest = ({ isOpen, nodes = [], edges = [], onClose, chatId }: Props) =>
             </MyTooltip>
             <MyTooltip label={t('common:Close')}>
               <IconButton
-                ml={4}
                 icon={<SmallCloseIcon fontSize={'22px'} />}
                 variant={'grayBase'}
                 size={'smSquare'}
@@ -187,6 +212,8 @@ const ChatTest = ({ isOpen, nodes = [], edges = [], onClose, chatId }: Props) =>
           )}
         </Flex>
       </MyBox>
+
+      <SandboxEditorModal />
     </Flex>
   );
 };
@@ -210,6 +237,7 @@ const Render = (Props: Props) => {
       isShowCite={true}
       isShowFullText={true}
       showRunningStatus={true}
+      showSkillReferences={true}
       showWholeResponse={true}
     >
       <ChatRecordContextProvider params={chatRecordProviderParams}>

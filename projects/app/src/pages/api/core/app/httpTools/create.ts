@@ -3,25 +3,26 @@ import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
 
 import type { ApiRequestProps, ApiResponseType } from '@fastgpt/service/type/next';
 import { NextAPI } from '@/service/middleware/entry';
-import { onCreateApp, type CreateAppBody } from '../create';
+import { onCreateApp } from '../create';
 import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
 import { pushTrack } from '@fastgpt/service/common/middle/tracks/utils';
 import { authApp } from '@fastgpt/service/support/permission/app/auth';
 import { TeamAppCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
 import { checkTeamAppTypeLimit } from '@fastgpt/service/support/permission/teamLimit';
 import { getHTTPToolSetRuntimeNode } from '@fastgpt/global/core/app/tool/httpTool/utils';
-
-export type createHttpToolsQuery = {};
-
-export type createHttpToolsBody = {
-  createType: 'batch' | 'manual';
-} & Omit<CreateAppBody, 'type' | 'modules' | 'edges' | 'chatConfig'>;
+import {
+  CreateHttpToolsBodySchema,
+  CreateHttpToolsResponseSchema,
+  type CreateHttpToolsBodyType,
+  type CreateHttpToolsResponseType
+} from '@fastgpt/global/openapi/core/app/httpTools/api';
+import { HttpToolTypeEnum } from '@fastgpt/global/core/app/tool/httpTool/constants';
 
 async function handler(
-  req: ApiRequestProps<createHttpToolsBody, createHttpToolsQuery>,
-  res: ApiResponseType<string>
-): Promise<string> {
-  const { name, avatar, intro, parentId, createType } = req.body;
+  req: ApiRequestProps<CreateHttpToolsBodyType>,
+  res: ApiResponseType
+): Promise<CreateHttpToolsResponseType> {
+  const { name, avatar, intro, parentId, createType } = CreateHttpToolsBodySchema.parse(req.body);
 
   const { teamId, tmbId, userId } = parentId
     ? await authApp({ req, appId: parentId, per: TeamAppCreatePermissionVal, authToken: true })
@@ -43,7 +44,7 @@ async function handler(
           name,
           avatar,
           toolList: [],
-          ...(createType === 'batch' && {
+          ...(createType === HttpToolTypeEnum.batch && {
             baseUrl: '',
             apiSchemaStr: '',
             customHeaders: '{}',
@@ -65,7 +66,7 @@ async function handler(
     tmbId
   });
 
-  return httpToolsetId;
+  return CreateHttpToolsResponseSchema.parse(httpToolsetId);
 }
 
 export default NextAPI(handler);

@@ -23,7 +23,7 @@ import {
   delOpenApiById,
   putOpenApiKey
 } from '@/web/support/openapi/api';
-import type { EditApiKeyProps } from '@/global/support/openapi/api.d';
+import type { EditApiKeyProps } from '@/global/support/openapi/api';
 import dayjs from 'dayjs';
 import { AddIcon } from '@chakra-ui/icons';
 import { useCopyData } from '@fastgpt/web/hooks/useCopyData';
@@ -97,10 +97,7 @@ const ApiKeyTable = ({ tips, appId }: { tips: string; appId?: string }) => {
             </Box>
             {feConfigs?.docUrl && (
               <Link
-                href={
-                  feConfigs.openAPIDocUrl ||
-                  getDocPath('/docs/introduction/development/openapi/intro')
-                }
+                href={feConfigs.openAPIDocUrl || getDocPath('/openapi/intro')}
                 target={'_blank'}
                 ml={1}
                 color={'primary.500'}

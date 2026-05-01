@@ -1,16 +1,22 @@
 import { ChatRoleEnum } from '@fastgpt/global/core/chat/constants';
-import { type ChatHistoryItemResType, type ChatItemType } from '@fastgpt/global/core/chat/type';
-import { type SearchDataResponseItemType } from '@fastgpt/global/core/dataset/type';
+import type {
+  ChatHistoryItemResType,
+  ChatItemMiniType,
+  ToolCiteLinksType,
+  ErrorTextItemType
+} from '@fastgpt/global/core/chat/type';
+import type { SearchDataResponseItemType } from '@fastgpt/global/core/dataset/type';
 import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
-import { type ToolCiteLinksType } from '@fastgpt/global/core/chat/type';
+import { getFlatAppResponses } from '@fastgpt/global/core/chat/utils';
+import { SANDBOX_TOOL_NAME } from '@fastgpt/global/core/ai/sandbox/constants';
 
 export const isLLMNode = (item: ChatHistoryItemResType) =>
-  item.moduleType === FlowNodeTypeEnum.chatNode || item.moduleType === FlowNodeTypeEnum.agent;
+  item.moduleType === FlowNodeTypeEnum.chatNode || item.moduleType === FlowNodeTypeEnum.toolCall;
 
 export function transformPreviewHistories(
-  histories: ChatItemType[],
+  histories: ChatItemMiniType[],
   responseDetail: boolean
-): ChatItemType[] {
+): ChatItemMiniType[] {
   return histories.map((item) => {
     return {
       ...addStatisticalDataToHistoryItem(item),
@@ -19,19 +25,6 @@ export function transformPreviewHistories(
     };
   });
 }
-
-export const getFlatAppResponses = (res: ChatHistoryItemResType[]): ChatHistoryItemResType[] => {
-  return res
-    .map((item) => {
-      return [
-        item,
-        ...getFlatAppResponses(item.pluginDetail || []),
-        ...getFlatAppResponses(item.toolDetail || []),
-        ...getFlatAppResponses(item.loopDetail || [])
-      ];
-    })
-    .flat();
-};
 
 const extractCitationIdsFromText = (text: string): string[] => {
   if (!text) return [];
@@ -54,7 +47,7 @@ const extractCitationIdsFromText = (text: string): string[] => {
   return Array.from(new Set(ids));
 };
 
-export function addStatisticalDataToHistoryItem(historyItem: ChatItemType) {
+export function addStatisticalDataToHistoryItem(historyItem: ChatItemMiniType) {
   if (historyItem.obj !== ChatRoleEnum.AI) return historyItem;
   if (historyItem.totalQuoteList !== undefined || historyItem.toolCiteLinks !== undefined)
     return historyItem;
@@ -63,48 +56,66 @@ export function addStatisticalDataToHistoryItem(historyItem: ChatItemType) {
   // Flat children
   const flatResData = getFlatAppResponses(historyItem.responseData || []);
 
-  // get llm module account and history preview length and total quote list and external link list
-  const { llmModuleAccount, historyPreviewLength, totalQuoteList, toolCiteLinks } =
-    flatResData.reduce(
-      (acc, item) => {
-        // LLM
-        if (isLLMNode(item)) {
-          acc.llmModuleAccount = acc.llmModuleAccount + 1;
-          if (acc.historyPreviewLength === undefined) {
-            acc.historyPreviewLength = item.historyPreview?.length;
-          }
+  // get llm module account and history preview length and total quote list and external link list and error text
+  const {
+    useAgentSandbox,
+    llmModuleAccount,
+    historyPreviewLength,
+    totalQuoteList,
+    toolCiteLinks,
+    errorText
+  } = flatResData.reduce(
+    (acc, item) => {
+      // LLM
+      if (isLLMNode(item)) {
+        acc.llmModuleAccount = acc.llmModuleAccount + 1;
+        if (acc.historyPreviewLength === undefined) {
+          acc.historyPreviewLength = item.historyPreview?.length;
         }
-        // Dataset search result
-        if (item.moduleType === FlowNodeTypeEnum.datasetSearchNode && item.quoteList) {
-          acc.totalQuoteList.push(...item.quoteList.filter(Boolean));
-        }
-
-        // Tool call
-        if (item.moduleType === FlowNodeTypeEnum.tool) {
-          const citeLinks = item?.toolRes?.citeLinks;
-          if (citeLinks && Array.isArray(citeLinks)) {
-            citeLinks.forEach(({ name = '', url = '' }: ToolCiteLinksType) => {
-              if (url) {
-                const key = `${name}::${url}`;
-                if (!acc.linkDedupe.has(key)) {
-                  acc.linkDedupe.add(key);
-                  acc.toolCiteLinks.push({ name, url });
-                }
-              }
-            });
-          }
-        }
-
-        return acc;
-      },
-      {
-        llmModuleAccount: 0,
-        historyPreviewLength: undefined as number | undefined,
-        totalQuoteList: [] as SearchDataResponseItemType[],
-        toolCiteLinks: [] as ToolCiteLinksType[],
-        linkDedupe: new Set<string>()
       }
-    );
+
+      // Dataset search result
+      if (item.moduleType === FlowNodeTypeEnum.datasetSearchNode && item.quoteList) {
+        acc.totalQuoteList.push(...item.quoteList.filter(Boolean));
+      }
+
+      // Tool call
+      if (item.moduleType === FlowNodeTypeEnum.tool) {
+        const citeLinks = item?.toolRes?.citeLinks;
+        if (citeLinks && Array.isArray(citeLinks)) {
+          citeLinks.forEach(({ name = '', url = '' }: ToolCiteLinksType) => {
+            if (url) {
+              const key = `${name}::${url}`;
+              if (!acc.linkDedupe.has(key)) {
+                acc.linkDedupe.add(key);
+                acc.toolCiteLinks.push({ name, url });
+              }
+            }
+          });
+        } else if (item.toolId === SANDBOX_TOOL_NAME) {
+          acc.useAgentSandbox = true;
+        }
+      }
+
+      if (item.errorText && !acc.errorText) {
+        acc.errorText = {
+          moduleName: item.moduleName,
+          errorText: item.errorText
+        };
+      }
+
+      return acc;
+    },
+    {
+      useAgentSandbox: false,
+      totalQuoteList: [] as SearchDataResponseItemType[],
+      toolCiteLinks: [] as ToolCiteLinksType[],
+      linkDedupe: new Set<string>(),
+      errorText: undefined as ErrorTextItemType | undefined,
+      llmModuleAccount: 0,
+      historyPreviewLength: undefined as number | undefined
+    }
+  );
 
   // Filter quote list to only include citations actually referenced in the response text
   const responseText = historyItem.value.map((v) => v.text?.content || '').join('');
@@ -113,9 +124,14 @@ export function addStatisticalDataToHistoryItem(historyItem: ChatItemType) {
 
   return {
     ...historyItem,
-    llmModuleAccount,
+    useAgentSandbox,
     totalQuoteList: filteredQuoteList,
-    historyPreviewLength,
-    ...(toolCiteLinks.length ? { toolCiteLinks } : {})
+    ...(toolCiteLinks.length ? { toolCiteLinks } : {}),
+    ...(errorText ? { errorText } : {}),
+
+    /** @deprecated */
+    llmModuleAccount,
+    /** @deprecated */
+    historyPreviewLength
   };
 }

@@ -7,6 +7,10 @@ import {
 import { FastGPTProUrl } from '../system/constants';
 import { UserError } from '@fastgpt/global/common/error/utils';
 import { createProxyAxios } from './axios';
+import { getLogger, LogCategories } from '../logger';
+import { assertRelativePath } from '../security/network';
+
+const logger = getLogger(LogCategories.HTTP.ERROR);
 
 interface ConfigType {
   headers?: { [key: string]: string };
@@ -40,7 +44,7 @@ function responseSuccess(response: AxiosResponse<ResponseDataType>) {
  */
 function checkRes(data: ResponseDataType) {
   if (data === undefined) {
-    console.log('error->', data, 'data is empty');
+    logger.error('Plus request response is empty', { data });
     return Promise.reject('服务器异常');
   } else if (data?.code && (data.code < 200 || data.code >= 400)) {
     return Promise.reject(data);
@@ -66,14 +70,17 @@ function responseError(err: any) {
 }
 
 /* 创建请求实例 */
-const instance = createProxyAxios({
-  timeout: 60000,
-  headers: {
-    'content-type': 'application/json',
-    'Cache-Control': 'no-cache',
-    rootkey: process.env.ROOT_KEY
-  }
-});
+const instance = createProxyAxios(
+  {
+    timeout: 60000,
+    headers: {
+      'content-type': 'application/json',
+      'Cache-Control': 'no-cache',
+      rootkey: process.env.ROOT_KEY
+    }
+  },
+  false
+);
 
 /* 请求拦截 */
 instance.interceptors.request.use(requestStart, (err) => Promise.reject(err));
@@ -82,8 +89,16 @@ instance.interceptors.response.use(responseSuccess, (err) => Promise.reject(err)
 
 export function request(url: string, data: any, config: ConfigType, method: Method): any {
   if (!FastGPTProUrl) {
-    console.log('未部署商业版接口', url);
+    logger.warn('FastGPT Pro API is not configured', { url });
     return Promise.reject(new UserError('The request was denied...'));
+  }
+
+  // plusRequest 仅用于访问商业版 Pro 服务,会自动携带 rootkey,SSRF 拦截已被显式关闭。
+  // 强制要求相对路径,防止调用方传入绝对 URL 覆盖 baseURL 形成带高权限头的 SSRF。
+  try {
+    assertRelativePath(url, 'plusRequest');
+  } catch (err) {
+    return Promise.reject(err);
   }
 
   /* 去空 */
@@ -129,8 +144,14 @@ export function DELETE<T = undefined>(url: string, data = {}, config: ConfigType
   return request(url, data, config, 'DELETE');
 }
 
-export const plusRequest = (config: AxiosRequestConfig) =>
-  instance.request({
+export const plusRequest = (config: AxiosRequestConfig) => {
+  try {
+    assertRelativePath(config.url, 'plusRequest');
+  } catch (err) {
+    return Promise.reject(err);
+  }
+  return instance.request({
     ...config,
     baseURL: FastGPTProUrl
   });
+};

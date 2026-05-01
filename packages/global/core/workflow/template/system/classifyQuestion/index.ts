@@ -16,7 +16,6 @@ import {
   Input_Template_UserChatInput
 } from '../../input';
 import { Input_Template_System_Prompt } from '../../input';
-import { LLMModelTypeEnum } from '../../../../ai/constants';
 import { i18nT } from '../../../../../../web/i18n/utils';
 
 export const ClassifyQuestionModule: FlowNodeTemplateType = {
@@ -32,12 +31,9 @@ export const ClassifyQuestionModule: FlowNodeTemplateType = {
   intro: i18nT('workflow:intro_question_classification'),
   showStatus: true,
   version: '4.9.2',
-  courseUrl: '/docs/introduction/guide/dashboard/workflow/question_classify/',
+  courseUrl: '/introduction/guide/dashboard/workflow/question_classify/',
   inputs: [
-    {
-      ...Input_Template_SelectAIModel,
-      llmModelType: LLMModelTypeEnum.classify
-    },
+    Input_Template_SelectAIModel,
     {
       ...Input_Template_System_Prompt,
       label: i18nT('common:core.module.input.label.Background'),

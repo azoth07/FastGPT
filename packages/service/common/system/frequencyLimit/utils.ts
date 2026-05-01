@@ -1,5 +1,9 @@
 import { type AuthFrequencyLimitProps } from '@fastgpt/global/common/frequenctLimit/type';
+import { ERROR_ENUM } from '@fastgpt/global/common/error/errorCode';
 import { MongoFrequencyLimit } from './schema';
+import { getLogger, LogCategories } from '../../logger';
+
+const logger = getLogger(LogCategories.SYSTEM);
 
 export const authFrequencyLimit = async ({
   eventId,
@@ -26,9 +30,9 @@ export const authFrequencyLimit = async ({
     ).lean();
     // 因为始终会返回+1的结果，所以这里不能直接等，需要多一个。
     if (result.amount > maxAmount) {
-      return Promise.reject(result);
+      return Promise.reject(ERROR_ENUM.uploadFileIntervalLimit);
     }
   } catch (error) {
-    console.log(error);
+    logger.error('Failed to update auth frequency limit', { eventId, error });
   }
 };

@@ -30,20 +30,21 @@ import NextHead from '@/components/common/NextHead';
 import MyIcon from '@fastgpt/web/components/common/Icon';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
 import AIModelSelector from '@/components/Select/AIModelSelector';
-import { form2AppWorkflow } from '@/web/core/app/utils';
 import Avatar from '@fastgpt/web/components/common/Avatar';
 import { getDefaultAppForm } from '@fastgpt/global/core/app/utils';
 import { getToolPreviewNode } from '@/web/core/app/api/tool';
 import type { FlowNodeTemplateType } from '@fastgpt/global/core/workflow/type/node';
 import { getWebLLMModel } from '@/web/common/system/utils';
 import { ChatPageContext } from '@/web/core/chat/context/chatPageContext';
-import type { AppFileSelectConfigType, AppWhisperConfigType } from '@fastgpt/global/core/app/type';
+import type { AppWhisperConfigType } from '@fastgpt/global/core/app/type';
+import { type AppFileSelectConfigType } from '@fastgpt/global/core/app/type/config.schema';
 import ChatHeader from '@/pageComponents/chat/ChatHeader';
 import { ChatRecordContext } from '@/web/core/chat/context/chatRecordContext';
 import { ChatSidebarPaneEnum } from '../constants';
 import ChatHistorySidebar from '@/pageComponents/chat/slider/ChatSliderSidebar';
 import ChatSliderMobileDrawer from '@/pageComponents/chat/slider/ChatSliderMobileDrawer';
 import { getWebReqUrl } from '@fastgpt/web/common/system/utils';
+import { form2AppWorkflow } from '@/pageComponents/app/detail/Edit/SimpleApp/utils';
 
 const defaultFileSelectConfig: AppFileSelectConfigType = {
   maxFiles: 20,
@@ -77,6 +78,7 @@ const HomeChatWindow = () => {
   const setChatBoxData = useContextSelector(ChatItemContext, (v) => v.setChatBoxData);
   const resetVariables = useContextSelector(ChatItemContext, (v) => v.resetVariables);
   const isShowCite = useContextSelector(ChatItemContext, (v) => v.isShowCite);
+  const showSkillReferences = useContextSelector(ChatItemContext, (v) => v.showSkillReferences);
 
   const pane = useContextSelector(ChatPageContext, (v) => v.pane);
   const chatSettings = useContextSelector(ChatPageContext, (v) => v.chatSettings);
@@ -162,7 +164,8 @@ const HomeChatWindow = () => {
     },
     {
       manual: false,
-      refreshDeps: [appId, chatId],
+      // Plus 配置晚于首屏就绪时，需重新拉会话状态（含 chatGenerateStatus，供流恢复）
+      refreshDeps: [appId, chatId, feConfigs?.isPlus],
       errorToast: '',
       onFinally() {
         forbidLoadChat.current = false;
@@ -200,6 +203,10 @@ const HomeChatWindow = () => {
       responseChatItemId,
       generatingMessage
     }: StartChatFnProps) => {
+      if (!appId) {
+        return Promise.reject('appId is empty');
+      }
+
       const histories = messages.slice(-1);
 
       // using original workflow of quick app
@@ -211,7 +218,8 @@ const HomeChatWindow = () => {
             responseChatItemId,
             appId,
             chatId,
-            retainDatasetCite: isShowCite
+            retainDatasetCite: isShowCite,
+            showSkillReferences
           },
           abortCtrl: controller,
           onMessage: generatingMessage
@@ -262,6 +270,7 @@ const HomeChatWindow = () => {
           appName: t('chat:home.chat_app'),
           chatId,
           retainDatasetCite: isShowCite,
+          showSkillReferences,
           ...form2AppWorkflow(formData, t)
         },
         onMessage: generatingMessage,
@@ -387,15 +396,14 @@ const HomeChatWindow = () => {
       availableModels,
       selectedModel,
       availableTools,
-      selectedTools.length,
+      selectedTools?.length,
       t,
       setSelectedModel,
       selectedToolIds,
       setSelectedToolIds,
       setChatBoxData,
       isPc,
-      isQuickApp,
-      isShowCite
+      isQuickApp
     ]
   );
 
@@ -455,7 +463,8 @@ const HomeChatWindow = () => {
           <ChatBox
             appId={appId}
             chatId={chatId}
-            isReady={!loading}
+            isReady={!loading && !!appId}
+            enableAutoResume
             feedbackType={'user'}
             chatType={ChatTypeEnum.home}
             slogan={chatSettings?.slogan}

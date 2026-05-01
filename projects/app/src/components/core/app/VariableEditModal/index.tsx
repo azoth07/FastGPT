@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useEffect } from 'react';
 import { Flex, Stack } from '@chakra-ui/react';
 import { VariableInputEnum } from '@fastgpt/global/core/workflow/constants';
-import type { VariableItemType } from '@fastgpt/global/core/app/type.d';
+import type { VariableItemType } from '@fastgpt/global/core/app/type';
 import { useForm } from 'react-hook-form';
 import MyModal from '@fastgpt/web/components/common/MyModal';
 import { useTranslation } from 'next-i18next';
@@ -14,6 +14,7 @@ import InputTypeSelector from '@fastgpt/web/components/common/InputTypeSelector'
 import { getVariableInputTypeList } from '@fastgpt/web/components/common/InputTypeSelector/configs';
 import { addVariable } from '../VariableEdit';
 import { useValidateFieldName, useSubmitErrorHandler } from '../utils/formValidation';
+import { snapTextInputValueType } from './utils';
 
 const VariableEditModal = ({
   onClose,
@@ -38,7 +39,14 @@ const VariableEditModal = ({
   const type = watch('type');
   useEffect(() => {
     reset(variable);
-  }, [variable, reset]);
+    if (variable?.type === VariableInputEnum.input) {
+      const snap = snapTextInputValueType(variable.valueType);
+      if (snap.resetDefault) {
+        setValue('valueType', snap.valueType);
+        setValue('defaultValue', '');
+      }
+    }
+  }, [variable, reset, setValue]);
 
   const inputTypeList = useMemo(() => getVariableInputTypeList(), []);
 
@@ -67,6 +75,13 @@ const VariableEditModal = ({
       if (typeEnum === VariableInputEnum.file) {
         setValue('canLocalUpload', true);
       }
+      if (typeEnum === VariableInputEnum.input) {
+        const snap = snapTextInputValueType(value.valueType);
+        if (snap.resetDefault) {
+          setValue('valueType', snap.valueType);
+          setValue('defaultValue', '');
+        }
+      }
 
       setValue('type', typeEnum);
     },
@@ -88,16 +103,26 @@ const VariableEditModal = ({
         return;
       }
 
+      // custom/internal/input 允许用户自选 valueType，其余强制用模板 defaultValueType
+      if (
+        ![VariableInputEnum.custom, VariableInputEnum.internal, VariableInputEnum.input].includes(
+          data.type
+        )
+      ) {
+        data.valueType = inputTypeList
+          .flat()
+          .find((item) => item.value === data.type)?.defaultValueType;
+      } else if (data.type === VariableInputEnum.input) {
+        data.valueType = snapTextInputValueType(data.valueType).valueType;
+      }
+
+      // Special types set required = false
       if (
         data.type === VariableInputEnum.custom ||
         data.type === VariableInputEnum.internal ||
         data.type === VariableInputEnum.switch
       ) {
         data.required = false;
-      } else {
-        data.valueType = inputTypeList
-          .flat()
-          .find((item) => item.value === data.type)?.defaultValueType;
       }
 
       Object.keys(data).forEach((key) => {
