@@ -1,39 +1,81 @@
-import type { ApiRequestProps, ApiResponseType } from '@fastgpt/service/type/next';
+import type { ApiRequestProps } from '@fastgpt/service/type/next';
 import { NextAPI } from '@/service/middleware/entry';
-import {
-  type GetPathProps,
-  type ParentTreePathItemType
-} from '@fastgpt/global/common/parentFolder/type';
-import { parseI18nString } from '@fastgpt/global/common/i18n/utils';
 import { getLocale } from '@fastgpt/service/common/middle/i18n';
-import { getSystemTools } from '@fastgpt/service/core/app/tool/controller';
+import { SystemToolRepo } from '@fastgpt/service/core/app/tool/systemTool/systemTool.repo';
+import { splitCombineToolId } from '@fastgpt/global/core/app/tool/utils';
+import { AppToolSourceEnum } from '@fastgpt/global/core/app/tool/constants';
+import {
+  GetToolPathQuerySchema,
+  GetToolPathResponseSchema,
+  type GetToolPathQueryType,
+  type GetToolPathResponseType
+} from '@fastgpt/global/openapi/core/app/tool/api';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 
-export type pathQuery = GetPathProps;
+export type pathQuery = GetToolPathQueryType;
 
-export type pathBody = {};
+export type pathBody = Record<string, never>;
 
-export type pathResponse = Promise<ParentTreePathItemType[]>;
+export type pathResponse = Promise<GetToolPathResponseType>;
 
-async function handler(
-  req: ApiRequestProps<pathBody, pathQuery>,
-  res: ApiResponseType<any>
-): Promise<pathResponse> {
-  const { sourceId: pluginId, type = 'current' } = req.query;
+export async function handler(req: ApiRequestProps<pathBody, pathQuery>): Promise<pathResponse> {
+  const {
+    query: { sourceId: pluginId, type = 'current' }
+  } = parseApiInput({
+    req,
+    querySchema: GetToolPathQuerySchema
+  });
   const lang = getLocale(req);
 
-  if (!pluginId) return [];
+  if (!pluginId) return GetToolPathResponseSchema.parse([]);
 
-  const plugins = await getSystemTools();
-  const plugin = plugins.find((item) => item.id === pluginId);
+  const parentToolId = getParentToolId(pluginId);
+  const pathToolIds = type === 'parent' ? (parentToolId ? [parentToolId] : []) : [];
 
-  if (!plugin) return [];
-
-  return [
-    {
-      parentId: type === 'current' ? plugin.id : plugin.parentId,
-      parentName: parseI18nString(plugin.name, lang)
+  if (type === 'current') {
+    if (parentToolId) {
+      pathToolIds.push(parentToolId);
     }
-  ];
+    pathToolIds.push(pluginId);
+  }
+
+  return GetToolPathResponseSchema.parse(
+    await Promise.all(pathToolIds.map((toolId) => getToolPathItem({ toolId, lang })))
+  );
 }
 
 export default NextAPI(handler);
+
+function getParentToolId(toolId: string) {
+  const { source, pluginId } = splitCombineToolId(toolId);
+
+  if (![AppToolSourceEnum.systemTool, AppToolSourceEnum.commercial].includes(source)) {
+    return;
+  }
+
+  const [parentPluginId, childPluginId] = pluginId.split('/');
+  if (!parentPluginId || !childPluginId) return;
+
+  return `${source}-${parentPluginId}`;
+}
+
+async function getToolPathItem({
+  toolId,
+  lang
+}: {
+  toolId: string;
+  lang: ReturnType<typeof getLocale>;
+}): Promise<GetToolPathResponseType[number]> {
+  const systemToolRepo = SystemToolRepo.getInstance();
+  const { source } = splitCombineToolId(toolId);
+  const tool = await systemToolRepo.getSystemToolDisplayInfo({
+    pluginId: toolId,
+    lang,
+    source: source === AppToolSourceEnum.commercial ? AppToolSourceEnum.commercial : 'system'
+  });
+
+  return {
+    parentId: toolId,
+    parentName: tool.name
+  };
+}

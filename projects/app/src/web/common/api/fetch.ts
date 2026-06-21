@@ -22,13 +22,12 @@ import { getWebReqUrl } from '@fastgpt/web/common/system/utils';
 import type { OnOptimizePromptProps } from '@/components/common/PromptEditor/OptimizerPopover';
 import type { OnOptimizeCodeProps } from '@/pageComponents/app/detail/WorkflowComponents/Flow/nodes/NodeCode/Copilot';
 import type {
-  StepTitleItemType,
   ToolModuleResponseItemType,
   SkillModuleResponseItemType
 } from '@fastgpt/global/core/chat/type';
-import type { TopAgentFormDataType } from '@fastgpt/service/core/chat/HelperBot/dispatch/topAgent/type';
+import type { TopAgentFormDataType } from '@fastgpt/global/core/chat/helperBot/topAgent/type';
 import type { UserInputInteractive } from '@fastgpt/global/core/workflow/template/system/interactive/type';
-import type { AgentPlanType } from '@fastgpt/global/core/ai/agent/type';
+import type { AgentPlanStatusType, AgentPlanType } from '@fastgpt/global/core/ai/agent/type';
 import type { StreamNoNeedToBeResumeType } from '@fastgpt/global/openapi/core/ai/api';
 import type { OutLinkChatAuthProps } from '@fastgpt/global/support/permission/chat';
 
@@ -40,6 +39,7 @@ type StreamFetchProps = {
 };
 export type StreamResponseType = {
   responseText: string;
+  title?: string;
 };
 export type ResumeStreamResponseType = StreamResponseType & {
   completedChat?: StreamNoNeedToBeResumeType;
@@ -64,7 +64,6 @@ const shouldSendStreamResumeHeader = (url: string) =>
 
 type CommonResponseType = {
   responseValueId?: string;
-  stepId?: string;
 };
 type ResponseQueueItemType = CommonResponseType &
   (
@@ -97,14 +96,42 @@ type ResponseQueueItemType = CommonResponseType &
         plan: AgentPlanType;
       }
     | {
-        event: SseResponseEventEnum.stepTitle;
-        stepTitle: StepTitleItemType;
+        event: SseResponseEventEnum.planStatus;
+        planStatus: AgentPlanStatusType;
       }
     | {
         event: SseResponseEventEnum.skillCall;
         skill: SkillModuleResponseItemType;
       }
+    | {
+        event: SseResponseEventEnum.chatTitle;
+        title: string;
+      }
   );
+
+const STREAM_TYPING_QUEUE_COUNT_WHILE_STREAMING = 1;
+const STREAM_TYPING_QUEUE_COUNT_AFTER_FINISH = 20;
+
+/**
+ * 控制客户端流式文本的打字机消费速度。
+ *
+ * 流仍在持续返回时保持稳定慢吐，避免模型输出快或网络批量到达时一次性渲染太多字符；
+ * 服务端已 close 后加速清空队列，避免请求已经结束但 UI 还长时间补字。
+ */
+const getStreamTypingQueueConsumeCount = ({
+  queueLength,
+  finished
+}: {
+  queueLength: number;
+  finished: boolean;
+}) => {
+  if (queueLength <= 0) return 0;
+
+  return Math.min(
+    queueLength,
+    finished ? STREAM_TYPING_QUEUE_COUNT_AFTER_FINISH : STREAM_TYPING_QUEUE_COUNT_WHILE_STREAMING
+  );
+};
 
 type HandleEventSourceDataParams = {
   event: string;
@@ -125,7 +152,7 @@ function handleEventSourceData(params: HandleEventSourceDataParams) {
     const parsed: any = JSON.parse(data);
     if (typeof parsed !== 'object') throw new Error('Invalid JSON');
 
-    const { responseValueId, stepId, ...obj } = parsed;
+    const { responseValueId, ...obj } = parsed;
 
     switch (event) {
       case SseResponseEventEnum.toolCall:
@@ -133,24 +160,24 @@ function handleEventSourceData(params: HandleEventSourceDataParams) {
       case SseResponseEventEnum.toolResponse:
       case SseResponseEventEnum.interactive:
       case SseResponseEventEnum.plan:
-      case SseResponseEventEnum.stepTitle:
+      case SseResponseEventEnum.planStatus:
       case SseResponseEventEnum.skillCall: {
-        enqueue({ responseValueId, stepId, event, ...obj });
+        enqueue({ responseValueId, event, ...obj });
         break;
       }
 
       case SseResponseEventEnum.answer: {
         const reasoningText = obj.choices?.[0]?.delta?.reasoning_content || '';
-        enqueue({ responseValueId, stepId, event, reasoningText });
+        enqueue({ responseValueId, event, reasoningText });
 
         const content = obj.choices?.[0]?.delta?.content || '';
 
         if (splitAnswerTextByCharacter) {
           for (const item of content) {
-            enqueue({ responseValueId, stepId, event, text: item });
+            enqueue({ responseValueId, event, text: item });
           }
         } else {
-          enqueue({ responseValueId, stepId, event, text: content });
+          enqueue({ responseValueId, event, text: content });
         }
 
         break;
@@ -158,10 +185,10 @@ function handleEventSourceData(params: HandleEventSourceDataParams) {
 
       case SseResponseEventEnum.fastAnswer: {
         const reasoningText = obj.choices?.[0]?.delta?.reasoning_content || '';
-        enqueue({ responseValueId, stepId, event, reasoningText });
+        enqueue({ responseValueId, event, reasoningText });
 
         const text = obj.choices?.[0]?.delta?.content || '';
-        enqueue({ responseValueId, stepId, event, text });
+        enqueue({ responseValueId, event, text });
 
         break;
       }
@@ -177,7 +204,7 @@ function handleEventSourceData(params: HandleEventSourceDataParams) {
       }
 
       case SseResponseEventEnum.collectionForm: {
-        onmessage({ event, collectionForm: obj });
+        enqueue({ responseValueId, event, collectionForm: obj });
         break;
       }
 
@@ -204,6 +231,11 @@ function handleEventSourceData(params: HandleEventSourceDataParams) {
 
       case SseResponseEventEnum.flowNodeStatus: {
         onmessage({ event, ...obj });
+        break;
+      }
+
+      case SseResponseEventEnum.chatTitle: {
+        onmessage({ event, title: obj.title });
         break;
       }
 
@@ -249,6 +281,7 @@ function $ssefetch(params: SSEFetchParams) {
     }, 60000);
 
     let responseText = '';
+    let title: string | undefined;
     let responseQueue: ResponseQueueItemType[] = [];
     let error: string | undefined;
     let finished = false;
@@ -263,7 +296,7 @@ function $ssefetch(params: SSEFetchParams) {
         return onfailed();
       }
 
-      return resolve({ responseText });
+      return resolve({ responseText, title });
     };
 
     const isAnswerEvent = (event: SseResponseEventEnum) => {
@@ -283,7 +316,10 @@ function $ssefetch(params: SSEFetchParams) {
       }
 
       if (responseQueue.length > 0) {
-        const fetchCount = Math.max(1, Math.round(responseQueue.length / 30));
+        const fetchCount = getStreamTypingQueueConsumeCount({
+          queueLength: responseQueue.length,
+          finished
+        });
         for (let i = 0; i < fetchCount; i++) {
           const item = responseQueue[i];
           onmessage(item);
@@ -337,6 +373,11 @@ function $ssefetch(params: SSEFetchParams) {
           }
         },
         onmessage: ({ event, data }) => {
+          if (event === SseResponseEventEnum.chatTitle) {
+            try {
+              title = JSON.parse(data)?.title;
+            } catch {}
+          }
           handleEventSourceData({
             event,
             data,
@@ -388,6 +429,7 @@ function $resumefetch({ url, onmessage, onResumeUnavailable, controller }: Resum
     }, 60000);
 
     let responseText = '';
+    let title: string | undefined;
     let responseQueue: ResponseQueueItemType[] = [];
     let error: string | undefined;
     let finished = false;
@@ -399,7 +441,12 @@ function $resumefetch({ url, onmessage, onResumeUnavailable, controller }: Resum
       if (error !== undefined) {
         return onfailed();
       }
-      return resolve({ responseText, completedChat, resumeUnavailable });
+      return resolve({ responseText, title, completedChat, resumeUnavailable });
+    };
+    const onAbort = () => {
+      finished = true;
+      responseQueue = [];
+      return onfinish();
     };
     const onfailed = (err?: any) => {
       finished = true;
@@ -424,12 +471,14 @@ function $resumefetch({ url, onmessage, onResumeUnavailable, controller }: Resum
 
     function animateResponseLoop() {
       if (signal.aborted) {
-        responseQueue.forEach(applyMessageItem);
-        return onfinish();
+        return onAbort();
       }
 
       if (responseQueue.length > 0) {
-        const fetchCount = Math.max(1, Math.round(responseQueue.length / 30));
+        const fetchCount = getStreamTypingQueueConsumeCount({
+          queueLength: responseQueue.length,
+          finished
+        });
         for (let i = 0; i < fetchCount; i++) {
           const item = responseQueue[i];
           applyMessageItem(item);
@@ -448,6 +497,8 @@ function $resumefetch({ url, onmessage, onResumeUnavailable, controller }: Resum
     animateResponseLoop();
 
     const enqueue = (data: ResponseQueueItemType) => {
+      if (signal.aborted) return;
+
       if (resumePhase === StreamResumePhaseEnum.catchup) {
         applyMessageItem(data);
         return;
@@ -485,6 +536,8 @@ function $resumefetch({ url, onmessage, onResumeUnavailable, controller }: Resum
           }
         },
         onmessage: ({ event, data }) => {
+          if (signal.aborted) return;
+
           if (event === StreamResumePhaseEvent) {
             if (data === StreamResumePhaseEnum.catchup || data === StreamResumePhaseEnum.live) {
               resumePhase = data;
@@ -517,6 +570,12 @@ function $resumefetch({ url, onmessage, onResumeUnavailable, controller }: Resum
             return;
           }
 
+          if (event === SseResponseEventEnum.chatTitle) {
+            try {
+              title = JSON.parse(data)?.title;
+            } catch {}
+          }
+
           handleEventSourceData({
             event,
             data,
@@ -546,8 +605,7 @@ function $resumefetch({ url, onmessage, onResumeUnavailable, controller }: Resum
       clearTimeout(timer);
 
       if (controller.signal.aborted) {
-        finished = true;
-        return;
+        return onAbort();
       }
 
       onfailed(err);
@@ -601,7 +659,10 @@ type StreamResumeFetchParams = {
   onResumeUnavailable?: (data: ResumeUnavailableType) => void;
   controller: AbortController;
 };
-export function streamResumeFetch(params: StreamResumeFetchParams) {
+
+let activeResumeController: AbortController | undefined;
+
+export async function streamResumeFetch(params: StreamResumeFetchParams) {
   const { appId, chatId, outLinkAuthData, onmessage, onResumeUnavailable, controller } = params;
   const query = new URLSearchParams({ appId, chatId });
 
@@ -612,7 +673,16 @@ export function streamResumeFetch(params: StreamResumeFetchParams) {
 
   const url = `/api/core/chat/resume?${query}`;
 
-  return $resumefetch({ url, onmessage, onResumeUnavailable, controller });
+  if (activeResumeController && activeResumeController !== controller) {
+    activeResumeController.abort('replace');
+  }
+  activeResumeController = controller;
+
+  return $resumefetch({ url, onmessage, onResumeUnavailable, controller }).finally(() => {
+    if (activeResumeController === controller) {
+      activeResumeController = undefined;
+    }
+  });
 }
 
 export const onOptimizePrompt = async ({

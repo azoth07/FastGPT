@@ -1,8 +1,8 @@
 import { axios } from '../../api/axios';
 import { serverRequestBaseUrl } from '../../api/serverRequest';
-import { retryFn } from '@fastgpt/global/common/system/utils';
-import { getContentTypeFromHeader } from '../utils';
+import { getAxiosContentType, getAxiosHeaderValue } from '@fastgpt/global/common/axios/utils';
 import { getLogger, LogCategories } from '../../logger';
+import { serviceEnv } from '../../../env';
 
 const logger = getLogger(LogCategories.MODULE.DATASET.FILE);
 
@@ -61,6 +61,25 @@ const BASE64_PREFIX_MAP: Record<string, string> = {
 };
 
 const DEFAULT_IMAGE_TYPE = 'image/jpeg';
+const DEFAULT_IMAGE_DOWNLOAD_TIMEOUT_MS = 180 * 1000;
+const DEFAULT_IMAGE_DOWNLOAD_MAX_SIZE = 10 * 1024 * 1024;
+const DEFAULT_IMAGE_BASE64_MAX_BUFFER_SIZE = DEFAULT_IMAGE_DOWNLOAD_MAX_SIZE;
+
+export class ImageDownloadTooLargeError extends Error {
+  constructor(size: number, maxSize: number) {
+    super(`Image download too large. Size: ${size} bytes, maximum allowed: ${maxSize} bytes`);
+    this.name = 'ImageDownloadTooLargeError';
+  }
+}
+
+export class ImageBase64TooLargeError extends Error {
+  constructor(size: number, maxSize: number) {
+    super(
+      `Image buffer too large to convert to base64. Size: ${size} bytes, maximum allowed: ${maxSize} bytes`
+    );
+    this.name = 'ImageBase64TooLargeError';
+  }
+}
 
 export const isValidImageContentType = (contentType: string): boolean => {
   if (!contentType) return false;
@@ -96,20 +115,61 @@ export const guessBase64ImageType = (str: string): string => {
   return BASE64_PREFIX_MAP[str.charAt(0)] || DEFAULT_IMAGE_TYPE;
 };
 
-export const getImageBase64 = async (url: string) => {
-  logger.debug('Load image to base64', { url });
+/**
+ * 下载远程图片并返回 Buffer。
+ *
+ * 该函数用于文档解析链路中转存 markdown http 图片，因此默认限制为 180 秒和 10MB：
+ * 先用 Content-Length 快速拒绝明显超限的资源，下载过程中再按累计字节数中断，避免
+ * 第三方图片拖住解析任务或把大响应一次性读进内存。
+ */
+export const getImageBuffer = async (
+  url: string,
+  options: {
+    timeoutMs?: number;
+    maxSize?: number;
+  } = {}
+) => {
+  logger.debug('Load image to buffer', { url });
 
   try {
-    const response = await retryFn(() =>
-      axios.get(url, {
-        baseURL: serverRequestBaseUrl,
-        responseType: 'arraybuffer'
-      })
-    );
+    const timeoutMs = options.timeoutMs ?? DEFAULT_IMAGE_DOWNLOAD_TIMEOUT_MS;
+    const maxSize = options.maxSize ?? DEFAULT_IMAGE_DOWNLOAD_MAX_SIZE;
+    const response = await axios.get(url, {
+      baseURL: serverRequestBaseUrl,
+      responseType: 'stream',
+      timeout: timeoutMs,
+      maxContentLength: maxSize
+    });
 
-    const buffer = Buffer.from(response.data);
-    const base64 = buffer.toString('base64');
-    const headerContentType = getContentTypeFromHeader(response.headers['content-type']);
+    const contentLength = Number(getAxiosHeaderValue(response?.headers?.['content-length']) || 0);
+    if (contentLength > maxSize) {
+      response.data?.destroy?.();
+      throw new ImageDownloadTooLargeError(contentLength, maxSize);
+    }
+
+    const chunks: Buffer[] = [];
+    let totalLength = 0;
+
+    const buffer = await new Promise<Buffer>((resolve, reject) => {
+      response.data.on('data', (chunk: Buffer) => {
+        totalLength += chunk.length;
+
+        if (totalLength > maxSize) {
+          response.data.destroy();
+          return reject(new ImageDownloadTooLargeError(totalLength, maxSize));
+        }
+
+        chunks.push(chunk);
+      });
+
+      response.data.on('end', () => {
+        resolve(Buffer.concat(chunks as unknown as Uint8Array[]));
+      });
+
+      response.data.on('error', reject);
+    });
+
+    const headerContentType = getAxiosContentType(response?.headers?.['content-type']);
 
     // 检测图片类型的优先级策略
     const imageType = (() => {
@@ -125,13 +185,47 @@ export const getImageBase64 = async (url: string) => {
       }
 
       // 3. 回退到 base64 推断
+      const base64 = buffer.toString('base64');
       return guessBase64ImageType(base64);
     })();
 
     return {
-      completeBase64: `data:${imageType};base64,${base64}`,
-      base64,
+      buffer,
       mime: imageType
+    };
+  } catch (error) {
+    logger.warn('Load image to buffer failed', { url, error });
+    return Promise.reject(error);
+  }
+};
+
+export const getImageBase64 = async (
+  url: string,
+  options: {
+    timeoutMs?: number;
+    maxSize?: number;
+    maxBase64BufferSize?: number;
+  } = {}
+) => {
+  logger.debug('Load image to base64', { url });
+
+  try {
+    const { buffer, mime } = await getImageBuffer(url, {
+      timeoutMs: options.timeoutMs,
+      maxSize: options.maxSize
+    });
+    const maxBase64BufferSize = options.maxBase64BufferSize ?? DEFAULT_IMAGE_BASE64_MAX_BUFFER_SIZE;
+
+    if (buffer.length > maxBase64BufferSize) {
+      throw new ImageBase64TooLargeError(buffer.length, maxBase64BufferSize);
+    }
+
+    const base64 = buffer.toString('base64');
+
+    return {
+      completeBase64: `data:${mime};base64,${base64}`,
+      base64,
+      mime
     };
   } catch (error) {
     logger.warn('Load image to base64 failed', { url, error });
@@ -140,11 +234,12 @@ export const getImageBase64 = async (url: string) => {
 };
 
 export const addEndpointToImageUrl = (text: string) => {
-  const baseURL = process.env.FE_DOMAIN;
-  const subRoute = process.env.NEXT_PUBLIC_BASE_URL || '';
+  const baseURL = serviceEnv.FE_DOMAIN;
+  const subRoute = serviceEnv.NEXT_PUBLIC_BASE_URL;
   if (!baseURL) return text;
+  const escapedSubRoute = subRoute.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp(
-    `(?<!https?:\\/\\/[^\\s]*)(?:${subRoute}\\/api\\/system\\/img\\/[^\\s.]*\\.[^\\s]*)`,
+    `(?<!https?:\\/\\/[^\\s]*)(?:${escapedSubRoute}\\/api\\/system\\/img\\/[^\\s.]*\\.[^\\s]*)`,
     'g'
   );
   // 匹配 ${subRoute}/api/system/img/xxx.xx 的图片链接，并追加 baseURL

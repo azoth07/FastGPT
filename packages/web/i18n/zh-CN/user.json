@@ -1,6 +1,5 @@
 {
   "bill.buy_plan": "购买套餐",
-  "bill.not_need_invoice": "余额支付，无法开票",
   "bill.renew_plan": "续费套餐",
   "bill.standard_valid_tip": "套餐使用规则：系统优先使用更高级的套餐，原未用完的套餐将延后生效",
   "manage_team": "管理团队",
@@ -20,6 +19,8 @@
   "permission.only_collaborators": "仅协作者访问",
   "permission.team_read": "团队可访问",
   "permission.team_write": "团队可编辑",
+  "promotion.pay": "付费",
+  "promotion.register": "注册",
   "register.confirm": "确认注册",
   "register.register_account": "注册 {{account}} 账号",
   "register.success": "注册成功",

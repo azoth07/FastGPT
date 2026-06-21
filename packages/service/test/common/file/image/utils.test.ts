@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Readable } from 'node:stream';
 import {
   isValidImageContentType,
   detectImageTypeFromBuffer,
   guessBase64ImageType,
-  getImageBase64,
-  addEndpointToImageUrl
+  getImageBuffer,
+  getImageBase64
 } from '@fastgpt/service/common/file/image/utils';
 
 const mockAxiosGet = vi.fn();
@@ -18,6 +19,16 @@ vi.mock('@fastgpt/service/common/api/axios', () => ({
 vi.mock('@fastgpt/service/common/api/serverRequest', () => ({
   serverRequestBaseUrl: 'http://localhost:3000'
 }));
+
+const loadUtilsModule = async () => {
+  vi.resetModules();
+  return import('@fastgpt/service/common/file/image/utils');
+};
+
+const mockImageResponse = (buffer: Buffer, headers: Record<string, string> = {}) => ({
+  data: Readable.from([buffer]),
+  headers
+});
 
 describe('isValidImageContentType', () => {
   it('should return true for valid image MIME types', () => {
@@ -52,8 +63,8 @@ describe('isValidImageContentType', () => {
   });
 
   it('should be case-sensitive (requires lowercase input)', () => {
-    // Note: This function expects lowercase input
-    // The getContentTypeFromHeader function should normalize it first
+    // Note: This function expects lowercase input.
+    // Header normalization is handled by getAxiosContentType before validation.
     expect(isValidImageContentType('IMAGE/JPEG')).toBe(false);
     expect(isValidImageContentType('Image/Png')).toBe(false);
   });
@@ -207,18 +218,29 @@ describe('getImageBase64', () => {
     mockAxiosGet.mockReset();
   });
 
+  it('should return image buffer without base64 encoding', async () => {
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    mockAxiosGet.mockResolvedValue(mockImageResponse(pngBytes, { 'content-type': 'image/png' }));
+
+    const result = await getImageBuffer('/api/system/img/test.png');
+
+    expect(result).toEqual({
+      buffer: pngBytes,
+      mime: 'image/png'
+    });
+  });
+
   it('should return base64 with correct mime when header has valid image content-type', async () => {
     const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    mockAxiosGet.mockResolvedValue({
-      data: pngBytes,
-      headers: { 'content-type': 'image/png' }
-    });
+    mockAxiosGet.mockResolvedValue(mockImageResponse(pngBytes, { 'content-type': 'image/png' }));
 
     const result = await getImageBase64('/api/system/img/test.png');
 
     expect(mockAxiosGet).toHaveBeenCalledWith('/api/system/img/test.png', {
       baseURL: 'http://localhost:3000',
-      responseType: 'arraybuffer'
+      responseType: 'stream',
+      timeout: 180000,
+      maxContentLength: 10 * 1024 * 1024
     });
     expect(result.mime).toBe('image/png');
     expect(result.base64).toBe(pngBytes.toString('base64'));
@@ -227,10 +249,9 @@ describe('getImageBase64', () => {
 
   it('should detect type from buffer when header content-type is not a valid image type', async () => {
     const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
-    mockAxiosGet.mockResolvedValue({
-      data: jpegBytes,
-      headers: { 'content-type': 'application/octet-stream' }
-    });
+    mockAxiosGet.mockResolvedValue(
+      mockImageResponse(jpegBytes, { 'content-type': 'application/octet-stream' })
+    );
 
     const result = await getImageBase64('/img/photo.jpg');
 
@@ -240,10 +261,7 @@ describe('getImageBase64', () => {
 
   it('should detect type from buffer when header content-type is missing', async () => {
     const gifBytes = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
-    mockAxiosGet.mockResolvedValue({
-      data: gifBytes,
-      headers: {}
-    });
+    mockAxiosGet.mockResolvedValue(mockImageResponse(gifBytes));
 
     const result = await getImageBase64('/img/anim.gif');
 
@@ -253,10 +271,9 @@ describe('getImageBase64', () => {
   it('should fallback to guessBase64ImageType when buffer detection fails', async () => {
     // Unknown magic bytes that do not match any signature
     const unknownBytes = Buffer.from([0xaa, 0xbb, 0xcc, 0xdd]);
-    mockAxiosGet.mockResolvedValue({
-      data: unknownBytes,
-      headers: { 'content-type': 'text/html' }
-    });
+    mockAxiosGet.mockResolvedValue(
+      mockImageResponse(unknownBytes, { 'content-type': 'text/html' })
+    );
 
     const result = await getImageBase64('/img/unknown.dat');
 
@@ -269,10 +286,9 @@ describe('getImageBase64', () => {
 
   it('should handle content-type header with charset parameter', async () => {
     const svgBytes = Buffer.from([0x3c, 0x73, 0x76, 0x67, 0x20, 0x78, 0x6d, 0x6c]);
-    mockAxiosGet.mockResolvedValue({
-      data: svgBytes,
-      headers: { 'content-type': 'image/svg+xml; charset=utf-8' }
-    });
+    mockAxiosGet.mockResolvedValue(
+      mockImageResponse(svgBytes, { 'content-type': 'image/svg+xml; charset=utf-8' })
+    );
 
     const result = await getImageBase64('/img/icon.svg');
 
@@ -296,10 +312,7 @@ describe('getImageBase64', () => {
 
   it('should handle empty arraybuffer response', async () => {
     const emptyBuffer = Buffer.from([]);
-    mockAxiosGet.mockResolvedValue({
-      data: emptyBuffer,
-      headers: { 'content-type': 'image/png' }
-    });
+    mockAxiosGet.mockResolvedValue(mockImageResponse(emptyBuffer, { 'content-type': 'image/png' }));
 
     const result = await getImageBase64('/img/empty.png');
 
@@ -311,10 +324,7 @@ describe('getImageBase64', () => {
   it('should prefer header content-type over buffer detection when header is valid', async () => {
     // JPEG magic bytes but header says image/webp
     const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
-    mockAxiosGet.mockResolvedValue({
-      data: jpegBytes,
-      headers: { 'content-type': 'image/webp' }
-    });
+    mockAxiosGet.mockResolvedValue(mockImageResponse(jpegBytes, { 'content-type': 'image/webp' }));
 
     const result = await getImageBase64('/img/test.webp');
 
@@ -324,39 +334,80 @@ describe('getImageBase64', () => {
 
   it('should construct completeBase64 in correct data URI format', async () => {
     const bmpBytes = Buffer.from([0x42, 0x4d, 0x00, 0x00, 0x00, 0x00]);
-    mockAxiosGet.mockResolvedValue({
-      data: bmpBytes,
-      headers: { 'content-type': 'image/bmp' }
-    });
+    mockAxiosGet.mockResolvedValue(mockImageResponse(bmpBytes, { 'content-type': 'image/bmp' }));
 
     const result = await getImageBase64('/img/test.bmp');
 
     expect(result.completeBase64).toMatch(/^data:image\/bmp;base64,[A-Za-z0-9+/=]+$/);
   });
+
+  it('should reject before reading when content-length exceeds maxSize', async () => {
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    mockAxiosGet.mockResolvedValue(
+      mockImageResponse(pngBytes, {
+        'content-type': 'image/png',
+        'content-length': '11'
+      })
+    );
+
+    await expect(getImageBuffer('/img/too-large.png', { maxSize: 10 })).rejects.toThrow(
+      'Image download too large'
+    );
+  });
+
+  it('should reject while streaming when image exceeds maxSize', async () => {
+    mockAxiosGet.mockResolvedValue(
+      mockImageResponse(Buffer.from('12345678901'), {
+        'content-type': 'image/png'
+      })
+    );
+
+    await expect(getImageBuffer('/img/stream-too-large.png', { maxSize: 10 })).rejects.toThrow(
+      'Image download too large'
+    );
+  });
+
+  it('should reject before converting to base64 when buffer exceeds base64 limit', async () => {
+    mockAxiosGet.mockResolvedValue(
+      mockImageResponse(Buffer.from('12345678901'), {
+        'content-type': 'image/png'
+      })
+    );
+
+    await expect(
+      getImageBase64('/img/base64-too-large.png', {
+        maxSize: 20,
+        maxBase64BufferSize: 10
+      })
+    ).rejects.toThrow('Image buffer too large to convert to base64');
+  });
 });
 
 describe('addEndpointToImageUrl', () => {
-  const originalEnv = { ...process.env };
-
   beforeEach(() => {
-    delete process.env.FE_DOMAIN;
-    delete process.env.NEXT_PUBLIC_BASE_URL;
+    vi.stubEnv('FE_DOMAIN', undefined);
+    vi.stubEnv('NEXT_PUBLIC_BASE_URL', undefined);
   });
 
   afterEach(() => {
-    process.env.FE_DOMAIN = originalEnv.FE_DOMAIN;
-    process.env.NEXT_PUBLIC_BASE_URL = originalEnv.NEXT_PUBLIC_BASE_URL;
+    vi.stubEnv('FE_DOMAIN', undefined);
+    vi.stubEnv('NEXT_PUBLIC_BASE_URL', undefined);
   });
 
-  it('should return text unchanged when FE_DOMAIN is not set', () => {
-    delete process.env.FE_DOMAIN;
+  const loadAddEndpointToImageUrl = async () => {
+    const { addEndpointToImageUrl } = await loadUtilsModule();
+    return addEndpointToImageUrl;
+  };
+
+  it('should return text unchanged when FE_DOMAIN is not set', async () => {
+    const addEndpointToImageUrl = await loadAddEndpointToImageUrl();
     const text = '/api/system/img/abc123.png';
     expect(addEndpointToImageUrl(text)).toBe(text);
   });
 
-  it('should prepend FE_DOMAIN to matching image URLs without subRoute', () => {
-    process.env.FE_DOMAIN = 'https://example.com';
-    process.env.NEXT_PUBLIC_BASE_URL = '';
+  it('should prepend FE_DOMAIN to matching image URLs without subRoute', async () => {
+    vi.stubEnv('FE_DOMAIN', 'https://example.com');
+    const addEndpointToImageUrl = await loadAddEndpointToImageUrl();
 
     const text = 'Here is an image: /api/system/img/abc123.png in the text';
     const result = addEndpointToImageUrl(text);
@@ -366,9 +417,10 @@ describe('addEndpointToImageUrl', () => {
     );
   });
 
-  it('should prepend FE_DOMAIN to matching image URLs with subRoute', () => {
-    process.env.FE_DOMAIN = 'https://example.com';
-    process.env.NEXT_PUBLIC_BASE_URL = '/fastgpt';
+  it('should prepend FE_DOMAIN to matching image URLs with subRoute', async () => {
+    vi.stubEnv('FE_DOMAIN', 'https://example.com');
+    vi.stubEnv('NEXT_PUBLIC_BASE_URL', '/fastgpt');
+    const addEndpointToImageUrl = await loadAddEndpointToImageUrl();
 
     const text = 'Image: /fastgpt/api/system/img/abc123.png end';
     const result = addEndpointToImageUrl(text);
@@ -376,9 +428,9 @@ describe('addEndpointToImageUrl', () => {
     expect(result).toBe('Image: https://example.com/fastgpt/api/system/img/abc123.png end');
   });
 
-  it('should not modify URLs that already have a full http(s) prefix', () => {
-    process.env.FE_DOMAIN = 'https://example.com';
-    process.env.NEXT_PUBLIC_BASE_URL = '';
+  it('should not modify URLs that already have a full http(s) prefix', async () => {
+    vi.stubEnv('FE_DOMAIN', 'https://example.com');
+    const addEndpointToImageUrl = await loadAddEndpointToImageUrl();
 
     const text = 'Already full: https://cdn.example.com/api/system/img/abc123.png';
     const result = addEndpointToImageUrl(text);
@@ -386,9 +438,9 @@ describe('addEndpointToImageUrl', () => {
     expect(result).toBe(text);
   });
 
-  it('should handle multiple image URLs in the same text', () => {
-    process.env.FE_DOMAIN = 'https://example.com';
-    process.env.NEXT_PUBLIC_BASE_URL = '';
+  it('should handle multiple image URLs in the same text', async () => {
+    vi.stubEnv('FE_DOMAIN', 'https://example.com');
+    const addEndpointToImageUrl = await loadAddEndpointToImageUrl();
 
     const text = 'First /api/system/img/img1.png and second /api/system/img/img2.jpg here';
     const result = addEndpointToImageUrl(text);
@@ -398,9 +450,9 @@ describe('addEndpointToImageUrl', () => {
     );
   });
 
-  it('should not modify non-matching paths', () => {
-    process.env.FE_DOMAIN = 'https://example.com';
-    process.env.NEXT_PUBLIC_BASE_URL = '';
+  it('should not modify non-matching paths', async () => {
+    vi.stubEnv('FE_DOMAIN', 'https://example.com');
+    const addEndpointToImageUrl = await loadAddEndpointToImageUrl();
 
     const text = 'This is /api/other/endpoint and /some/path.png';
     const result = addEndpointToImageUrl(text);
@@ -408,22 +460,23 @@ describe('addEndpointToImageUrl', () => {
     expect(result).toBe(text);
   });
 
-  it('should return empty string unchanged', () => {
-    process.env.FE_DOMAIN = 'https://example.com';
+  it('should return empty string unchanged', async () => {
+    vi.stubEnv('FE_DOMAIN', 'https://example.com');
+    const addEndpointToImageUrl = await loadAddEndpointToImageUrl();
     expect(addEndpointToImageUrl('')).toBe('');
   });
 
-  it('should handle text with no image URLs', () => {
-    process.env.FE_DOMAIN = 'https://example.com';
-    process.env.NEXT_PUBLIC_BASE_URL = '';
+  it('should handle text with no image URLs', async () => {
+    vi.stubEnv('FE_DOMAIN', 'https://example.com');
+    const addEndpointToImageUrl = await loadAddEndpointToImageUrl();
 
     const text = 'This is plain text with no image references at all.';
     expect(addEndpointToImageUrl(text)).toBe(text);
   });
 
-  it('should not double-prepend FE_DOMAIN to already-prefixed URLs with http', () => {
-    process.env.FE_DOMAIN = 'https://example.com';
-    process.env.NEXT_PUBLIC_BASE_URL = '';
+  it('should not double-prepend FE_DOMAIN to already-prefixed URLs with http', async () => {
+    vi.stubEnv('FE_DOMAIN', 'https://example.com');
+    const addEndpointToImageUrl = await loadAddEndpointToImageUrl();
 
     const text = 'http://other.com/api/system/img/abc123.png';
     const result = addEndpointToImageUrl(text);
@@ -431,19 +484,19 @@ describe('addEndpointToImageUrl', () => {
     expect(result).toBe(text);
   });
 
-  it('should handle FE_DOMAIN with trailing slash gracefully', () => {
-    process.env.FE_DOMAIN = 'https://example.com';
-    process.env.NEXT_PUBLIC_BASE_URL = '';
+  it('should handle FE_DOMAIN with trailing slash gracefully', async () => {
+    vi.stubEnv('FE_DOMAIN', 'https://example.com/');
+    const { addEndpointToImageUrl: addEndpointToImageUrlWithBase } = await loadUtilsModule();
 
     const text = '/api/system/img/file-name_123.webp';
-    const result = addEndpointToImageUrl(text);
+    const result = addEndpointToImageUrlWithBase(text);
 
     expect(result).toBe('https://example.com/api/system/img/file-name_123.webp');
   });
 
-  it('should handle image URLs with various file extensions', () => {
-    process.env.FE_DOMAIN = 'https://example.com';
-    process.env.NEXT_PUBLIC_BASE_URL = '';
+  it('should handle image URLs with various file extensions', async () => {
+    vi.stubEnv('FE_DOMAIN', 'https://example.com');
+    const addEndpointToImageUrl = await loadAddEndpointToImageUrl();
 
     expect(addEndpointToImageUrl('/api/system/img/test.jpg')).toBe(
       'https://example.com/api/system/img/test.jpg'
@@ -456,6 +509,19 @@ describe('addEndpointToImageUrl', () => {
     );
     expect(addEndpointToImageUrl('/api/system/img/test.webp')).toBe(
       'https://example.com/api/system/img/test.webp'
+    );
+  });
+
+  it('should escape special characters in subRoute', async () => {
+    vi.stubEnv('FE_DOMAIN', 'https://example.com');
+    vi.stubEnv('NEXT_PUBLIC_BASE_URL', '/fast.gpt');
+    const addEndpointToImageUrl = await loadAddEndpointToImageUrl();
+
+    expect(addEndpointToImageUrl('/fast.gpt/api/system/img/test.jpg')).toBe(
+      'https://example.com/fast.gpt/api/system/img/test.jpg'
+    );
+    expect(addEndpointToImageUrl('/fastxgpt/api/system/img/test.jpg')).toBe(
+      '/fastxgpt/api/system/img/test.jpg'
     );
   });
 });

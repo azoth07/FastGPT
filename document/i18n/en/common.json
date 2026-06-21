@@ -1,7 +1,7 @@
 {
-  "introduction": "Introduction",
+  "guide": "Guide",
+  "pluginSystem": "Plugin System",
   "api_reference": "API Reference",
-  "use-cases": "Use Cases",
   "selfHost": "Self-Host",
-  "faq": "FAQ"
+  "businessConsultation": "Business Inquiry"
 }

@@ -46,7 +46,7 @@ import {
   Input_Template_Stream_MODE,
   Input_Template_UserChatInput
 } from './template/input';
-import { i18nT } from '../../../web/i18n/utils';
+import { i18nT } from '../../common/i18n/utils';
 import { type RuntimeUserPromptType, type UserChatItemType } from '../../core/chat/type';
 import { getNanoid } from '../../common/string/tools';
 import { ChatRoleEnum } from '../../core/chat/constants';
@@ -60,9 +60,20 @@ export const getHandleId = (
   return `${nodeId}-${type}-${key}`;
 };
 
-export const checkInputIsReference = (input: FlowNodeInputItemType) => {
-  if (input.renderTypeList?.[input?.selectedTypeIndex || 0] === FlowNodeInputTypeEnum.reference)
+/**
+ * 判断输入值是否应按工作流引用解析。
+ * settingDatasetQuotePrompt 内部渲染 Reference 选择器，虽然 renderType 不是 reference，
+ * 但它的值仍是 [nodeId, outputId]，运行时必须解析成知识库检索结果。
+ */
+export const nodeInputIsReference = (input: FlowNodeInputItemType) => {
+  const renderType = input.renderTypeList?.[input?.selectedTypeIndex || 0];
+
+  if (
+    renderType === FlowNodeInputTypeEnum.reference ||
+    renderType === FlowNodeInputTypeEnum.settingDatasetQuotePrompt
+  ) {
     return true;
+  }
 
   return false;
 };
@@ -89,7 +100,7 @@ export const splitGuideModule = (guideModules?: StoreNodeItemType) => {
   const questionGuide: AppQGConfigType =
     typeof questionGuideVal === 'boolean'
       ? { ...defaultQGConfig, open: questionGuideVal }
-      : questionGuideVal ?? defaultQGConfig;
+      : (questionGuideVal ?? defaultQGConfig);
 
   const ttsConfig: AppTTSConfigType =
     guideModules?.inputs?.find((item) => item.key === NodeInputKeyEnum.tts)?.value ??
@@ -278,7 +289,10 @@ export const appData2FlowNodeIO = ({
           [VariableInputEnum.timeRangeSelect]: [FlowNodeInputTypeEnum.timeRangeSelect],
           [VariableInputEnum.switch]: [FlowNodeInputTypeEnum.switch],
           [VariableInputEnum.password]: [FlowNodeInputTypeEnum.password],
-          [VariableInputEnum.file]: [FlowNodeInputTypeEnum.fileSelect],
+          [VariableInputEnum.file]: [
+            FlowNodeInputTypeEnum.fileSelect,
+            FlowNodeInputTypeEnum.reference
+          ],
           [VariableInputEnum.llmSelect]: [FlowNodeInputTypeEnum.selectLLMModel],
           [VariableInputEnum.datasetSelect]: [FlowNodeInputTypeEnum.selectDataset],
           [VariableInputEnum.internal]: [FlowNodeInputTypeEnum.hidden],
@@ -405,8 +419,22 @@ export const formatEditorVariablePickerIcon = (
 };
 
 // Check the value is a valid reference value format: [variableId, outputId]
-export const isValidReferenceValueFormat = (value: any): value is ReferenceItemValueType => {
-  return Array.isArray(value) && value.length === 2 && typeof value[0] === 'string';
+export const isValidReferenceValueFormat = (
+  value: any,
+  nodesMap?:
+    | Record<string, Pick<StoreNodeItemType, 'nodeId'>>
+    | Map<string, Pick<StoreNodeItemType, 'nodeId'>>
+): value is ReferenceItemValueType => {
+  if (!(Array.isArray(value) && value.length === 2 && typeof value[0] === 'string')) {
+    return false;
+  }
+
+  if (!nodesMap) return true;
+
+  const sourceNodeId = value[0];
+  if (sourceNodeId === VARIABLE_NODE_ID) return true;
+
+  return nodesMap instanceof Map ? nodesMap.has(sourceNodeId) : !!nodesMap[sourceNodeId];
 };
 /*
   Check whether the value([variableId, outputId]) value is a valid reference value:
@@ -460,7 +488,7 @@ export const clientGetWorkflowToolRunUserQuery = ({
   }) => {
     const pluginInputsWithValue = pluginInputs.map((input) => {
       const { key } = input;
-      let value = variables?.hasOwnProperty(key) ? variables[key] : input.defaultValue;
+      const value = variables?.hasOwnProperty(key) ? variables[key] : input.defaultValue;
 
       return {
         ...input,

@@ -1,16 +1,37 @@
-import type { ChatHistoryItemResType, ChatItemMiniType } from '@fastgpt/global/core/chat/type';
+import type { ChatItemMiniType } from '@fastgpt/global/core/chat/type';
 import { MongoChatItem } from './chatItemSchema';
 import { MongoChat } from './chatSchema';
-import { DispatchNodeResponseKeyEnum } from '@fastgpt/global/core/workflow/runtime/constants';
 import { ChatRoleEnum } from '@fastgpt/global/core/chat/constants';
 import { MongoChatItemResponse } from './chatItemResponseSchema';
 import type { ClientSession } from '../../common/mongo';
 import { Types } from '../../common/mongo';
-import { mongoSessionRun } from '../../common/mongo/sessionRun';
 import { UserError } from '@fastgpt/global/common/error/utils';
 import { getLogger, LogCategories } from '../../common/logger';
+import { composeChatItemResponseData } from './nodeResponseStorage';
 
 const logger = getLogger(LogCategories.MODULE.CHAT.HISTORY);
+
+export type ChatItemNodeResponseMode = 'none' | 'preview' | 'full';
+type ChatItemResponsePreviewProjection = Record<string, 1>;
+
+const defaultNodeResponsePreviewProjection = {
+  chatItemDataId: 1,
+  'data.id': 1,
+  'data.parentId': 1,
+  'data.moduleType': 1,
+  'data.moduleName': 1,
+  'data.quoteList.id': 1,
+  'data.quoteList.collectionId': 1,
+  'data.quoteList.datasetId': 1,
+  'data.quoteList.sourceId': 1,
+  'data.quoteList.sourceName': 1,
+  'data.quoteList.chunkIndex': 1,
+  'data.quoteList.score': 1,
+  'data.toolId': 1,
+  'data.toolRes.citeLinks': 1,
+  'data.errorText': 1,
+  'data.errorCaptured': 1
+} as const;
 
 export async function getChatItems({
   includeDeleted = false,
@@ -18,6 +39,8 @@ export async function getChatItems({
   chatId,
   field,
   limit,
+  nodeResponseMode,
+  nodeResponsePreviewProjection,
 
   offset,
   initialId,
@@ -29,6 +52,8 @@ export async function getChatItems({
   chatId?: string;
   field: string;
   limit: number;
+  nodeResponseMode?: ChatItemNodeResponseMode;
+  nodeResponsePreviewProjection?: ChatItemResponsePreviewProjection;
 
   offset?: number;
   initialId?: string;
@@ -44,8 +69,9 @@ export async function getChatItems({
     return { histories: [], total: 0, hasMorePrev: false, hasMoreNext: false };
   }
 
-  // Extend dataId
+  const shouldReadNodeResponse = nodeResponseMode || 'none';
   field = `dataId ${field}`;
+
   const baseCondition = includeDeleted ? { appId, chatId } : { appId, chatId, deleteTime: null };
 
   const { histories, total, hasMorePrev, hasMoreNext } = await (async () => {
@@ -163,32 +189,50 @@ export async function getChatItems({
     }
   })();
 
-  // Add node responses field
-  if (field.includes(DispatchNodeResponseKeyEnum.nodeResponse) && histories.length > 0) {
+  if (shouldReadNodeResponse !== 'none' && histories.length > 0) {
     const chatItemDataIds = histories
-      .filter((item) => item.obj === ChatRoleEnum.AI && !item.responseData?.length)
+      .filter((item) => item.obj === ChatRoleEnum.AI)
       .map((item) => item.dataId);
 
     if (chatItemDataIds.length > 0) {
-      const chatItemResponsesMap = await MongoChatItemResponse.find(
-        { appId, chatId, chatItemDataId: { $in: chatItemDataIds } },
-        { chatItemDataId: 1, data: 1 }
+      const isPreview = shouldReadNodeResponse === 'preview';
+      const rows = await MongoChatItemResponse.find(
+        {
+          appId,
+          chatId,
+          chatItemDataId: { $in: chatItemDataIds }
+        },
+        {
+          chatItemDataId: 1,
+          ...(isPreview
+            ? nodeResponsePreviewProjection || defaultNodeResponsePreviewProjection
+            : { data: 1 })
+        }
       )
-        .lean()
-        .then((res) => {
-          const map = new Map<string, ChatHistoryItemResType[]>();
-          res.forEach((item) => {
-            const val = map.get(item.chatItemDataId) || [];
-            val.push(item.data);
-            map.set(item.chatItemDataId, val);
-          });
-          return map;
+        .sort({ _id: 1 })
+        .lean();
+
+      const chatItemResponsesMap = (() => {
+        const map = new Map<string, typeof rows>();
+        rows.forEach((item) => {
+          const val = map.get(item.chatItemDataId) || [];
+          val.push(item);
+          map.set(item.chatItemDataId, val);
         });
+        return map;
+      })();
 
       histories.forEach((item) => {
-        const val = chatItemResponsesMap.get(String(item.dataId));
-        if (item.obj === ChatRoleEnum.AI && val) {
-          item.responseData = val;
+        if (item.obj !== ChatRoleEnum.AI) return;
+
+        if (isPreview) {
+          item.responseData = chatItemResponsesMap
+            .get(String(item.dataId))
+            ?.flatMap((row) => (row.data ? [row.data] : []));
+        } else {
+          item.responseData = composeChatItemResponseData({
+            rows: chatItemResponsesMap.get(String(item.dataId)) || []
+          });
         }
       });
     }

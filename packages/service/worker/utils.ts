@@ -1,6 +1,7 @@
-import type { Worker as NodeWorker } from 'worker_threads';
+import type { TransferListItem, Worker as NodeWorker } from 'worker_threads';
 import path from 'path';
 import { getLogger, LogCategories } from '../common/logger';
+import { serviceEnv } from '../env';
 
 export enum WorkerNameEnum {
   readFile = 'readFile',
@@ -12,7 +13,7 @@ export enum WorkerNameEnum {
 
 export const getSafeEnv = () => {
   return {
-    MAX_HTML_TRANSFORM_CHARS: process.env.MAX_HTML_TRANSFORM_CHARS,
+    MAX_HTML_TRANSFORM_CHARS: String(serviceEnv.MAX_HTML_TRANSFORM_CHARS),
     NODE_ENV: process.env.NODE_ENV,
     HTTP_PROXY: process.env.HTTP_PROXY,
     HTTPS_PROXY: process.env.HTTPS_PROXY,
@@ -64,19 +65,45 @@ export const runWorker = <T = any>(name: WorkerNameEnum, params?: Record<string,
   });
 };
 
-type WorkerRunTaskType<T> = { data: T; resolve: (e: any) => void; reject: (e: any) => void };
+type WorkerRunTaskType<T> = {
+  data: T;
+  transferList?: TransferListItem[];
+  handlers?: WorkerRunHandlers;
+  resolve: (e: any) => void;
+  reject: (e: any) => void;
+};
+export type WorkerUploadFileRequest = {
+  name: string;
+  mime: string;
+  buffer: ArrayBuffer;
+};
+export type WorkerUploadFileResult = {
+  key: string;
+};
+/**
+ * Worker 任务运行期间可发起的通用主线程能力。
+ *
+ * 这些 handler 只服务当前 run 调用，worker 发送中间事件时不会释放任务槽位；
+ * 只有最终 success/error 消息才会完成任务。
+ */
+export type WorkerRunHandlers = {
+  uploadFile?: (data: WorkerUploadFileRequest) => Promise<WorkerUploadFileResult>;
+};
 type WorkerQueueItem = {
   id: string;
   worker: NodeWorker;
   status: 'running' | 'idle';
   taskTime: number;
+  tasksCompleted: number;
   timeoutId?: NodeJS.Timeout;
+  handlers?: WorkerRunHandlers;
   resolve: (e: any) => void;
   reject: (e: any) => void;
 };
 type WorkerResponse<T = any> = {
   id: string;
-  type: 'success' | 'error';
+  type: 'success' | 'error' | 'uploadFile';
+  requestId?: string;
   data: T;
 };
 
@@ -86,19 +113,35 @@ type WorkerResponse<T = any> = {
   * 可以设置最大常驻线程（不会被销毁），线程满了后，后续任务会等待执行。
   * 每次执行，会把数据丢到一个空闲线程里运行。主线程需要监听子线程返回的数据，并执行对于的 callback，主要是通过 workerId 进行标记。
   * 务必保证，每个线程只会同时运行 1 个任务，否则 callback 会对应不上。
+  * taskTimeoutMs：单任务超时时间，超时会终止 worker 并从队列摘除（避免 hang 住占池）。
+  * maxTasksPerWorker：worker 完成多少任务后回收（应对依赖库的内存泄漏，例如 readFile 的 mammoth/xlsx/pdf-parse）。
 */
 export class WorkerPool<Props = Record<string, any>, Response = any> {
   name: WorkerNameEnum;
   maxReservedThreads: number;
+  taskTimeoutMs: number;
+  maxTasksPerWorker: number;
   workerQueue: WorkerQueueItem[] = [];
   waitQueue: WorkerRunTaskType<Props>[] = [];
 
-  constructor({ name, maxReservedThreads }: { name: WorkerNameEnum; maxReservedThreads: number }) {
+  constructor({
+    name,
+    maxReservedThreads,
+    taskTimeoutMs = 60000,
+    maxTasksPerWorker = 1000
+  }: {
+    name: WorkerNameEnum;
+    maxReservedThreads: number;
+    taskTimeoutMs?: number;
+    maxTasksPerWorker?: number;
+  }) {
     this.name = name;
     this.maxReservedThreads = maxReservedThreads;
+    this.taskTimeoutMs = taskTimeoutMs;
+    this.maxTasksPerWorker = maxTasksPerWorker;
   }
 
-  private runTask({ data, resolve, reject }: WorkerRunTaskType<Props>) {
+  private runTask({ data, transferList, handlers, resolve, reject }: WorkerRunTaskType<Props>) {
     // Get idle worker or create a new worker
     const runningWorker = (() => {
       // @ts-ignore
@@ -121,27 +164,35 @@ export class WorkerPool<Props = Record<string, any>, Response = any> {
       runningWorker.taskTime = Date.now();
       runningWorker.resolve = resolve;
       runningWorker.reject = reject;
+      runningWorker.handlers = handlers;
       runningWorker.timeoutId = setTimeout(() => {
         reject('Worker timeout');
-      }, 30000);
+        // 超时即销毁，避免占着 idle 槽位永远不释放
+        this.deleteWorker(runningWorker.id);
+      }, this.taskTimeoutMs);
 
-      runningWorker.worker.postMessage({
-        id: runningWorker.id,
-        ...data
-      });
+      runningWorker.worker.postMessage(
+        {
+          id: runningWorker.id,
+          ...data
+        },
+        transferList
+      );
     } else {
       // Not enough worker, push to wait queue
-      this.waitQueue.push({ data, resolve, reject });
+      this.waitQueue.push({ data, transferList, handlers, resolve, reject });
     }
   }
 
-  run(data: Props) {
+  run(data: Props, transferList?: TransferListItem[], handlers?: WorkerRunHandlers) {
     return new Promise<Response>((resolve, reject) => {
       /*
         Whether the task is executed immediately or delayed, the promise callback will dispatch after task complete.
       */
       this.runTask({
         data,
+        transferList,
+        handlers,
         resolve,
         reject
       });
@@ -165,13 +216,22 @@ export class WorkerPool<Props = Record<string, any>, Response = any> {
       worker,
       status: 'running',
       taskTime: Date.now(),
+      tasksCompleted: 0,
+      handlers: undefined,
       resolve: () => {},
       reject: () => {}
     };
     this.workerQueue.push(item);
 
     // watch response
-    worker.on('message', ({ id, type, data }: WorkerResponse<Response>) => {
+    worker.on('message', ({ id, type, requestId, data }: WorkerResponse<Response>) => {
+      if (id !== item.id) return;
+
+      if (type === 'uploadFile') {
+        this.handleUploadFileMessage({ item, requestId, data });
+        return;
+      }
+
       if (type === 'success') {
         item.resolve(data);
       } else if (type === 'error') {
@@ -180,7 +240,15 @@ export class WorkerPool<Props = Record<string, any>, Response = any> {
 
       // Clear timeout timer and update worker status
       clearTimeout(item.timeoutId);
-      item.status = 'idle';
+      item.tasksCompleted += 1;
+
+      // 达到任务上限则回收（应对 worker 进程内库的内存泄漏）
+      if (item.tasksCompleted >= this.maxTasksPerWorker) {
+        this.deleteWorker(item.id);
+      } else {
+        item.status = 'idle';
+        item.handlers = undefined;
+      }
     });
 
     // Worker error, terminate and delete it.（Un catch error)
@@ -196,11 +264,55 @@ export class WorkerPool<Props = Record<string, any>, Response = any> {
     return item;
   }
 
+  private handleUploadFileMessage({
+    item,
+    requestId,
+    data
+  }: {
+    item: WorkerQueueItem;
+    requestId?: string;
+    data: any;
+  }) {
+    const reply = (type: 'uploadFileResult' | 'uploadFileError', payload: any) => {
+      if (!this.workerQueue.includes(item) || item.status !== 'running') return;
+      try {
+        item.worker.postMessage({
+          id: item.id,
+          type,
+          requestId,
+          data: payload
+        });
+      } catch (error) {
+        getLogger(LogCategories.INFRA.WORKER).warn('Failed to reply worker uploadFile request', {
+          workerId: item.id,
+          name: this.name,
+          error
+        });
+      }
+    };
+
+    if (!requestId) {
+      reply('uploadFileError', 'Missing uploadFile requestId');
+      return;
+    }
+
+    const handler = item.handlers?.uploadFile;
+    if (!handler) {
+      reply('uploadFileError', 'Missing uploadFile handler');
+      return;
+    }
+
+    handler(data)
+      .then((result) => reply('uploadFileResult', result))
+      .catch((error) => reply('uploadFileError', error));
+  }
+
   private deleteWorker(workerId: string) {
     const item = this.workerQueue.find((item) => item.id === workerId);
     if (item) {
       item.reject?.('error');
       clearTimeout(item.timeoutId);
+      item.handlers = undefined;
       item.worker.removeAllListeners();
       item.worker.terminate();
     }
@@ -212,6 +324,8 @@ export class WorkerPool<Props = Record<string, any>, Response = any> {
 export const getWorkerController = <Props, Response>(props: {
   name: WorkerNameEnum;
   maxReservedThreads: number;
+  taskTimeoutMs?: number;
+  maxTasksPerWorker?: number;
 }) => {
   if (!global.workerPoll) {
     // @ts-ignore

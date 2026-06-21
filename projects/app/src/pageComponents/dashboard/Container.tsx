@@ -11,9 +11,10 @@ import { navbarWidth } from '@/components/Layout';
 import Avatar from '@fastgpt/web/components/common/Avatar';
 import { useRequest } from '@fastgpt/web/hooks/useRequest';
 import { getTemplateMarketItemList, getTemplateTagList } from '@/web/core/app/api/template';
-import type { AppTemplateSchemaType, TemplateTypeSchemaType } from '@fastgpt/global/core/app/type';
+import type { TemplateTypeSchemaType } from '@fastgpt/global/core/app/type';
 import TeamPlanStatusCard from './TeamPlanStatusCard';
 import { useUserStore } from '@/web/support/user/useUserStore';
+import type { AppTemplateListItemType } from '@fastgpt/global/openapi/core/app/template/api';
 
 export enum TabEnum {
   agent = 'agent',
@@ -31,7 +32,7 @@ const DashboardContainer = ({
 }: {
   children: (e: {
     templateTags: TemplateTypeSchemaType[];
-    templateList: AppTemplateSchemaType[];
+    templateList: AppTemplateListItemType[];
     MenuIcon: JSX.Element;
   }) => React.ReactNode;
 }) => {
@@ -86,7 +87,7 @@ const DashboardContainer = ({
   const { data: templateData, loading: isLoadingTemplates } = useRequest(
     () =>
       currentTab === TabEnum.app_templates && hasAppCreatePer
-        ? getTemplateMarketItemList({ type: appType })
+        ? getTemplateMarketItemList({ type: appType || 'all' })
         : Promise.resolve({ list: [], total: 0 }),
     {
       manual: false,
@@ -112,7 +113,7 @@ const DashboardContainer = ({
       {
         groupId: TabEnum.agent,
         groupAvatar: 'core/chat/sidebar/star',
-        groupName: 'Agent',
+        groupName: 'Agents',
         children: [
           {
             isActive: !currentType,
@@ -134,16 +135,12 @@ const DashboardContainer = ({
           }
         ]
       },
-      ...(feConfigs?.show_skill
-        ? [
-            {
-              groupId: TabEnum.skill,
-              groupAvatar: 'common/skill',
-              groupName: 'Skill',
-              children: []
-            }
-          ]
-        : []),
+      {
+        groupId: TabEnum.skill,
+        groupAvatar: 'common/skill',
+        groupName: t('common:navbar.Skill'),
+        children: []
+      },
       {
         groupId: TabEnum.tool,
         groupAvatar: 'core/app/type/plugin',
@@ -232,8 +229,7 @@ const DashboardContainer = ({
   }, [
     currentType,
     feConfigs.appTemplateCourse,
-    feConfigs?.isPlus,
-    feConfigs?.show_skill,
+    feConfigs.isPlus,
     hasAppCreatePer,
     t,
     templateList,

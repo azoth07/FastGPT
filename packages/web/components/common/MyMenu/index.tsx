@@ -31,6 +31,7 @@ export type MenuItemData = {
     description?: string;
     onClick?: () => any;
     menuItemStyles?: MenuItemProps;
+    iconStyles?: AvatarProps;
     disabled?: boolean;
     disabledTip?: string;
   }>;
@@ -208,9 +209,16 @@ const MyMenu = ({
 
   const formatTrigger = !isPc ? 'click' : trigger;
 
+  const isIgnoreOutsideClickTarget = (event: Event) => {
+    return event.composedPath().some((target) => {
+      return target instanceof HTMLElement && target.dataset.myMenuIgnoreOutsideClick !== undefined;
+    });
+  };
+
   useOutsideClick({
     ref: ref,
-    handler: () => {
+    handler: (event) => {
+      if (isIgnoreOutsideClickTarget(event)) return;
       setIsOpen(false);
     }
   });
@@ -244,7 +252,7 @@ const MyMenu = ({
           if (formatTrigger === 'hover') {
             closeTimer.current = setTimeout(() => {
               setIsOpen(false);
-            }, 100);
+            }, 250);
           }
         }}
       >
@@ -293,6 +301,7 @@ const MyMenu = ({
                   const menuItem = (
                     <MenuItem
                       key={index}
+                      w={'100%'}
                       borderRadius={'sm'}
                       isDisabled={child.disabled}
                       onClick={(e) => {
@@ -318,6 +327,7 @@ const MyMenu = ({
                           src={child.icon as any}
                           mr={2}
                           {...sizeMapStyle[size].iconStyle}
+                          {...child.iconStyles}
                           color={
                             child.isActive
                               ? 'inherit'
@@ -351,7 +361,7 @@ const MyMenu = ({
                   if (child.disabled && child.disabledTip) {
                     return (
                       <MyTooltip shouldWrapChildren={false} key={index} label={child.disabledTip}>
-                        {menuItem}
+                        <Box>{menuItem}</Box>
                       </MyTooltip>
                     );
                   }

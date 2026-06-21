@@ -91,12 +91,12 @@ const RenderText = React.memo(function RenderText({
   return <Markdown source={source} showAnimation={showAnimation} />;
 });
 const RenderCollectionForm = React.memo(function RenderCollectionForm({
-  isLastValue,
+  canSubmit,
   collectionForm,
   onSubmit,
   showDescription = true
 }: {
-  isLastValue: boolean;
+  canSubmit: boolean;
   collectionForm: UserInputInteractive;
   onSubmit: (formData: string) => void;
   showDescription?: boolean;
@@ -141,7 +141,7 @@ const RenderCollectionForm = React.memo(function RenderCollectionForm({
         })}
       </Flex>
 
-      {!submitted && isLastValue && (
+      {!submitted && canSubmit && (
         <Flex justifyContent={'flex-end'} mt={4}>
           <Button
             size={'sm'}
@@ -173,6 +173,17 @@ const AIItem = ({
   onSubmitCollectionForm: (formData: string) => void;
 }) => {
   const { t } = useTranslation();
+  const firstValue = chat.value[0];
+  const isWaitingForResponse =
+    chat.value.length === 1 &&
+    !(
+      ('text' in firstValue && firstValue.text?.content) ||
+      ('reasoning' in firstValue && firstValue.reasoning && !firstValue.hideReason)
+    );
+  const lastCollectionFormIndex = chat.value.findLastIndex(
+    (value) => 'collectionForm' in value && value.collectionForm
+  );
+
   return (
     <Box
       _hover={{
@@ -192,8 +203,7 @@ const AIItem = ({
           color={'myGray.900'}
           bg={'myGray.100'}
         >
-          {chat.value.length === 1 &&
-          (!('text' in chat.value[0]) || !chat.value[0].text?.content) ? (
+          {isWaitingForResponse ? (
             <RenderText showAnimation={true} text={t('chat:chat.waiting_for_response')} />
           ) : (
             <>
@@ -203,35 +213,34 @@ const AIItem = ({
                     <RenderText key={i} showAnimation={false} text={t('chat:plan_check_tip')} />
                   );
                 }
-                if ('text' in value && value.text) {
-                  return (
-                    <RenderText
-                      key={i}
-                      showAnimation={isChatting && isLastChild}
-                      text={value.text.content}
-                    />
-                  );
-                }
-                if ('reasoning' in value && value.reasoning) {
-                  return (
-                    <RenderResoningContent
-                      key={i}
-                      isChatting={isChatting}
-                      isLastResponseValue={isLastChild}
-                      content={value.reasoning.content}
-                    />
-                  );
-                }
                 if ('collectionForm' in value && value.collectionForm) {
                   return (
                     <RenderCollectionForm
                       key={i}
-                      isLastValue={isLastChild && i === chat.value.length - 1}
+                      canSubmit={isLastChild && i === lastCollectionFormIndex}
                       collectionForm={value.collectionForm}
                       onSubmit={onSubmitCollectionForm}
                     />
                   );
                 }
+
+                return (
+                  <React.Fragment key={i}>
+                    {'reasoning' in value && value.reasoning && !value.hideReason && (
+                      <RenderResoningContent
+                        isChatting={isChatting}
+                        isLastResponseValue={isLastChild}
+                        content={value.reasoning.content}
+                      />
+                    )}
+                    {'text' in value && value.text && (
+                      <RenderText
+                        showAnimation={isChatting && isLastChild}
+                        text={value.text.content}
+                      />
+                    )}
+                  </React.Fragment>
+                );
               })}
             </>
           )}

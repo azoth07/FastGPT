@@ -1,5 +1,5 @@
 import { AuditEventEnum, AdminAuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
-import { i18nT } from '../../../i18n/utils';
+import { i18nT } from '@fastgpt/global/common/i18n/utils';
 
 export const adminAuditLogMap = {
   [AdminAuditEventEnum.ADMIN_LOGIN]: {
@@ -504,6 +504,11 @@ export const auditLogMap = {
   [AuditEventEnum.UPDATE_API_KEY]: {
     content: i18nT('account_team:log_update_api_key'),
     typeLabel: i18nT('account_team:update_api_key'),
+    params: {} as { name?: string; keyName: string }
+  },
+  [AuditEventEnum.COPY_API_KEY]: {
+    content: i18nT('account_team:log_copy_api_key'),
+    typeLabel: i18nT('account_team:copy_api_key'),
     params: {} as { name?: string; keyName: string }
   },
   [AuditEventEnum.DELETE_API_KEY]: {

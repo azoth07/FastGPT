@@ -2,12 +2,10 @@ import { DatasetSourceReadTypeEnum } from '@fastgpt/global/core/dataset/constant
 import { rawText2Chunks, readDatasetSourceRawText } from '@fastgpt/service/core/dataset/read';
 import { NextAPI } from '@/service/middleware/entry';
 import type { ApiRequestProps } from '@fastgpt/service/type/next';
-import {
-  OwnerPermissionVal,
-  WritePermissionVal
-} from '@fastgpt/global/support/permission/constant';
-import { authCollectionFile } from '@fastgpt/service/support/permission/auth/file';
+import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
+import { authDatasetFileKey } from '@fastgpt/service/support/permission/auth/file';
 import { authDataset } from '@fastgpt/service/support/permission/dataset/auth';
+import { isAuthorizedDatasetFileS3Key } from '@fastgpt/service/common/s3/sources/dataset/key';
 import {
   computedCollectionChunkSettings,
   getLLMMaxChunkSize
@@ -16,6 +14,7 @@ import { CommonErrEnum } from '@fastgpt/global/common/error/code/common';
 import { getEmbeddingModel, getLLMModel } from '@fastgpt/service/core/ai/model';
 import { replaceS3KeyToPreviewUrl } from '@fastgpt/service/core/dataset/utils';
 import { addDays } from 'date-fns';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import {
   GetPreviewChunksBodySchema,
   GetPreviewChunksResponseSchema,
@@ -35,20 +34,27 @@ async function handler(
     datasetId,
     externalFileId,
     ...chunkSettings
-  } = GetPreviewChunksBodySchema.parse(req.body);
+  } = parseApiInput({ req, bodySchema: GetPreviewChunksBodySchema }).body;
 
   if (!sourceId) {
     throw new Error('sourceId is empty');
   }
 
+  if (
+    type === DatasetSourceReadTypeEnum.fileLocal &&
+    !isAuthorizedDatasetFileS3Key({ key: sourceId, datasetId })
+  ) {
+    return Promise.reject(CommonErrEnum.unAuthFile);
+  }
+
   const fileAuthRes =
     type === DatasetSourceReadTypeEnum.fileLocal
-      ? await authCollectionFile({
+      ? await authDatasetFileKey({
           req,
           authToken: true,
           authApiKey: true,
           fileId: sourceId,
-          per: OwnerPermissionVal
+          per: WritePermissionVal
         })
       : undefined;
 

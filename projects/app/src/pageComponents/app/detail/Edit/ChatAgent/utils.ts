@@ -25,8 +25,9 @@ import {
   userFilesInput
 } from '@fastgpt/global/core/workflow/template/system/workflowStart';
 import { SystemConfigNode } from '@fastgpt/global/core/workflow/template/system/systemConfig';
-import { i18nT } from '@fastgpt/web/i18n/utils';
+import { i18nT } from '@fastgpt/global/common/i18n/utils';
 import { workflowStartNodeId } from '@/web/core/app/constants';
+import { getWebLLMModel } from '@/web/common/system/utils';
 import { AgentNode } from '@fastgpt/global/core/workflow/template/system/agent/index';
 import { getDefaultAppForm } from '@fastgpt/global/core/app/utils';
 import type { FlowNodeInputItemType } from '@fastgpt/global/core/workflow/type/io';
@@ -36,7 +37,7 @@ import {
   getToolConfigStatus,
   validateToolConfiguration
 } from '@fastgpt/global/core/app/formEdit/utils';
-import { getToolPreviewNode } from '@/web/core/app/api/tool';
+import { getClientToolPreviewNode } from '@/web/core/app/api/tool';
 import type { AppFileSelectConfigType } from '@fastgpt/global/core/app/type/config.schema';
 import { DatasetSearchModeEnum } from '@fastgpt/global/core/dataset/constants';
 
@@ -60,6 +61,11 @@ export const appWorkflow2AgentForm = ({
       defaultAppForm.aiSettings.systemPrompt = inputMap.get(NodeInputKeyEnum.aiSystemPrompt);
       defaultAppForm.aiSettings.temperature = inputMap.get(NodeInputKeyEnum.aiChatTemperature);
       defaultAppForm.aiSettings.maxHistories = inputMap.get(NodeInputKeyEnum.history);
+      defaultAppForm.aiSettings.aiChatReasoning =
+        inputMap.get(NodeInputKeyEnum.aiChatReasoning) ?? true;
+      defaultAppForm.aiSettings.aiChatReasoningEffort = inputMap.get(
+        NodeInputKeyEnum.aiChatReasoningEffort
+      );
       defaultAppForm.aiSettings.aiChatTopP = inputMap.get(NodeInputKeyEnum.aiChatTopP);
       defaultAppForm.aiSettings.useAgentSandbox = inputMap.get(NodeInputKeyEnum.useAgentSandbox);
 
@@ -107,6 +113,29 @@ export type WorkflowType = {
   nodes: StoreNodeItemType[];
   edges: StoreEdgeItemType[];
 };
+
+/**
+ * 判断 ChatAgent 是否处于历史遗留的 Skill + 虚拟机不可用状态。
+ * 该状态允许普通保存草稿，但不能继续发布或运行，因为 Skill 运行依赖虚拟机环境。
+ */
+export const checkAgentSkillSandboxUnavailable = ({
+  appForm,
+  showSandbox,
+  enableSandbox
+}: {
+  appForm: Pick<AppFormEditFormType, 'aiSettings' | 'selectedAgentSkills'>;
+  showSandbox?: boolean;
+  enableSandbox?: boolean;
+}) => {
+  const hasSelectedAgentSkills = (appForm.selectedAgentSkills?.length || 0) > 0;
+
+  return (
+    hasSelectedAgentSkills &&
+    !appForm.aiSettings.useAgentSandbox &&
+    (!showSandbox || !enableSandbox)
+  );
+};
+
 export function agentForm2AppWorkflow(
   data: AppFormEditFormType,
   t: any // i18nT
@@ -114,6 +143,27 @@ export function agentForm2AppWorkflow(
   chatConfig: AppChatConfigType;
 } {
   const aiChatNodeId = '7BdojPlukIQw';
+  const modelData = getWebLLMModel(data.aiSettings.model);
+  const modelMultimodal = {
+    vision: !!modelData?.vision,
+    audio: !!modelData?.audio,
+    video: !!modelData?.video,
+    extractFiles: !!(modelData?.vision || modelData?.audio || modelData?.video)
+  };
+  const chatConfig: AppChatConfigType = {
+    ...data.chatConfig,
+    ...(data.chatConfig.fileSelectConfig
+      ? {
+          fileSelectConfig: {
+            ...data.chatConfig.fileSelectConfig,
+            canSelectImg: modelMultimodal.vision,
+            canSelectAudio: modelMultimodal.audio,
+            canSelectVideo: modelMultimodal.video
+          }
+        }
+      : {})
+  };
+
   function systemConfigTemplate(): StoreNodeItemType {
     return {
       nodeId: SystemConfigNode.id,
@@ -184,7 +234,42 @@ export function agentForm2AppWorkflow(
               renderTypeList: [FlowNodeInputTypeEnum.hidden],
               label: '',
               valueType: WorkflowIOValueTypeEnum.boolean,
-              value: true
+              value: modelMultimodal.vision
+            },
+            {
+              key: NodeInputKeyEnum.aiChatAudio,
+              renderTypeList: [FlowNodeInputTypeEnum.hidden],
+              label: '',
+              valueType: WorkflowIOValueTypeEnum.boolean,
+              value: modelMultimodal.audio
+            },
+            {
+              key: NodeInputKeyEnum.aiChatVideo,
+              renderTypeList: [FlowNodeInputTypeEnum.hidden],
+              label: '',
+              valueType: WorkflowIOValueTypeEnum.boolean,
+              value: modelMultimodal.video
+            },
+            {
+              key: NodeInputKeyEnum.aiChatExtractFiles,
+              renderTypeList: [FlowNodeInputTypeEnum.hidden],
+              label: '',
+              valueType: WorkflowIOValueTypeEnum.boolean,
+              value: modelMultimodal.extractFiles
+            },
+            {
+              key: NodeInputKeyEnum.aiChatReasoning,
+              renderTypeList: [FlowNodeInputTypeEnum.hidden],
+              label: '',
+              valueType: WorkflowIOValueTypeEnum.boolean,
+              value: data.aiSettings.aiChatReasoning ?? true
+            },
+            {
+              key: NodeInputKeyEnum.aiChatReasoningEffort,
+              renderTypeList: [FlowNodeInputTypeEnum.hidden],
+              label: '',
+              valueType: WorkflowIOValueTypeEnum.string,
+              value: data.aiSettings.aiChatReasoningEffort
             },
             {
               key: NodeInputKeyEnum.history,
@@ -248,7 +333,8 @@ export function agentForm2AppWorkflow(
                 rerankWeight: data.dataset.rerankWeight,
                 datasetSearchUsingExtensionQuery: data.dataset.datasetSearchUsingExtensionQuery,
                 datasetSearchExtensionModel: data.dataset.datasetSearchExtensionModel,
-                datasetSearchExtensionBg: data.dataset.datasetSearchExtensionBg
+                datasetSearchExtensionBg: data.dataset.datasetSearchExtensionBg,
+                [NodeInputKeyEnum.authTmbId]: data.dataset.authTmbId
               })
             },
             // agent sandbox
@@ -267,7 +353,14 @@ export function agentForm2AppWorkflow(
                     renderTypeList: [FlowNodeInputTypeEnum.hidden],
                     label: '',
                     valueType: WorkflowIOValueTypeEnum.arrayObject,
-                    value: data.selectedAgentSkills
+                    value: data.selectedAgentSkills.map(
+                      ({ skillId, name, description, avatar }) => ({
+                        skillId,
+                        name,
+                        description,
+                        ...(avatar === undefined ? {} : { avatar })
+                      })
+                    )
                   }
                 ]
               : [])
@@ -291,7 +384,7 @@ export function agentForm2AppWorkflow(
   return {
     nodes: [systemConfigTemplate(), workflowStartTemplate(), ...workflow.nodes],
     edges: workflow.edges,
-    chatConfig: data.chatConfig
+    chatConfig
   };
 }
 
@@ -303,7 +396,8 @@ export const getEmptyAgentConfig = (t: any) => {
       aiSettings: {
         model: '',
         maxHistories: 6,
-        isResponseAnswerText: true
+        isResponseAnswerText: true,
+        aiChatReasoning: true
       },
       dataset: {
         ...defaultAppForm.dataset,
@@ -338,7 +432,7 @@ export const loadGeneratedTools = async ({
         }
 
         // 新工具，需要与已配置的 tool 进行 input 合并
-        const tool = await getToolPreviewNode({ appId: toolId });
+        const tool = await getClientToolPreviewNode({ appId: toolId, versionId: '' });
         // 验证工具配置
         const toolValid = validateToolConfiguration({
           toolTemplate: tool,

@@ -1,6 +1,6 @@
 import { type ChatBoxInputFormType } from '@/components/core/chat/ChatContainer/ChatBox/type';
 import { PluginRunBoxTabEnum } from '@/components/core/chat/ChatContainer/PluginRunBox/constants';
-import React, { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { type ReactNode, useCallback, useMemo, useRef, useState } from 'react';
 import { createContext } from 'use-context-selector';
 import { type ComponentRef as ChatComponentRef } from '@/components/core/chat/ChatContainer/ChatBox/type';
 import { useForm, type UseFormReturn } from 'react-hook-form';
@@ -8,7 +8,7 @@ import { defaultChatData } from '@/global/core/chat/constants';
 import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
 import { type AppChatConfigType, type VariableItemType } from '@fastgpt/global/core/app/type';
 import { type FlowNodeInputItemType } from '@fastgpt/global/core/workflow/type/io';
-import { type SearchDataResponseItemType } from '@fastgpt/global/core/dataset/type';
+import { type SearchDataResponseQuoteListItemType } from '@fastgpt/global/core/dataset/type';
 import { type OutLinkChatAuthProps } from '@fastgpt/global/support/permission/chat';
 import type { ChatGenerateStatusEnum } from '@fastgpt/global/core/chat/constants';
 
@@ -20,7 +20,9 @@ type ContextProps = {
   showRunningStatus: boolean;
   showSkillReferences: boolean;
   showWholeResponse: boolean;
+  showPoints?: boolean;
   showAvatar?: boolean;
+  showSandboxAction?: boolean;
 };
 type ChatBoxDataType = {
   chatId?: string;
@@ -40,6 +42,7 @@ type ChatBoxDataType = {
     type: AppTypeEnum;
     pluginInputs: FlowNodeInputItemType[];
     chatModels?: string[];
+    useAgentSandbox?: boolean;
   };
 };
 
@@ -64,7 +67,7 @@ export type GetAllQuoteDataProps = GetQuoteDataBasicProps & {
 };
 export type GetQuoteProps = GetAllQuoteDataProps | GetCollectionQuoteDataProps;
 export type QuoteDataType = {
-  rawSearch: SearchDataResponseItemType[];
+  rawSearch: SearchDataResponseQuoteListItemType[];
   metadata: GetQuoteProps;
 };
 export type OnOpenCiteModalProps = {
@@ -93,6 +96,7 @@ type ChatItemContextType = {
   setCiteModalData: React.Dispatch<React.SetStateAction<QuoteDataType | undefined>>;
   isVariableVisible: boolean;
   setIsVariableVisible: React.Dispatch<React.SetStateAction<boolean>>;
+  resetUIState: () => void;
 } & ContextProps;
 
 export const ChatItemContext = createContext<ChatItemContextType>({
@@ -103,6 +107,8 @@ export const ChatItemContext = createContext<ChatItemContextType>({
   showRunningStatus: true,
   showSkillReferences: true,
   showWholeResponse: true,
+  showPoints: false,
+  showSandboxAction: true,
   ChatBoxRef: null,
   // @ts-ignore
   variablesForm: undefined,
@@ -127,10 +133,13 @@ export const ChatItemContext = createContext<ChatItemContextType>({
   isVariableVisible: true,
   setIsVariableVisible: function (value: React.SetStateAction<boolean>): void {
     throw new Error('Function not implemented.');
+  },
+  resetUIState: function (): void {
+    throw new Error('Function not implemented.');
   }
 });
 
-/* 
+/*
     Chat 对象的上下文
 */
 const ChatItemContextProvider = ({
@@ -142,7 +151,9 @@ const ChatItemContextProvider = ({
   showRunningStatus,
   showSkillReferences,
   showWholeResponse,
-  showAvatar = true
+  showPoints = false,
+  showAvatar = true,
+  showSandboxAction = true
 }: {
   children: ReactNode;
 } & ContextProps) => {
@@ -185,23 +196,32 @@ const ChatItemContextProvider = ({
     [variablesForm]
   );
 
+  const [datasetCiteData, setCiteModalData] = useState<QuoteDataType>();
+
+  const resetUIState = useCallback(() => {
+    setCiteModalData(undefined);
+    setIsVariableVisible(true);
+    setPluginRunTab(PluginRunBoxTabEnum.input);
+  }, []);
+
   const clearChatRecords = useCallback(() => {
     const variables = chatBoxData?.app?.chatConfig?.variables || [];
     const values = variablesForm.getValues();
+    const nextVariables: Record<string, any> = {};
 
     variables.forEach((item) => {
-      if (item.defaultValue !== undefined) {
-        values.variables[item.key] = item.defaultValue;
-      } else {
-        values.variables[item.key] = '';
-      }
+      nextVariables[item.key] = item.defaultValue ?? '';
     });
-    variablesForm.reset(values);
+    variablesForm.reset({
+      ...values,
+      variables: nextVariables,
+      chatStarted: false
+    });
 
+    resetUIState();
     ChatBoxRef.current?.restartChat?.();
-  }, [chatBoxData?.app?.chatConfig?.variables, variablesForm]);
-
-  const [datasetCiteData, setCiteModalData] = useState<QuoteDataType>();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatBoxData?.app?.chatConfig?.variables, resetUIState]);
 
   const contextValue = useMemo(() => {
     return {
@@ -221,12 +241,15 @@ const ChatItemContextProvider = ({
       showRunningStatus,
       showSkillReferences,
       showWholeResponse,
+      showPoints,
       showAvatar,
+      showSandboxAction,
 
       datasetCiteData,
       setCiteModalData,
       isVariableVisible,
-      setIsVariableVisible
+      setIsVariableVisible,
+      resetUIState
     };
   }, [
     chatBoxData,
@@ -242,11 +265,14 @@ const ChatItemContextProvider = ({
     showSkillReferences,
     isShowFullText,
     showWholeResponse,
+    showPoints,
     showAvatar,
+    showSandboxAction,
     datasetCiteData,
     setCiteModalData,
     isVariableVisible,
-    setIsVariableVisible
+    setIsVariableVisible,
+    resetUIState
   ]);
 
   return <ChatItemContext.Provider value={contextValue}>{children}</ChatItemContext.Provider>;

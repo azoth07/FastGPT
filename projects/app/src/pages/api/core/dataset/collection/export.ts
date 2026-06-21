@@ -15,10 +15,11 @@ import { sanitizeCsvField } from '@fastgpt/service/common/file/csv';
 import { replaceS3KeyToPreviewUrl } from '@fastgpt/service/core/dataset/utils';
 import { addDays } from 'date-fns';
 import { ExportCollectionBodySchema } from '@fastgpt/global/openapi/core/dataset/collection/api';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 const logger = getLogger(LogCategories.MODULE.DATASET.COLLECTION);
 
 async function handler(req: ApiRequestProps, res: NextApiResponse) {
-  const parseBody = ExportCollectionBodySchema.parse(req.body);
+  const parseBody = parseApiInput({ req, bodySchema: ExportCollectionBodySchema }).body;
   const collectionId = parseBody.collectionId;
 
   const {
@@ -40,8 +41,7 @@ async function handler(req: ApiRequestProps, res: NextApiResponse) {
       };
     }
 
-    const { appId, chatId, chatItemDataId, shareId, outLinkUid, teamId, teamToken, chatTime } =
-      parseBody;
+    const { appId, chatId, shareId, outLinkUid, teamId, teamToken, chatTime } = parseBody;
     /*
       1. auth chat read permission
       2. auth collection quote in chat
@@ -59,7 +59,7 @@ async function handler(req: ApiRequestProps, res: NextApiResponse) {
         teamToken
       }),
       getCollectionWithDataset(collectionId),
-      authCollectionInChat({ appId, chatId, chatItemDataId, collectionIds: [collectionId] })
+      authCollectionInChat({ appId, chatId, collectionIds: [collectionId] })
     ]);
 
     if (!authRes.canDownloadSource) {

@@ -22,6 +22,7 @@ import MyDivider from '../MyDivider';
 import { shadowLight } from '../../../styles/theme';
 import { useMemoEnhance } from '../../../hooks/useMemoEnhance';
 import MyLoading from '../MyLoading';
+import { selectSizeStyleMap, type MySelectSize } from './styles';
 
 const menuItemStyles: MenuItemProps = {
   borderRadius: 'sm',
@@ -33,6 +34,36 @@ const menuItemStyles: MenuItemProps = {
   },
   _notLast: {
     mb: 2
+  }
+};
+
+const selectedTagStyle: FlexProps = {
+  bg: 'white',
+  border: 'base',
+  color: 'myGray.900'
+};
+
+const selectedTagSizeStyleMap: Record<
+  MySelectSize,
+  Pick<FlexProps, 'fontSize' | 'minH' | 'px' | 'py'>
+> = {
+  sm: {
+    fontSize: 'xs',
+    minH: 5,
+    px: 2,
+    py: 0.5
+  },
+  md: {
+    fontSize: 'sm',
+    minH: 6,
+    px: 2.5,
+    py: 1
+  },
+  lg: {
+    fontSize: 'sm',
+    minH: 7,
+    px: 3,
+    py: 1
   }
 };
 
@@ -61,9 +92,10 @@ export type SelectProps<T = any> = {
 
   onOpenFunc?: () => void;
 
+  size?: MySelectSize;
   tagStyle?: FlexProps;
   menuBottomSlot?: React.ReactNode;
-} & Omit<ButtonProps, 'onSelect'>;
+} & Omit<ButtonProps, 'onSelect' | 'size'>;
 
 type SelectedItemType<T> = {
   icon?: string;
@@ -91,6 +123,7 @@ const MultipleSelect = <T = any,>({
 
   onOpenFunc,
 
+  size = 'md',
   tagStyle,
   menuBottomSlot,
   isLoading,
@@ -98,6 +131,7 @@ const MultipleSelect = <T = any,>({
 }: SelectProps<T>) => {
   const SearchInputRef = useRef<HTMLInputElement>(null);
   const tagsContainerRef = useRef<HTMLDivElement>(null);
+  void itemWrap;
 
   const { t } = useTranslation();
   const { isOpen, onOpen: originalOnOpen, onClose } = useDisclosure();
@@ -122,6 +156,23 @@ const MultipleSelect = <T = any,>({
       return listItem || { value: val, label: String(val) };
     });
   }, [formatValue, list]);
+  const selectedTagSizeStyle = selectedTagSizeStyleMap[size];
+  const tagWidth = tagStyle?.w;
+  const canInferSelectAll = !ScrollData && (isSelectAll !== undefined || !!setIsSelectAll);
+  const isFullSelected = useMemo(() => {
+    if (list.length === 0 || formatValue.length !== list.length) return false;
+
+    return list.every((item) => formatValue.includes(item.value));
+  }, [formatValue, list]);
+  const isAllSelected = !!isSelectAll || (canInferSelectAll && isFullSelected);
+  const openedMenuButtonStyle: Pick<ButtonProps, 'bg' | 'borderColor' | 'boxShadow'> =
+    isOpen && !isDisabled
+      ? {
+          boxShadow: shadowLight,
+          borderColor: 'primary.600 !important',
+          bg: 'white'
+        }
+      : {};
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -141,26 +192,31 @@ const MultipleSelect = <T = any,>({
 
   const onclickItem = useCallback(
     (val: T) => {
-      if (isSelectAll) {
+      if (isAllSelected) {
         onSelect(list.map((item) => item.value).filter((i) => i !== val));
         setIsSelectAll?.(false);
         return;
       }
 
-      if (formatValue.includes(val)) {
-        onSelect(formatValue.filter((i) => i !== val));
-      } else {
-        onSelect([...formatValue, val]);
-      }
+      const nextValue = formatValue.includes(val)
+        ? formatValue.filter((i) => i !== val)
+        : [...formatValue, val];
+      onSelect(nextValue);
+      setIsSelectAll?.(
+        !ScrollData &&
+          list.length > 0 &&
+          nextValue.length === list.length &&
+          list.every((item) => nextValue.includes(item.value))
+      );
     },
-    [isSelectAll, formatValue, onSelect, list, setIsSelectAll]
+    [isAllSelected, formatValue, onSelect, setIsSelectAll, ScrollData, list]
   );
 
   const onSelectAll = useCallback(() => {
-    onSelect(isSelectAll ? [] : list.map((item) => item.value));
+    onSelect(isAllSelected ? [] : list.map((item) => item.value));
 
-    setIsSelectAll?.((state) => !state);
-  }, [isSelectAll, onSelect, list, setIsSelectAll]);
+    setIsSelectAll?.(!isAllSelected);
+  }, [isAllSelected, onSelect, list, setIsSelectAll]);
 
   // 动态长度计算器 - 计算一行能展示多少个tag，剩余用+n表示
   const calculateLayout = useCallback(() => {
@@ -188,15 +244,15 @@ const MultipleSelect = <T = any,>({
     // 创建临时元素来测量每个tag的实际宽度
     const measureTagWidth = (item: any): number => {
       // 如果有tagStyle.w，优先使用
-      if (tagStyle?.w) {
-        return typeof tagStyle.w === 'number' ? tagStyle.w : parseInt(String(tagStyle.w)) || 60;
+      if (tagWidth) {
+        return typeof tagWidth === 'number' ? tagWidth : parseInt(String(tagWidth)) || 60;
       }
 
       // 否则根据文本长度估算（更精确）
       const text = String(item.label || item.value);
-      const baseWidth = 16; // 基础padding
-      const charWidth = 8; // 每个字符约8px
-      const closeIconWidth = closeable ? 20 : 0; // 关闭按钮宽度
+      const baseWidth = size === 'sm' ? 16 : size === 'md' ? 20 : 24; // 基础padding
+      const charWidth = size === 'sm' ? 7.5 : 8; // 每个字符约8px
+      const closeIconWidth = closeable ? 22 : 0; // 关闭按钮宽度
 
       return baseWidth + text.length * charWidth + closeIconWidth;
     };
@@ -239,20 +295,18 @@ const MultipleSelect = <T = any,>({
 
     setVisibleItems(selectedItems.slice(0, visibleCount));
     setOverflowItems(selectedItems.slice(visibleCount));
-  }, [closeable, formLabel, selectedItems, tagStyle?.w]);
+  }, [closeable, formLabel, selectedItems, size, tagWidth]);
 
   // 动态监听容器宽度变化并重新计算布局
   useEffect(() => {
     if (!tagsContainerRef.current) return;
 
     // 创建 ResizeObserver 监听容器宽度变化
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        // 当容器宽度发生变化时，触发重新计算
-        requestAnimationFrame(() => {
-          calculateLayout();
-        });
-      }
+    const resizeObserver = new ResizeObserver(() => {
+      // 当容器宽度发生变化时，触发重新计算
+      requestAnimationFrame(() => {
+        calculateLayout();
+      });
     });
 
     // 开始监听容器
@@ -280,17 +334,10 @@ const MultipleSelect = <T = any,>({
     return (
       <>
         {list.map((item, i) => {
-          const isSelected = isSelectAll || formatValue.includes(item.value);
+          const isSelected = isAllSelected || formatValue.includes(item.value);
           return (
             <MenuItem
               key={i}
-              {...(isSelected
-                ? {
-                    color: 'primary.600'
-                  }
-                : {
-                    color: 'myGray.900'
-                  })}
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
@@ -300,6 +347,7 @@ const MultipleSelect = <T = any,>({
               fontSize={'sm'}
               gap={2}
               {...menuItemStyles}
+              color={isSelected ? 'primary.600' : 'myGray.900'}
             >
               <Checkbox isChecked={isSelected} />
               {item.icon && <MyAvatar src={item.icon} w={'1rem'} borderRadius={'0'} />}
@@ -309,7 +357,7 @@ const MultipleSelect = <T = any,>({
         })}
       </>
     );
-  }, [list, isSelectAll, formatValue, onclickItem]);
+  }, [list, isAllSelected, formatValue, onclickItem]);
 
   return (
     <Box h={'100%'} w={'100%'}>
@@ -326,8 +374,9 @@ const MultipleSelect = <T = any,>({
           as={Flex}
           px={3}
           alignItems={'center'}
-          borderRadius={'md'}
-          border={'sm'}
+          {...selectSizeStyleMap[size]}
+          border={'1px solid'}
+          borderColor={'borderColor.low'}
           userSelect={'none'}
           cursor={isDisabled ? 'not-allowed' : 'pointer'}
           _active={{
@@ -338,13 +387,7 @@ const MultipleSelect = <T = any,>({
           }}
           opacity={isDisabled ? 0.6 : 1}
           {...props}
-          {...(isOpen && !isDisabled
-            ? {
-                boxShadow: shadowLight,
-                borderColor: 'primary.600 !important',
-                bg: 'white'
-              }
-            : {})}
+          {...openedMenuButtonStyle}
         >
           <Flex alignItems={'center'} w={'100%'} h={'100%'} py={1.5}>
             {formLabel && (
@@ -369,7 +412,7 @@ const MultipleSelect = <T = any,>({
                 alignItems={'center'}
               >
                 {(!isOpen || !canInput) &&
-                  (isSelectAll ? (
+                  (isAllSelected ? (
                     <Box fontSize={formLabelFontSize} color={'myGray.900'}>
                       {t('common:All')}
                     </Box>
@@ -382,10 +425,10 @@ const MultipleSelect = <T = any,>({
                           bg={'primary.100'}
                           color={'primary.700'}
                           type={'fill'}
-                          borderRadius={'lg'}
-                          px={2}
-                          py={0.5}
+                          borderRadius={'sm'}
+                          {...selectedTagSizeStyle}
                           flexShrink={0}
+                          {...selectedTagStyle}
                           {...tagStyle}
                         >
                           {item.label}
@@ -409,9 +452,9 @@ const MultipleSelect = <T = any,>({
                       ))}
                       {overflowItems.length > 0 && (
                         <Box
-                          fontSize={formLabelFontSize}
-                          px={2}
-                          py={0.5}
+                          {...selectedTagSizeStyle}
+                          display={'flex'}
+                          alignItems={'center'}
                           flexShrink={0}
                           borderRadius={'lg'}
                           bg={'myGray.100'}
@@ -460,7 +503,6 @@ const MultipleSelect = <T = any,>({
           {setIsSelectAll && (
             <>
               <MenuItem
-                color={isSelectAll ? 'primary.600' : 'myGray.900'}
                 onClick={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
@@ -471,8 +513,9 @@ const MultipleSelect = <T = any,>({
                 gap={2}
                 mb={1}
                 {...menuItemStyles}
+                color={isAllSelected ? 'primary.600' : 'myGray.900'}
               >
-                <Checkbox isChecked={isSelectAll} />
+                <Checkbox isChecked={isAllSelected} />
                 <Box flex={'1 0 0'}>{t('common:All')}</Box>
               </MenuItem>
 

@@ -53,7 +53,8 @@ const pcUnShowLayoutRoute: Record<string, boolean> = {
   '/app/edit': true,
   '/chat': true,
   '/tools/price': true,
-  '/price': true
+  '/price': true,
+  '/skill/detail': true
 };
 const phoneUnShowLayoutRoute: Record<string, boolean> = {
   '/': true,
@@ -63,7 +64,8 @@ const phoneUnShowLayoutRoute: Record<string, boolean> = {
   '/chat': true,
   '/chat/share': true,
   '/tools/price': true,
-  '/price': true
+  '/price': true,
+  '/skill/detail': true
 };
 
 export const navbarWidth = '64px';
@@ -76,7 +78,7 @@ const Layout = ({ children }: { children: JSX.Element }) => {
   const { setLastRoute, loading, feConfigs, llmModelList, embeddingModelList } = useSystemStore();
   const { isPc } = useSystem();
   const { userInfo, isUpdateNotification, setIsUpdateNotification } = useUserStore();
-  const { setUserDefaultLng } = useI18nLng();
+  const { setUserDefaultLng, setShareDefaultLng } = useI18nLng();
 
   // Auto redeem coupon
   useCheckCoupon();
@@ -103,6 +105,11 @@ const Layout = ({ children }: { children: JSX.Element }) => {
     !!userInfo?.team.permission.isOwner;
 
   useMount(() => {
+    if (router.pathname === '/chat/share') {
+      setShareDefaultLng();
+      return;
+    }
+
     setUserDefaultLng();
   });
 

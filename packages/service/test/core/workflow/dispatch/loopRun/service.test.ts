@@ -5,17 +5,17 @@ import {
 } from '@fastgpt/global/core/workflow/node/constant';
 import { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
 import { LoopRunModeEnum } from '@fastgpt/global/core/workflow/template/system/loopRun/loopRun';
-import type { RuntimeNodeItemType } from '@fastgpt/global/core/workflow/runtime/type';
+import type {
+  RuntimeNodeItemType,
+  WorkflowVariableStateLike
+} from '@fastgpt/global/core/workflow/runtime/type';
 import type {
   FlowNodeInputItemType,
   FlowNodeOutputItemType
 } from '@fastgpt/global/core/workflow/type/io';
-import type { ChatHistoryItemResType } from '@fastgpt/global/core/chat/type';
 import {
-  extractFinishedNodeIds,
   hasLoopRunBreakChild,
   injectLoopRunStart,
-  isLoopBreakHit,
   pickCustomOutputInputs,
   readCustomOutputSnapshot
 } from '@fastgpt/service/core/workflow/dispatch/loopRun/service';
@@ -57,13 +57,17 @@ const makeNode = (
   }))
 });
 
-const makeResponse = (override: Partial<ChatHistoryItemResType>): ChatHistoryItemResType =>
-  ({
-    nodeId: 'n',
-    moduleType: FlowNodeTypeEnum.chatNode,
-    moduleName: 'n',
-    ...override
-  }) as ChatHistoryItemResType;
+const makeVariableState = (variables: Record<string, unknown> = {}): WorkflowVariableStateLike => ({
+  get: (key: string) => variables[key],
+  set: async (key: string, value: unknown) => {
+    variables[key] = value;
+    return value;
+  },
+  getStoreValue: (key: string) => variables[key],
+  getFileStoreValueByRuntimeUrl: () => undefined,
+  toRuntimeRecord: () => ({ ...variables }),
+  toStoreRecord: () => ({ ...variables })
+});
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -123,22 +127,6 @@ describe('loopRun/service', () => {
     });
   });
 
-  describe('extractFinishedNodeIds', () => {
-    it('把 flowResponses 里带 nodeId 的项汇总到 Set', () => {
-      const responses = [
-        makeResponse({ nodeId: 'n1' }),
-        makeResponse({ nodeId: 'n2' }),
-        makeResponse({ nodeId: 'n1' }) // 重复
-      ];
-      const result = extractFinishedNodeIds(responses);
-      expect(result).toEqual(new Set(['n1', 'n2']));
-    });
-
-    it('空数组返回空 Set', () => {
-      expect(extractFinishedNodeIds([])).toEqual(new Set());
-    });
-  });
-
   describe('readCustomOutputSnapshot', () => {
     const nodeA = makeNode('A', FlowNodeTypeEnum.chatNode, {
       outputs: [{ id: 'outA', key: 'outA', value: 'valueFromA' }]
@@ -155,7 +143,7 @@ describe('loopRun/service', () => {
       const snapshot = readCustomOutputSnapshot({
         customOutputInputs,
         runtimeNodes: [nodeA, nodeB],
-        variables: {}
+        variableState: makeVariableState()
       });
       expect(snapshot).toEqual({ a: 'valueFromA', b: 'valueFromB' });
     });
@@ -168,7 +156,7 @@ describe('loopRun/service', () => {
       const snapshot = readCustomOutputSnapshot({
         customOutputInputs,
         runtimeNodes: [nodeA, nodeB],
-        variables: {},
+        variableState: makeVariableState(),
         finishedNodeIds: new Set(['A']) // 只有 A 跑过
       });
       expect(snapshot).toEqual({ a: 'valueFromA', b: undefined });
@@ -181,7 +169,7 @@ describe('loopRun/service', () => {
       const snapshot = readCustomOutputSnapshot({
         customOutputInputs,
         runtimeNodes: [nodeA],
-        variables: {},
+        variableState: makeVariableState(),
         finishedNodeIds: new Set()
       });
       expect(snapshot).toEqual({ a: undefined });
@@ -194,7 +182,7 @@ describe('loopRun/service', () => {
       const snapshot = readCustomOutputSnapshot({
         customOutputInputs,
         runtimeNodes: [],
-        variables: { globalKey: 'globalValue' },
+        variableState: makeVariableState({ globalKey: 'globalValue' }),
         finishedNodeIds: new Set()
       });
       expect(snapshot).toEqual({ g: 'globalValue' });
@@ -204,7 +192,7 @@ describe('loopRun/service', () => {
       const snapshot = readCustomOutputSnapshot({
         customOutputInputs: [],
         runtimeNodes: [],
-        variables: {}
+        variableState: makeVariableState()
       });
       expect(snapshot).toEqual({});
     });
@@ -219,7 +207,7 @@ describe('loopRun/service', () => {
       const snapshot = readCustomOutputSnapshot({
         customOutputInputs,
         runtimeNodes: [nodeA, nodeB],
-        variables: {},
+        variableState: makeVariableState(),
         finishedNodeIds: new Set(['B']), // 只有 B（循环体内）跑过
         childrenNodeIdList: ['B'] // A 在循环体外
       });
@@ -234,7 +222,7 @@ describe('loopRun/service', () => {
       const snapshot = readCustomOutputSnapshot({
         customOutputInputs,
         runtimeNodes: [nodeA, nodeB],
-        variables: {},
+        variableState: makeVariableState(),
         finishedNodeIds: new Set(['B']),
         childrenNodeIdList: ['A', 'B'] // 都在循环体内，A 本轮未跑
       });
@@ -335,24 +323,6 @@ describe('loopRun/service', () => {
     it('空 childrenNodeIdList → false', () => {
       const nodes = [makeNode('break1', FlowNodeTypeEnum.loopRunBreak)];
       expect(hasLoopRunBreakChild(nodes, [])).toBe(false);
-    });
-  });
-
-  describe('isLoopBreakHit', () => {
-    it('含 loopRunBreak moduleType 响应 → true', () => {
-      const responses = [
-        makeResponse({ moduleType: FlowNodeTypeEnum.chatNode }),
-        makeResponse({ moduleType: FlowNodeTypeEnum.loopRunBreak })
-      ];
-      expect(isLoopBreakHit(responses)).toBe(true);
-    });
-
-    it('无 loopRunBreak → false', () => {
-      expect(isLoopBreakHit([makeResponse({ moduleType: FlowNodeTypeEnum.chatNode })])).toBe(false);
-    });
-
-    it('空数组 → false', () => {
-      expect(isLoopBreakHit([])).toBe(false);
     });
   });
 });

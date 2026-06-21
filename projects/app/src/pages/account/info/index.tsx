@@ -321,7 +321,7 @@ const MyInfo = ({ onOpenContact }: { onOpenContact: () => void }) => {
                 try {
                   await putUpdateMemberName(val);
                   initUserInfo();
-                } catch (error) {}
+                } catch {}
               }}
             />
           </Flex>
@@ -755,7 +755,7 @@ const Other = ({ onOpenContact }: { onOpenContact: () => void }) => {
       <Grid gridGap={4}>
         {feConfigs?.docUrl && (
           <Link
-            href={getDocPath('/introduction')}
+            href={getDocPath('/guide/getting-started')}
             target="_blank"
             textDecoration={'none !important'}
             {...ButtonStyles}

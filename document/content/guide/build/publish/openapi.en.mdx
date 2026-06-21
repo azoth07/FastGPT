@@ -1,0 +1,40 @@
+---
+title: Access App via API
+description: Access FastGPT app via API
+---
+
+import { Alert } from '@/components/docs/Alert';
+
+In FastGPT, the API entry under Publish Channels only creates **App API Keys**. App API Keys are isolated by app: each key belongs to the current app only and can only access that app's chat endpoint.
+
+If you need to call general OpenAPI endpoints such as Knowledge Base or app management APIs, or use `authProxy` in `chat/completions` to proxy a team member identity, create a **Global API Key** in account settings. For the full distinction, [see the OpenAPI Introduction](../../../openapi/intro.en.mdx).
+
+## Get an App API Key
+
+Go to App -> "Publish Channels" -> "API", then click "New" to create a key.
+
+<Alert context="warning">
+  App API Keys can only access the current app. Keep your key safe. To copy it again later, use the
+  copy button in this app's API publish channel list.
+</Alert>
+
+![](/imgs/fastgpt-api1.jpg)
+
+<Alert icon="🍅" context="success">
+  Tip: For security, you can set a quota or expiration time to prevent key abuse.
+</Alert>
+
+## Replace Variables in Third-Party Apps
+
+```bash
+OPENAI_API_BASE_URL: http://localhost:3000/api (replace with your deployed domain)
+OPENAI_API_KEY = the key obtained in the previous step
+```
+
+**[ChatGPT Next Web](https://github.com/Yidadaa/ChatGPT-Next-Web) Example:**
+
+![](/imgs/chatgptnext.png)
+
+**[ChatGPT Web](https://github.com/Chanzhaoyu/chatgpt-web) Example:**
+
+![](/imgs/chatgptweb.png)

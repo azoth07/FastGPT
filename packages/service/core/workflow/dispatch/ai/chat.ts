@@ -10,14 +10,13 @@ import type {
 } from '@fastgpt/global/core/workflow/runtime/type';
 import {
   chats2GPTMessages,
-  chatValue2RuntimePrompt,
   getSystemPrompt_ChatItemType,
   GPTMessages2Chats,
   runtimePrompt2ChatsValue
 } from '@fastgpt/global/core/chat/adapt';
 import { getQuoteTemplate, getQuotePrompt } from '@fastgpt/global/core/ai/prompt/AIChat';
 import type { AIChatNodeProps } from '@fastgpt/global/core/workflow/runtime/type';
-import { replaceVariable } from '@fastgpt/global/common/string/tools';
+import { replaceVariable } from '../../../../common/string/replaceVariable';
 import type { ModuleDispatchProps } from '@fastgpt/global/core/workflow/runtime/type';
 import { getLLMModel } from '../../../ai/model';
 import type { SearchDataResponseItemType } from '@fastgpt/global/core/dataset/type';
@@ -33,7 +32,7 @@ import type { AiChatQuoteRoleType } from '@fastgpt/global/core/workflow/template
 import { parseFileContentFromUrls } from '../../utils/file';
 import { parseUrlToFileType } from '../../utils/context';
 import { formatUserQueryWithFiles } from '../../utils/file';
-import { i18nT } from '../../../../../web/i18n/utils';
+import { i18nT } from '@fastgpt/global/common/i18n/utils';
 import { postTextCensor } from '../../../chat/postTextCensor';
 import { createLLMResponse } from '../../../ai/llm/request';
 import { formatModelChars2Points } from '../../../../support/wallet/usage/utils';
@@ -58,8 +57,7 @@ export type ChatResponse = DispatchNodeResultType<
 
 /* request openai chat */
 export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResponse> => {
-  let {
-    res,
+  const {
     checkIsStopping,
     requestOrigin,
     stream = false,
@@ -67,7 +65,6 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
     externalProvider,
     histories,
     node: { name, version, inputs },
-    query,
     runningUserInfo,
     workflowStreamResponse,
     chatConfig,
@@ -77,14 +74,12 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
       temperature,
       maxToken,
       history = 6,
-      quoteQA,
-      userChatInput = '',
+      userChatInput: rawUserChatInput = '',
       isResponseAnswerText = true,
       systemPrompt = '',
       aiChatQuoteRole = 'system',
       quoteTemplate,
       quotePrompt,
-      aiChatVision,
       aiChatReasoning = true,
       aiChatReasoningEffort,
       aiChatTopP,
@@ -92,9 +87,20 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
       aiChatResponseFormat,
       aiChatJsonSchema,
 
-      fileUrlList: fileLinks // node quote file links
+      quoteQA: rawQuoteQA,
+      aiChatVision: rawAiChatVision,
+      aiChatAudio: rawAiChatAudio,
+      aiChatVideo: rawAiChatVideo,
+      aiChatExtractFiles,
+      fileUrlList: rawFileLinks // node quote file links
     }
   } = props;
+  let quoteQA = rawQuoteQA;
+  let aiChatVision = rawAiChatVision;
+  let aiChatAudio = rawAiChatAudio;
+  let aiChatVideo = rawAiChatVideo;
+  let fileLinks = rawFileLinks;
+  let userChatInput = rawUserChatInput;
 
   const modelConstantsData = getLLMModel(model);
   if (!modelConstantsData) {
@@ -105,6 +111,8 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
 
   try {
     aiChatVision = modelConstantsData.vision && aiChatVision;
+    aiChatAudio = modelConstantsData.audio && aiChatAudio;
+    aiChatVideo = modelConstantsData.video && aiChatVideo;
     // Check fileLinks is reference variable
     const fileUrlInput = inputs.find((item) => item.key === NodeInputKeyEnum.fileUrlList);
     if (!fileUrlInput || !fileUrlInput.value || fileUrlInput.value.length === 0) {
@@ -194,6 +202,9 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
         },
         retainDatasetCite,
         useVision: aiChatVision,
+        useAudio: aiChatAudio,
+        useVideo: aiChatVideo,
+        extractFiles: aiChatExtractFiles,
         requestOrigin
       },
       userKey: externalProvider.openaiAccount,
@@ -228,7 +239,7 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens
     });
-    const points = externalProvider.openaiAccount?.key ? 0 : totalPoints;
+    const points = usage.usedUserOpenAIKey ? 0 : totalPoints;
     props.usagePush([
       {
         moduleName: name,
@@ -282,7 +293,7 @@ export const dispatchChatCompletion = async (props: ChatProps): Promise<ChatResp
         finishReason: finish_reason,
         llmRequestIds: [requestId] // 记录 LLM 请求追踪 ID
       },
-      [DispatchNodeResponseKeyEnum.toolResponses]: answerText
+      [DispatchNodeResponseKeyEnum.toolResponse]: answerText
     };
   } catch (error) {
     return getNodeErrResponse({ error });
@@ -416,7 +427,7 @@ const getChatMessages = async ({
   ];
 
   const messages = await Promise.all(
-    rawUserMessages.map(async (message, index): Promise<ChatItemMiniType> => {
+    rawUserMessages.map(async (message): Promise<ChatItemMiniType> => {
       if (message.obj !== ChatRoleEnum.Human) {
         return message;
       }
@@ -436,6 +447,7 @@ const getChatMessages = async ({
 
           return files.map((file) => ({
             name: file.name,
+            url: file.url,
             content: file.content
           }));
         }

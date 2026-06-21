@@ -1,8 +1,4 @@
-import {
-  replaceVariable,
-  sliceJsonStr,
-  sliceStrStartEnd
-} from '@fastgpt/global/common/string/tools';
+import { sliceStrStartEnd } from '@fastgpt/global/common/string/tools';
 import type {
   AIChatItemValueItemType,
   UserChatItemValueItemType
@@ -13,9 +9,9 @@ import { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
 import type { McpToolDataType } from '@fastgpt/global/core/app/tool/mcpTool/type';
 import type { JSONSchemaInputType } from '@fastgpt/global/core/app/jsonschema';
 import type { ToolNodeItemType } from './toolcall/type';
-import json5 from 'json5';
 import type { ChatCompletionMessageParam } from '@fastgpt/global/core/ai/llm/type';
 import { ChatCompletionRequestMessageRoleEnum } from '@fastgpt/global/core/ai/constants';
+import { replaceVariable } from '../../../../common/string/replaceVariable';
 
 // Assistant process
 export const filterToolResponseToPreview = (response: AIChatItemValueItemType[]) => {
@@ -41,12 +37,12 @@ export const filterMemoryMessages = (messages: ChatCompletionMessageParam[]) => 
   return messages.filter((item) => item.role !== ChatCompletionRequestMessageRoleEnum.System);
 };
 
-export const formatToolResponse = (toolResponses: any) => {
-  if (typeof toolResponses === 'object') {
-    return JSON.stringify(toolResponses, null, 2);
+export const formatToolResponse = (toolResponse: any) => {
+  if (typeof toolResponse === 'object') {
+    return JSON.stringify(toolResponse, null, 2);
   }
 
-  return toolResponses ? String(toolResponses) : 'none';
+  return toolResponse ? String(toolResponse) : 'none';
 };
 
 /*

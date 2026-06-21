@@ -1,4 +1,4 @@
-import { i18nT } from '../../../../web/i18n/utils';
+import { i18nT } from '../../i18n/utils';
 import type { ErrType } from '../errorCode';
 /* team: 500000 */
 export enum TeamErrEnum {
@@ -150,6 +150,10 @@ const teamErr = [
   {
     statusText: TeamErrEnum.datasetFolderAmountNotEnough,
     message: i18nT('common:code_error.team_error.dataset_folder_amount_not_enough')
+  },
+  {
+    statusText: TeamErrEnum.sandboxNotSupport,
+    message: i18nT('common:code_error.team_error.sandbox_not_support')
   }
 ];
 

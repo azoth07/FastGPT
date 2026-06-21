@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/refs */
 import React, { useRef, useCallback, useState, useMemo, useEffect } from 'react';
 import {
   Button,
@@ -230,8 +231,14 @@ export const MultipleRowSelect = ({
               }
             : {})}
         >
-          <Flex alignItems={'center'}>
-            <Box flex="1" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+          <Flex alignItems={'center'} minW={0} overflow={'hidden'}>
+            <Box
+              flex="1 1 0"
+              minW={0}
+              overflow="hidden"
+              textOverflow="ellipsis"
+              whiteSpace="nowrap"
+            >
               {label ?? placeholder}
             </Box>
             <MyIcon name={'core/chat/chevronDown'} w={4} flexShrink={0} color={'myGray.500'} />

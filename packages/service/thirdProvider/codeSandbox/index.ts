@@ -2,6 +2,7 @@ import { SandboxCodeTypeEnum } from '@fastgpt/global/core/workflow/template/syst
 import type { AxiosInstance } from 'axios';
 import { createProxyAxios } from '../../common/api/axios';
 import { getLogger, LogCategories } from '../../common/logger';
+import { serviceEnv } from '../../env';
 const logger = getLogger(LogCategories.MODULE.WORKFLOW.CODE_SANDBOX);
 
 export type SanndboxPackagesResponse = {
@@ -14,12 +15,12 @@ export class CodeSandbox {
   private readonly client: AxiosInstance;
 
   constructor() {
-    const baseUrl = process.env.CODE_SANDBOX_URL || '';
-    const token = process.env.CODE_SANDBOX_TOKEN || '';
+    const baseUrl = serviceEnv.CODE_SANDBOX_URL;
+    const token = serviceEnv.CODE_SANDBOX_TOKEN;
 
     this.client = createProxyAxios(
       {
-        baseURL: `${baseUrl.replace(/\/$/, '')}/sandbox`,
+        baseURL: `${baseUrl}/sandbox`,
         timeout: 180000,
         headers: {
           'Content-Type': 'application/json',
@@ -39,6 +40,10 @@ export class CodeSandbox {
         return response.data;
       },
       (error) => {
+        const message = error?.response?.data?.message;
+        if (typeof message === 'string' && message) {
+          return Promise.reject(new Error(message));
+        }
         return Promise.reject(error);
       }
     );
@@ -52,11 +57,13 @@ export class CodeSandbox {
   async runCode({
     codeType,
     code,
-    variables
+    variables,
+    queueId
   }: {
     codeType: string;
     code: string;
     variables: Record<string, any>;
+    queueId?: string;
   }) {
     const url = (() => {
       if (codeType == SandboxCodeTypeEnum.py) {
@@ -69,7 +76,7 @@ export class CodeSandbox {
     const { data } = await this.client.post<{
       codeReturn: Record<string, any>;
       log: string;
-    }>(url, { code, variables });
+    }>(url, { code, variables, queueId });
 
     return data;
   }

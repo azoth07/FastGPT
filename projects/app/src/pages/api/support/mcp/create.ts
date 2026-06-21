@@ -1,20 +1,18 @@
-import type { ApiRequestProps, ApiResponseType } from '@fastgpt/service/type/next';
+import type { ApiRequestProps } from '@fastgpt/service/type/next';
 import { NextAPI } from '@/service/middleware/entry';
 import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
 import { TeamErrEnum } from '@fastgpt/global/common/error/code/team';
 import { authAppByTmbId } from '@fastgpt/service/support/permission/app/auth';
 import { ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
 import { MongoMcpKey } from '@fastgpt/service/support/mcp/schema';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import {
   McpCreateBodySchema,
   McpCreateResponseSchema,
   type McpCreateResponseType
 } from '@fastgpt/global/openapi/support/mcpServer/api';
 
-async function handler(
-  req: ApiRequestProps,
-  res: ApiResponseType<any>
-): Promise<McpCreateResponseType> {
+async function handler(req: ApiRequestProps): Promise<McpCreateResponseType> {
   const { teamId, tmbId, permission } = await authUserPer({
     req,
     authToken: true,
@@ -25,7 +23,7 @@ async function handler(
     return Promise.reject(TeamErrEnum.unPermission);
   }
 
-  const { name, apps } = McpCreateBodySchema.parse(req.body);
+  const { name, apps } = parseApiInput({ req, bodySchema: McpCreateBodySchema }).body;
 
   // Count mcp length
   const totalMcp = await MongoMcpKey.countDocuments({ teamId });
@@ -61,7 +59,7 @@ async function handler(
     apps: uniqueApps
   });
 
-  return McpCreateResponseSchema.parse({});
+  return McpCreateResponseSchema.parse(undefined);
 }
 
 export default NextAPI(handler);

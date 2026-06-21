@@ -1,19 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
-import { Box, Flex } from '@chakra-ui/react';
+import { Box, Flex, IconButton } from '@chakra-ui/react';
 import { streamFetch } from '@/web/common/api/fetch';
 import SideBar from '@/components/SideBar';
-import { GPTMessages2Chats } from '@fastgpt/global/core/chat/adapt';
 
 import ChatBox from '@/components/core/chat/ChatContainer/ChatBox';
 import type { StartChatFnProps } from '@/components/core/chat/ChatContainer/type';
 
 import PageContainer from '@/components/PageContainer';
-import ChatHeader from '@/pageComponents/chat/ChatHeader';
 import { serviceSideProps } from '@/web/common/i18n/utils';
+import { LANG_KEY, SHARE_LANG_KEY } from '@fastgpt/web/i18n/utils';
 import { useTranslation } from 'next-i18next';
 import { getInitOutLinkChatInfo } from '@/web/core/chat/api';
-import { getChatTitleFromChatMessage } from '@fastgpt/global/core/chat/utils';
 import { MongoOutLink } from '@fastgpt/service/support/outLink/schema';
 import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
 
@@ -32,17 +30,22 @@ import ChatItemContextProvider, { ChatItemContext } from '@/web/core/chat/contex
 import ChatRecordContextProvider, {
   ChatRecordContext
 } from '@/web/core/chat/context/chatRecordContext';
+import { getDisplayHistoryTitle } from '@/web/core/chat/context/historyTitleUtils';
 import { useChatStore } from '@/web/core/chat/context/useChatStore';
 import { ChatSourceEnum } from '@fastgpt/global/core/chat/constants';
-import { useI18nLng } from '@fastgpt/web/hooks/useI18n';
 import { type AppSchemaType } from '@fastgpt/global/core/app/type';
 import ChatQuoteList from '@/pageComponents/chat/ChatQuoteList';
 import { useToast } from '@fastgpt/web/hooks/useToast';
 import { ChatTypeEnum } from '@/components/core/chat/ChatContainer/ChatBox/constants';
-import { ChatSidebarPaneEnum } from '@/pageComponents/chat/constants';
 import ChatHistorySidebar from '@/pageComponents/chat/slider/ChatSliderSidebar';
 import ChatSliderMobileDrawer from '@/pageComponents/chat/slider/ChatSliderMobileDrawer';
 import { useMemoEnhance } from '@fastgpt/web/hooks/useMemoEnhance';
+import ChatLanguageSelector from '@/pageComponents/chat/LanguageSelector';
+import ChatWindowHeader from '@/pageComponents/chat/ChatWindow/ChatWindowHeader';
+import MyIcon from '@fastgpt/web/components/common/Icon';
+import ToolMenu from '@/pageComponents/chat/ToolMenu';
+import { mobileChatHeaderIconButtonStyle } from '@/pageComponents/chat/ChatWindow/headerIconButtonStyle';
+import Avatar from '@fastgpt/web/components/common/Avatar';
 
 const logger = getLogger(LogCategories.MODULE.CHAT.ITEM);
 
@@ -92,27 +95,33 @@ const OutLink = (props: Props) => {
     return Object.fromEntries(Object.entries(customVariables).filter(([_, value]) => value !== ''));
   }, [customVariables]);
 
-  const forbidLoadChat = useContextSelector(ChatContext, (v) => v.forbidLoadChat);
+  const forbidLoadChatRef = useContextSelector(ChatContext, (v) => v.forbidLoadChat);
   const onChangeChatId = useContextSelector(ChatContext, (v) => v.onChangeChatId);
-  const onUpdateHistoryTitle = useContextSelector(ChatContext, (v) => v.onUpdateHistoryTitle);
+  const onOpenSlider = useContextSelector(ChatContext, (v) => v.onOpenSlider);
+  const onCloseSlider = useContextSelector(ChatContext, (v) => v.onCloseSlider);
 
   const resetVariables = useContextSelector(ChatItemContext, (v) => v.resetVariables);
+  const clearChatRecords = useContextSelector(ChatItemContext, (v) => v.clearChatRecords);
   const isPlugin = useContextSelector(ChatItemContext, (v) => v.isPlugin);
+  const chatBoxData = useContextSelector(ChatItemContext, (v) => v.chatBoxData);
   const setChatBoxData = useContextSelector(ChatItemContext, (v) => v.setChatBoxData);
   const datasetCiteData = useContextSelector(ChatItemContext, (v) => v.datasetCiteData);
   const setCiteModalData = useContextSelector(ChatItemContext, (v) => v.setCiteModalData);
   const isShowCite = useContextSelector(ChatItemContext, (v) => v.isShowCite);
 
   const chatRecords = useContextSelector(ChatRecordContext, (v) => v.chatRecords);
-  const totalRecordsCount = useContextSelector(ChatRecordContext, (v) => v.totalRecordsCount);
   const isChatRecordsLoaded = useContextSelector(ChatRecordContext, (v) => v.isChatRecordsLoaded);
+  const chatWindowTitle = getDisplayHistoryTitle({
+    title: chatBoxData.title,
+    fallbackTitle: t('common:core.chat.New Chat')
+  });
 
   const initSign = useRef(false);
   const { data, loading } = useRequest(
     async () => {
       const shareId = outLinkAuthData.shareId;
       const outLinkUid = outLinkAuthData.outLinkUid;
-      if (!outLinkUid || !shareId || forbidLoadChat.current) return;
+      if (!outLinkUid || !shareId || forbidLoadChatRef.current) return;
 
       const res = await getInitOutLinkChatInfo({
         chatId,
@@ -136,10 +145,13 @@ const OutLink = (props: Props) => {
       manual: false,
       refreshDeps: [shareId, outLinkAuthData, chatId],
       onFinally() {
-        forbidLoadChat.current = false;
+        forbidLoadChatRef.current = false;
       }
     }
   );
+  const mobileHeaderAppName = props.appName || data?.app?.name || chatBoxData.app.name;
+  const mobileHeaderAppAvatar = props.appAvatar || data?.app?.avatar || chatBoxData.app.avatar;
+
   useEffect(() => {
     if (initSign.current === false && data && isChatRecordsLoaded) {
       initSign.current = true;
@@ -188,19 +200,10 @@ const OutLink = (props: Props) => {
         abortCtrl: controller
       });
 
-      const newTitle = getChatTitleFromChatMessage(GPTMessages2Chats({ messages: histories })[0]);
-
       // new chat
       if (completionChatId !== chatId) {
         onChangeChatId(completionChatId, true);
       }
-      onUpdateHistoryTitle({ chatId: completionChatId, newTitle });
-
-      // update chat window
-      setChatBoxData((state) => ({
-        ...state,
-        title: newTitle
-      }));
 
       // hook message
       window.top?.postMessage(
@@ -214,7 +217,7 @@ const OutLink = (props: Props) => {
         '*'
       );
 
-      return { responseText, isNewChat: forbidLoadChat.current };
+      return { responseText, isNewChat: forbidLoadChatRef.current };
     },
     [
       chatId,
@@ -222,9 +225,7 @@ const OutLink = (props: Props) => {
       outLinkAuthData,
       isShowCite,
       props.showSkillReferences,
-      onUpdateHistoryTitle,
-      setChatBoxData,
-      forbidLoadChat,
+      forbidLoadChatRef,
       onChangeChatId
     ]
   );
@@ -236,8 +237,18 @@ const OutLink = (props: Props) => {
   });
 
   const RenderHistoryList = useMemo(() => {
+    // 语言入口跟随历史侧栏挂载：PC 放侧栏底部，移动端放抽屉底部且选择后关闭抽屉。
+    const footerSlot = (
+      <Box flexShrink={0} p={3} mt="auto">
+        <ChatLanguageSelector mode="share" onSelected={isPc ? undefined : onCloseSlider} />
+      </Box>
+    );
+
     const Children = (
-      <ChatHistorySidebar menuConfirmButtonText={t('chat:confirm_to_clear_share_chat_history')} />
+      <ChatHistorySidebar
+        menuConfirmButtonText={t('chat:confirm_to_clear_share_chat_history')}
+        footerSlot={footerSlot}
+      />
     );
 
     if (showHistory !== '1') return null;
@@ -248,10 +259,11 @@ const OutLink = (props: Props) => {
       <ChatSliderMobileDrawer
         showHeader={false}
         showFooter={false}
+        footerSlot={footerSlot}
         menuConfirmButtonText={t('common:core.chat.Confirm to clear history')}
       />
     );
-  }, [isPc, datasetCiteData, showHistory, t]);
+  }, [isPc, datasetCiteData, onCloseSlider, showHistory, t]);
 
   return (
     <>
@@ -262,11 +274,22 @@ const OutLink = (props: Props) => {
       />
       <Flex
         h={'full'}
-        gap={4}
+        gap={datasetCiteData ? 0 : 4}
         {...(isEmbed ? { p: '0 !important', borderRadius: '0', boxShadow: 'none' } : { p: [0, 5] })}
       >
         {(!datasetCiteData || isPc) && (
-          <PageContainer flex={'1 0 0'} w={0} p={'0 !important'}>
+          <PageContainer
+            flex={'1 0 0'}
+            w={0}
+            p={'0 !important'}
+            insertProps={
+              datasetCiteData
+                ? {
+                    borderRadius: [0, '16px 0 0 16px']
+                  }
+                : undefined
+            }
+          >
             <Flex h={'100%'} flexDirection={['column', 'row']}>
               {RenderHistoryList}
 
@@ -279,17 +302,86 @@ const OutLink = (props: Props) => {
                 flexDirection={'column'}
               >
                 {/* header */}
-                {showHead === '1' ? (
-                  <ChatHeader
-                    chatSettings={undefined}
-                    pane={ChatSidebarPaneEnum.RECENTLY_USED_APPS}
-                    history={chatRecords}
-                    totalRecordsCount={totalRecordsCount}
-                    showHistory={showHistory === '1'}
-                    reserveSpace={showWorkorder !== undefined}
-                    hideMenu={hideMenu === '1'}
-                  />
-                ) : null}
+                {showHead === '1' &&
+                  (isPc ? (
+                    !isPlugin && (
+                      <ChatWindowHeader
+                        title={chatWindowTitle}
+                        history={chatRecords}
+                        chatType={ChatTypeEnum.share}
+                      />
+                    )
+                  ) : (
+                    <Flex
+                      h="48px"
+                      px={4}
+                      bg="white"
+                      alignItems="center"
+                      justifyContent="space-between"
+                      color="myGray.600"
+                    >
+                      {showHistory === '1' ? (
+                        <IconButton
+                          aria-label="Open history"
+                          icon={
+                            <MyIcon
+                              name="core/chat/sidebar/menu"
+                              w="20px"
+                              h="20px"
+                              color="currentColor"
+                            />
+                          }
+                          variant="unstyled"
+                          {...mobileChatHeaderIconButtonStyle}
+                          onClick={onOpenSlider}
+                        />
+                      ) : (
+                        <Box minW="36px" />
+                      )}
+
+                      <Flex
+                        alignItems="center"
+                        minW={0}
+                        flex="1"
+                        justifyContent="center"
+                        px={3}
+                        gap={2}
+                      >
+                        {!!mobileHeaderAppAvatar && (
+                          <Avatar
+                            src={mobileHeaderAppAvatar}
+                            w="24px"
+                            h="24px"
+                            borderRadius="6px"
+                            flexShrink={0}
+                          />
+                        )}
+                        <Box
+                          minW={0}
+                          fontSize="16px"
+                          fontWeight={500}
+                          color="myGray.900"
+                          overflow="hidden"
+                          whiteSpace="nowrap"
+                          textOverflow="clip"
+                        >
+                          {mobileHeaderAppName}
+                        </Box>
+                      </Flex>
+
+                      {hideMenu === '1' ? (
+                        <Box minW="36px" />
+                      ) : (
+                        <Box minW="36px">
+                          <ToolMenu
+                            history={chatRecords}
+                            reserveSpace={showWorkorder !== undefined}
+                            chatType={ChatTypeEnum.share}
+                          />
+                        </Box>
+                      )}
+                    </Flex>
+                  ))}
                 {/* chat box */}
                 <Box flex={1} bg={'white'}>
                   {isPlugin ? (
@@ -297,7 +389,10 @@ const OutLink = (props: Props) => {
                       appId={appId}
                       chatId={chatId}
                       outLinkAuthData={outLinkAuthData}
-                      onNewChat={() => onChangeChatId(getNanoid())}
+                      onNewChat={() => {
+                        clearChatRecords();
+                        onChangeChatId(getNanoid());
+                      }}
                       onStartChat={startChat}
                     />
                   ) : (
@@ -320,7 +415,17 @@ const OutLink = (props: Props) => {
         )}
 
         {datasetCiteData && (
-          <PageContainer flex={'1 0 0'} w={0} maxW={'560px'} p={'0 !important'}>
+          <PageContainer
+            flex={'1 0 0'}
+            w={0}
+            maxW={'560px'}
+            p={'0 !important'}
+            insertProps={{
+              borderLeft: '1px solid',
+              borderLeftColor: 'myGray.200',
+              borderRadius: [0, '0 16px 16px 0']
+            }}
+          >
             <ChatQuoteList
               rawSearch={datasetCiteData.rawSearch}
               metadata={datasetCiteData.metadata}
@@ -339,7 +444,6 @@ const Render = (props: Props) => {
   const { shareId, authToken, customUid, appId } = props;
   const { localUId, setLocalUId, loaded } = useShareChatStore();
   const { source, chatId, setSource, setAppId, setOutLinkAuthData } = useChatStore();
-  const { setUserDefaultLng } = useI18nLng();
 
   const chatHistoryProviderParams = useMemoEnhance(() => {
     return { shareId, outLinkUid: authToken || customUid || localUId || '' };
@@ -356,7 +460,6 @@ const Render = (props: Props) => {
 
   useMount(() => {
     setSource('share');
-    setUserDefaultLng(true);
   });
 
   // Set default localUId
@@ -455,7 +558,10 @@ export async function getServerSideProps(context: any) {
       shareId: shareId ?? '',
       authToken: authToken ?? '',
       customUid,
-      ...(await serviceSideProps(context, ['file', 'app', 'chat', 'workflow']))
+      ...(await serviceSideProps(context, ['file', 'app', 'chat', 'workflow'], {
+        langCookieKey: SHARE_LANG_KEY,
+        fallbackLangCookieKey: LANG_KEY
+      }))
     }
   };
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   getHandleId,
-  checkInputIsReference,
+  nodeInputIsReference,
   getGuideModule,
   splitGuideModule,
   getAppChatConfig,
@@ -65,14 +65,14 @@ describe('getHandleId', () => {
   });
 });
 
-describe('checkInputIsReference', () => {
+describe('nodeInputIsReference', () => {
   it('should return true when renderTypeList first item is reference', () => {
     const input: FlowNodeInputItemType = {
       key: 'test',
       label: 'Test',
       renderTypeList: [FlowNodeInputTypeEnum.reference]
     };
-    expect(checkInputIsReference(input)).toBe(true);
+    expect(nodeInputIsReference(input)).toBe(true);
   });
 
   it('should return true when selectedTypeIndex points to reference', () => {
@@ -82,7 +82,7 @@ describe('checkInputIsReference', () => {
       renderTypeList: [FlowNodeInputTypeEnum.input, FlowNodeInputTypeEnum.reference],
       selectedTypeIndex: 1
     };
-    expect(checkInputIsReference(input)).toBe(true);
+    expect(nodeInputIsReference(input)).toBe(true);
   });
 
   it('should return false when renderTypeList first item is not reference', () => {
@@ -91,7 +91,7 @@ describe('checkInputIsReference', () => {
       label: 'Test',
       renderTypeList: [FlowNodeInputTypeEnum.input]
     };
-    expect(checkInputIsReference(input)).toBe(false);
+    expect(nodeInputIsReference(input)).toBe(false);
   });
 
   it('should return false when selectedTypeIndex is 0 and first item is not reference', () => {
@@ -101,7 +101,7 @@ describe('checkInputIsReference', () => {
       renderTypeList: [FlowNodeInputTypeEnum.input, FlowNodeInputTypeEnum.reference],
       selectedTypeIndex: 0
     };
-    expect(checkInputIsReference(input)).toBe(false);
+    expect(nodeInputIsReference(input)).toBe(false);
   });
 
   it('should return false when renderTypeList is undefined', () => {
@@ -109,7 +109,7 @@ describe('checkInputIsReference', () => {
       key: 'test',
       label: 'Test'
     } as FlowNodeInputItemType;
-    expect(checkInputIsReference(input)).toBe(false);
+    expect(nodeInputIsReference(input)).toBe(false);
   });
 
   it('should use index 0 when selectedTypeIndex is undefined', () => {
@@ -118,7 +118,17 @@ describe('checkInputIsReference', () => {
       label: 'Test',
       renderTypeList: [FlowNodeInputTypeEnum.reference, FlowNodeInputTypeEnum.input]
     };
-    expect(checkInputIsReference(input)).toBe(true);
+    expect(nodeInputIsReference(input)).toBe(true);
+  });
+
+  it('should treat settingDatasetQuotePrompt as reference', () => {
+    const input: FlowNodeInputItemType = {
+      key: NodeInputKeyEnum.aiChatDatasetQuote,
+      label: 'Dataset quote',
+      renderTypeList: [FlowNodeInputTypeEnum.settingDatasetQuotePrompt],
+      valueType: WorkflowIOValueTypeEnum.datasetQuote
+    };
+    expect(nodeInputIsReference(input)).toBe(true);
   });
 });
 
@@ -735,7 +745,8 @@ describe('appData2FlowNodeIO', () => {
           { key: 'textVar', label: 'Text', type: VariableInputEnum.input, description: '' },
           { key: 'numVar', label: 'Number', type: VariableInputEnum.numberInput, description: '' },
           { key: 'selectVar', label: 'Select', type: VariableInputEnum.select, description: '' },
-          { key: 'switchVar', label: 'Switch', type: VariableInputEnum.switch, description: '' }
+          { key: 'switchVar', label: 'Switch', type: VariableInputEnum.switch, description: '' },
+          { key: 'fileVar', label: 'File', type: VariableInputEnum.file, description: '' }
         ]
       }
     });
@@ -751,6 +762,12 @@ describe('appData2FlowNodeIO', () => {
 
     const switchVar = result.inputs.find((i) => i.key === 'switchVar');
     expect(switchVar?.renderTypeList).toContain(FlowNodeInputTypeEnum.switch);
+
+    const fileVar = result.inputs.find((i) => i.key === 'fileVar');
+    expect(fileVar?.renderTypeList).toEqual([
+      FlowNodeInputTypeEnum.fileSelect,
+      FlowNodeInputTypeEnum.reference
+    ]);
   });
 
   it('should map text input variable with non-string valueType to JSONEditor', () => {

@@ -12,19 +12,23 @@ import { POST } from '@fastgpt/service/common/api/plusRequest';
 import {
   type DeepRagSearchProps,
   type SearchDatasetDataResponse
-} from '@fastgpt/service/core/dataset/search/controller';
+} from '@fastgpt/service/core/dataset/search';
 import { type AuthOpenApiLimitProps } from '@fastgpt/service/support/openapi/auth';
 import type {
   PushUsageItemsProps,
   ConcatUsageProps,
   CreateUsageProps
 } from '@fastgpt/global/support/wallet/usage/api';
-import { getSystemToolTags } from '@fastgpt/service/core/app/tool/api';
 import { isProVersion } from '@fastgpt/service/common/system/constants';
 import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
-import { env } from '@fastgpt/service/env';
+import { hasAgentSandboxConfig, serviceEnv } from '@fastgpt/service/env';
+import { hasAIProxyApiEndpoint } from '@fastgpt/service/thirdProvider/aiproxy/config';
+import { appEnv } from '@/env';
+import { pluginTagList } from '@fastgpt/global/sdk/fastgpt-plugin';
 
 const logger = getLogger(LogCategories.SYSTEM);
+const defaultOpenSourceLoginGuideDocUrl =
+  'https://doc.fastgpt.io/zh-CN/guide/version/cloud/faq#%E8%B4%A6%E5%8F%B7%E7%99%BB%E5%BD%95%E9%97%AE%E9%A2%98';
 
 export const readConfigData = async (name: string) => {
   const splitName = name.split('.');
@@ -40,7 +44,7 @@ export const readConfigData = async (name: string) => {
       return `data/${name}`;
     }
     // Fallback to default production path
-    const envPath = process.env.CONFIG_JSON_PATH || '/app/data';
+    const envPath = appEnv.CONFIG_JSON_PATH || '/app/data';
     return `${envPath}/${name}`;
   })();
 
@@ -125,14 +129,19 @@ const defaultFeConfigs: FastGPTFeConfigsType = {
   limit: {
     exportDatasetLimitMinutes: 0,
     websiteSyncLimitMinuted: 0,
-    workflowParallelRunMaxConcurrency: env.WORKFLOW_PARALLEL_MAX_CONCURRENCY
+    agentSandboxMaxEditDebug: serviceEnv.AGENT_SANDBOX_MAX_EDIT_DEBUG,
+    agentSandboxArchiveMaxBytes: serviceEnv.AGENT_SANDBOX_ARCHIVE_MAX_SIZE * 1024 * 1024,
+    skillSandboxMaxBytes: serviceEnv.AGENT_SANDBOX_SKILL_MAX_SIZE * 1024 * 1024,
+    agentSandboxMaxFileBytes: serviceEnv.AGENT_SANDBOX_MAX_FILE_SIZE * 1024 * 1024,
+    workflowParallelRunMaxConcurrency: serviceEnv.WORKFLOW_PARALLEL_MAX_CONCURRENCY,
+    maxFolderDepth: serviceEnv.MAX_FOLDER_DEPTH
   },
   scripts: [],
   favicon: '/favicon.ico',
 
-  chineseRedirectUrl: process.env.CHINESE_IP_REDIRECT_URL || '',
-  uploadFileMaxSize: Number(process.env.UPLOAD_FILE_MAX_SIZE || 1000),
-  uploadFileMaxAmount: Number(process.env.UPLOAD_FILE_MAX_AMOUNT || 1000)
+  chineseRedirectUrl: appEnv.CHINESE_IP_REDIRECT_URL,
+  uploadFileMaxSize: serviceEnv.UPLOAD_FILE_MAX_SIZE,
+  uploadFileMaxAmount: serviceEnv.UPLOAD_FILE_MAX_AMOUNT
 
 };
 
@@ -158,17 +167,17 @@ export async function initSystemConfig() {
         ...(fastgptConfig.feConfigs?.limit || {})
       },
       isPlus: !!licenseData,
-      hideChatCopyrightSetting: process.env.HIDE_CHAT_COPYRIGHT_SETTING === 'true',
-      show_aiproxy: !!process.env.AIPROXY_API_ENDPOINT,
-      show_coupon: process.env.SHOW_COUPON === 'true',
-      show_discount_coupon: process.env.SHOW_DISCOUNT_COUPON === 'true',
+      hideChatCopyrightSetting: appEnv.HIDE_CHAT_COPYRIGHT_SETTING,
+      show_aiproxy: hasAIProxyApiEndpoint(),
+      show_coupon: appEnv.SHOW_COUPON,
+      show_discount_coupon: appEnv.SHOW_DISCOUNT_COUPON,
       show_dataset_enhance: licenseData?.functions?.datasetEnhance,
       show_batch_eval: licenseData?.functions?.batchEval,
-      show_agent_sandbox: !!env.AGENT_SANDBOX_PROVIDER,
-      show_skill: env.SHOW_SKILL,
-      payFormUrl: process.env.PAY_FORM_URL || '',
+      show_agent_sandbox: hasAgentSandboxConfig(),
+      payFormUrl: appEnv.PAY_FORM_URL || '',
 
-      agentSandboxFree: process.env.AGENT_SANDBOX_FREE_TIP === 'true'
+      agentSandboxFree: appEnv.AGENT_SANDBOX_FREE_TIP,
+      agentSandboxProxyUrl: appEnv.AGENT_SANDBOX_PROXY_URL || ''
     },
     systemEnv: {
       ...fileRes.systemEnv,
@@ -176,6 +185,10 @@ export async function initSystemConfig() {
     },
     subPlans: fastgptConfig.subPlans
   };
+
+  if (!licenseData) {
+    config.feConfigs.loginGuideDocUrl = defaultOpenSourceLoginGuideDocUrl;
+  }
 
   // set config
   initFastGPTConfig(config);
@@ -192,7 +205,7 @@ export async function initSystemConfig() {
 
 export async function initSystemPluginTags() {
   try {
-    const tags = await getSystemToolTags();
+    const tags = pluginTagList;
 
     if (tags.length > 0) {
       const bulkOps = tags.map((tag, index) => ({
@@ -221,14 +234,15 @@ export async function initAppTemplateTypes() {
   try {
     await Promise.all(
       defaultTemplateTypes.map((templateType) => {
-        const { typeOrder, ...rest } = templateType;
-
         return MongoTemplateTypes.updateOne(
           {
             typeId: templateType.typeId
           },
           {
-            $set: rest
+            $set: {
+              typeId: templateType.typeId,
+              typeName: templateType.typeName
+            }
           },
           {
             upsert: true

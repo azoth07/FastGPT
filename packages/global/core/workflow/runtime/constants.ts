@@ -3,6 +3,7 @@ import { FlowNodeInputTypeEnum } from '../node/constant';
 export enum SseResponseEventEnum {
   error = 'error',
   workflowDuration = 'workflowDuration', // workflow duration
+  chatTitle = 'chatTitle', // generated chat title
   answer = 'answer', // animation stream
   fastAnswer = 'fastAnswer', // direct answer text, not animation
   flowNodeStatus = 'flowNodeStatus', // update node status
@@ -19,7 +20,7 @@ export enum SseResponseEventEnum {
 
   // Agent
   plan = 'plan', // plan response
-  stepTitle = 'stepTitle', // step title response
+  planStatus = 'planStatus', // plan lifecycle status
 
   // Sandbox lifecycle
   sandboxStatus = 'sandboxStatus', // sandbox lifecycle phase notification
@@ -52,7 +53,7 @@ export enum DispatchNodeResponseKeyEnum {
   nodeResponse = 'responseData', // run node response
   nodeResponses = 'nodeResponses', // node responses
   childrenResponses = 'childrenResponses', // Some nodes make recursive calls that need to be returned
-  toolResponses = 'toolResponses', // The result is passed back to the tool node for use
+  toolResponse = 'toolResponse', // The result is passed back to the tool node for use
   assistantResponses = 'assistantResponses', // assistant response
   rewriteHistories = 'rewriteHistories', // If have the response, workflow histories will be rewrite
   interactive = 'INTERACTIVE', // is interactive
@@ -71,6 +72,3 @@ export const needReplaceReferenceInputTypeList = [
   FlowNodeInputTypeEnum.addInputParam,
   FlowNodeInputTypeEnum.custom
 ] as string[];
-
-// Interactive
-export const ConfirmPlanAgentText = 'CONFIRM';

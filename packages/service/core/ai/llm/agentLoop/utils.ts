@@ -1,11 +1,6 @@
-import type { ChatCompletionMessageParam } from '@fastgpt/global/core/ai/llm/type';
-
-export const filterEmptyAssistantMessages = (messages: ChatCompletionMessageParam[]) => {
-  return messages.filter((item) => {
-    if (item.role === 'assistant') {
-      if (!item.content) return false;
-      if (item.content.length === 0) return false;
-    }
-    return true;
-  });
-};
+/**
+ * 规范化会写入 LLM tool message 的工具响应。
+ * OpenAI 兼容接口通常不接受空 tool content；undefined 和空字符串统一兜底为 none。
+ */
+export const normalizeToolResponseContent = (response?: string) =>
+  response === '' || response === undefined ? 'none' : response;

@@ -10,11 +10,9 @@ import {
   Switch
 } from '@chakra-ui/react';
 import type { AppFormEditFormType } from '@fastgpt/global/core/app/formEdit/type';
-import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
 
 import dynamic from 'next/dynamic';
-import Avatar from '@fastgpt/web/components/common/Avatar';
 import MyIcon from '@fastgpt/web/components/common/Icon';
 import VariableEdit from '@/components/core/app/VariableEdit';
 import PromptEditor from '@fastgpt/web/components/common/Textarea/PromptEditor';
@@ -32,12 +30,12 @@ import { getWebLLMModel } from '@/web/common/system/utils';
 import ToolSelect from '../FormComponent/ToolSelector/ToolSelect';
 import OptimizerPopover from '@/components/common/PromptEditor/OptimizerPopover';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
-import MyIconButton, { MyDeleteIconButton } from '@fastgpt/web/components/common/Icon/button';
 import { SmallAddIcon } from '@chakra-ui/icons';
-import { SANDBOX_ICON } from '@fastgpt/global/core/ai/sandbox/constants';
+import { SANDBOX_ICON } from '@fastgpt/global/core/ai/sandbox/tools';
 import SandboxTipTag from '../../components/SandboxTipTag';
 import SandboxNotSupportTip from '../../components/SandboxNotSupportTip';
 import { useUserStore } from '@/web/support/user/useUserStore';
+import DatasetCard from '@/components/core/app/DatasetCard';
 
 const DatasetSelectModal = dynamic(() => import('@/components/core/app/DatasetSelectModal'));
 const DatasetParamsModal = dynamic(() => import('@/components/core/app/DatasetParamsModal'));
@@ -69,7 +67,6 @@ const EditForm = ({
   appForm: AppFormEditFormType;
   setAppForm: React.Dispatch<React.SetStateAction<AppFormEditFormType>>;
 }) => {
-  const router = useRouter();
   const { t } = useTranslation();
   const { defaultModels, feConfigs } = useSystemStore();
   const showSandbox = feConfigs.show_agent_sandbox;
@@ -78,6 +75,7 @@ const EditForm = ({
   const { appDetail } = useContextSelector(AppContext, (v) => v);
   const selectDatasets = useMemo(() => appForm?.dataset?.datasets, [appForm]);
   const [, startTst] = useTransition();
+  const isAgentSandboxEnabled = !!appForm.aiSettings.useAgentSandbox;
 
   const {
     isOpen: isOpenDatasetSelect,
@@ -112,27 +110,27 @@ const EditForm = ({
 
   const selectedModel = getWebLLMModel(appForm.aiSettings.model);
   const tokenLimit = useMemo(() => {
-    return selectedModel?.quoteMaxToken || 3000;
-  }, [selectedModel?.quoteMaxToken]);
+    return selectedModel.quoteMaxToken || 3000;
+  }, [selectedModel.quoteMaxToken]);
 
-  // Force close image select when model not support vision
+  // 简易应用不暴露多模态开关，文件选择能力直接跟随模型能力。
   useEffect(() => {
-    if (!selectedModel.vision) {
-      setAppForm((state) => ({
-        ...state,
-        chatConfig: {
-          ...state.chatConfig,
-          ...(state.chatConfig.fileSelectConfig
-            ? {
-                fileSelectConfig: {
-                  ...state.chatConfig.fileSelectConfig,
-                  canSelectImg: false
-                }
+    setAppForm((state) => ({
+      ...state,
+      chatConfig: {
+        ...state.chatConfig,
+        ...(state.chatConfig.fileSelectConfig
+          ? {
+              fileSelectConfig: {
+                ...state.chatConfig.fileSelectConfig,
+                canSelectImg: !!selectedModel.vision,
+                canSelectAudio: !!selectedModel.audio,
+                canSelectVideo: !!selectedModel.video
               }
-            : {})
-        }
-      }));
-    }
+            }
+          : {})
+      }
+    }));
   }, [selectedModel, setAppForm]);
 
   useEffect(() => {
@@ -204,6 +202,7 @@ const EditForm = ({
                   aiChatResponseFormat: appForm.aiSettings.aiChatResponseFormat,
                   aiChatJsonSchema: appForm.aiSettings.aiChatJsonSchema
                 }}
+                showMultimodalConfig={false}
                 onChange={({ maxHistories = 6, ...data }) => {
                   setAppForm((state) => ({
                     ...state,
@@ -261,31 +260,28 @@ const EditForm = ({
               <FormLabel ml={2}>{t('app:use_agent_sandbox')}</FormLabel>
               <QuestionTip ml={1} label={t('app:use_computer_desc')} />
             </Flex>
-            {showSandbox ? (
-              enableSandbox ? (
-                <>
-                  <Box mr={2}>
-                    <SandboxTipTag />
-                  </Box>
-                  <Switch
-                    isChecked={appForm.aiSettings.useAgentSandbox ?? false}
-                    onChange={(e) => {
-                      setAppForm((state) => ({
-                        ...state,
-                        aiSettings: {
-                          ...state.aiSettings,
-                          useAgentSandbox: e.target.checked
-                        }
-                      }));
-                    }}
-                  />
-                </>
+            <Box mr={2}>
+              {showSandbox && enableSandbox ? (
+                <SandboxTipTag />
               ) : (
-                <SandboxNotSupportTip type="freeDisable" />
-              )
-            ) : (
-              <SandboxNotSupportTip type="systemDisable" />
-            )}
+                <SandboxNotSupportTip type={showSandbox ? 'freeDisable' : 'systemDisable'} />
+              )}
+            </Box>
+            <Switch
+              isChecked={isAgentSandboxEnabled}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                if (checked && (!showSandbox || !enableSandbox)) return;
+
+                setAppForm((state) => ({
+                  ...state,
+                  aiSettings: {
+                    ...state.aiSettings,
+                    useAgentSandbox: checked
+                  }
+                }));
+              }}
+            />
           </Flex>
         </Box>
 
@@ -324,6 +320,28 @@ const EditForm = ({
               <MyIcon name={'core/app/simpleMode/dataset'} w={'20px'} />
               <FormLabel ml={2}>{t('app:dataset')}</FormLabel>
             </Flex>
+            {feConfigs?.isPlus && (
+              <Flex alignItems={'center'} mr={2}>
+                <Box fontSize={'sm'} color={'myGray.600'} whiteSpace={'nowrap'}>
+                  {t('workflow:auth_tmb_id')}
+                </Box>
+                <QuestionTip ml={1} label={t('workflow:auth_tmb_id_tip')} />
+                <Switch
+                  ml={2}
+                  size={'sm'}
+                  isChecked={!!appForm.dataset.authTmbId}
+                  onChange={(e) => {
+                    setAppForm((state) => ({
+                      ...state,
+                      dataset: {
+                        ...state.dataset,
+                        authTmbId: e.target.checked
+                      }
+                    }));
+                  }}
+                />
+              </Flex>
+            )}
             <Button
               variant={'transparentBase'}
               leftIcon={<MyIcon name={'edit'} w={'14px'} />}
@@ -359,63 +377,21 @@ const EditForm = ({
             </Box>
           )}
           <Grid gridTemplateColumns={'repeat(2, minmax(0, 1fr))'} gridGap={[2, 4]}>
-            {selectDatasets.map((item) => (
-              <Flex
-                key={item.datasetId}
-                overflow={'hidden'}
-                alignItems={'center'}
-                p={2}
-                bg={'white'}
-                boxShadow={'0 4px 8px -2px rgba(16,24,40,.1),0 2px 4px -2px rgba(16,24,40,.06)'}
-                borderRadius={'md'}
-                border={'base'}
-                _hover={{
-                  '& .controler': {
-                    display: 'flex'
-                  }
-                }}
-              >
-                <Avatar src={item.avatar} w={'1.5rem'} borderRadius={'sm'} />
-                <Box
-                  ml={2}
-                  flex={'1 0 0'}
-                  w={0}
-                  className={'textEllipsis'}
-                  fontSize={'sm'}
-                  color={'myGray.900'}
-                >
-                  {item.name}
-                </Box>
-
-                {/* Icon */}
-                <Box className="controler" display={['flex', 'none']} alignItems={'center'}>
-                  <MyIconButton
-                    icon={'common/viewLight'}
-                    onClick={() =>
-                      router.push({
-                        pathname: '/dataset/detail',
-                        query: {
-                          datasetId: item.datasetId
-                        }
-                      })
+            {selectDatasets.map((dataset) => (
+              <DatasetCard
+                key={dataset.datasetId}
+                dataset={dataset}
+                onDelete={(datasetId) => {
+                  setAppForm((state) => ({
+                    ...state,
+                    dataset: {
+                      ...state.dataset,
+                      datasets:
+                        state.dataset.datasets?.filter((pre) => pre.datasetId !== datasetId) || []
                     }
-                  />
-                  <MyDeleteIconButton
-                    onClick={() => {
-                      setAppForm((state) => ({
-                        ...state,
-                        dataset: {
-                          ...state.dataset,
-                          datasets:
-                            state.dataset.datasets?.filter(
-                              (pre) => pre.datasetId !== item.datasetId
-                            ) || []
-                        }
-                      }));
-                    }}
-                  />
-                </Box>
-              </Flex>
+                  }));
+                }}
+              />
             ))}
           </Grid>
         </Box>
@@ -542,7 +518,8 @@ const EditForm = ({
             datasetId: item.datasetId,
             name: item.name,
             avatar: item.avatar,
-            vectorModel: item.vectorModel
+            vectorModel: item.vectorModel,
+            isDeleted: item.isDeleted
           }))}
           onClose={onCloseDatasetSelect}
           onChange={(e) => {

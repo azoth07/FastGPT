@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   pluginNodes2InputSchema,
   workflow2InputSchema,
@@ -20,13 +20,18 @@ vi.mock('@fastgpt/service/support/mcp/schema', () => ({
   }
 }));
 
-vi.mock('@fastgpt/service/core/app/schema', () => ({
-  MongoApp: {
-    find: vi.fn().mockReturnValue({
-      lean: vi.fn()
-    })
-  }
-}));
+vi.mock('@fastgpt/service/core/app/schema', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@fastgpt/service/core/app/schema')>();
+
+  return {
+    ...actual,
+    MongoApp: {
+      find: vi.fn().mockReturnValue({
+        lean: vi.fn()
+      })
+    }
+  };
+});
 
 vi.mock('@fastgpt/service/support/permission/app/auth', () => ({
   authAppByTmbId: vi.fn()
@@ -46,8 +51,17 @@ vi.mock('@fastgpt/service/core/workflow/dispatch', () => ({
 }));
 
 vi.mock('@fastgpt/service/core/chat/saveChat', () => ({
-  pushChatRecords: vi.fn()
+  finalizeChatRound: vi.fn(),
+  failChatRound: vi.fn()
 }));
+
+vi.mock('@fastgpt/service/core/chat/utils/prepare', () => ({
+  preChatRound: vi.fn()
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe('pluginNodes2InputSchema', () => {
   it('should generate input schema from plugin nodes', () => {
@@ -186,6 +200,52 @@ describe('getMcpServerTools', () => {
 
     const tools = await getMcpServerTools('test-key');
 
+    expect(tools).toHaveLength(1);
+    expect(tools[0].name).toBe('test-tool');
+  });
+
+  it('should use MCP key bindings as runtime tool snapshot', async () => {
+    const mockMcp = {
+      tmbId: 'test-tmb',
+      apps: [
+        {
+          appId: 'test-app',
+          toolName: 'test-tool',
+          description: 'test description'
+        }
+      ]
+    };
+
+    vi.mocked(MongoMcpKey.findOne).mockReturnValue({
+      lean: () => mockMcp
+    });
+
+    vi.mocked(MongoApp.find).mockReturnValue({
+      lean: () => [
+        {
+          _id: 'test-app',
+          name: 'Test App',
+          type: AppTypeEnum.workflowTool
+        }
+      ]
+    });
+
+    vi.mocked(authAppByTmbId).mockRejectedValue(new Error('unAuthApp'));
+
+    vi.mocked(getAppLatestVersion).mockResolvedValue({
+      nodes: [
+        {
+          flowNodeType: FlowNodeTypeEnum.pluginInput,
+          inputs: []
+        }
+      ],
+      edges: [],
+      chatConfig: {}
+    });
+
+    const tools = await getMcpServerTools('test-key');
+
+    expect(authAppByTmbId).not.toHaveBeenCalled();
     expect(tools).toHaveLength(1);
     expect(tools[0].name).toBe('test-tool');
   });

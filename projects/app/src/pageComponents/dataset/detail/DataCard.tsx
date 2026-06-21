@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Box, Card, IconButton, Flex, Button, useTheme, Image } from '@chakra-ui/react';
+import { Box, Card, IconButton, Flex, Button } from '@chakra-ui/react';
 import { getDatasetCollectionById } from '@/web/core/dataset/api/collection';
 import { getDatasetDataList, delOneDatasetDataById } from '@/web/core/dataset/api/data';
 import { useToast } from '@fastgpt/web/hooks/useToast';
@@ -8,7 +8,7 @@ import { useTranslation } from 'next-i18next';
 import { useRouter } from 'next/router';
 import MyIcon from '@fastgpt/web/components/common/Icon';
 import MyInput from '@/components/MyInput';
-import InputDataModal from './InputDataModal';
+import InputDataModal from './components/InputDataModal';
 import RawSourceBox from '@/components/core/dataset/RawSourceBox';
 import { getCollectionSourceData } from '@fastgpt/global/core/dataset/collection/utils';
 import EmptyTip from '@fastgpt/web/components/common/EmptyTip';
@@ -36,6 +36,10 @@ import { formatFileSize } from '@fastgpt/global/common/file/tools';
 import MyImage from '@fastgpt/web/components/common/Image/MyImage';
 import dynamic from 'next/dynamic';
 import { downloadFetch } from '@/web/common/system/utils';
+import {
+  getCollectionTrainingStatusColorSchema,
+  getCollectionTrainingStatusText
+} from '@/web/core/dataset/trainingStatus';
 
 const InsertImagesModal = dynamic(() => import('./data/InsertImageModal'), {
   ssr: false
@@ -101,6 +105,13 @@ const DataCard = () => {
   );
 
   const canWrite = useMemo(() => datasetDetail.permission.hasWritePer, [datasetDetail]);
+  const collectionTrainingStatus = useMemo(() => {
+    if (!collection) return;
+    return {
+      text: getCollectionTrainingStatusText(collection),
+      colorSchema: getCollectionTrainingStatusColorSchema(collection)
+    };
+  }, [collection]);
 
   const [
     isInsertImagesModalOpen,
@@ -175,7 +186,8 @@ const DataCard = () => {
             isDisabled={!collection}
             isLoading={isExportChunksLoading}
             onClick={() => {
-              onExportAllChunks(collection?._id!);
+              if (!collection?._id) return;
+              onExportAllChunks(collection._id);
             }}
           >
             {t('dataset:collection.export_all_chunks')}
@@ -239,21 +251,19 @@ const DataCard = () => {
                 indexAmount: collection?.indexAmount ?? '-'
               })}
             </Box>
-            {!!collection?.errorCount && (
+            {!!collectionTrainingStatus && (
               <MyTag
-                colorSchema={'red'}
                 type={'fill'}
                 cursor={'pointer'}
                 rounded={'full'}
                 ml={2}
+                colorSchema={collectionTrainingStatus.colorSchema}
                 onClick={() => {
-                  setErrorModalId(collection._id);
+                  setErrorModalId(collection?._id || '');
                 }}
               >
                 <Flex fontWeight={'medium'} alignItems={'center'} gap={1}>
-                  {t('dataset:data_error_amount', {
-                    errorAmount: collection?.errorCount
-                  })}
+                  {t(collectionTrainingStatus.text as any)}
                   <MyIcon name={'common/maximize'} w={'11px'} />
                 </Flex>
               </MyTag>
@@ -461,11 +471,11 @@ const DataCard = () => {
           }}
         />
       )}
-      {errorModalId && (
+      {errorModalId && collection && (
         <TrainingStates
-          datasetId={datasetId}
-          defaultTab={'errors'}
+          defaultTab={collection?.hasError ? 'errors' : 'states'}
           collectionId={errorModalId}
+          permission={collection.permission}
           onClose={() => {
             setErrorModalId('');
             refreshList();

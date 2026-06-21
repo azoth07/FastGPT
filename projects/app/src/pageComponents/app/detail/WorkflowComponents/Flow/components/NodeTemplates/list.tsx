@@ -12,7 +12,7 @@ import {
   css
 } from '@chakra-ui/react';
 import { useTranslation } from 'next-i18next';
-import { getToolPreviewNode } from '@/web/core/app/api/tool';
+import { getClientToolPreviewNode } from '@/web/core/app/api/tool';
 import type {
   FlowNodeItemType,
   NodeTemplateListItemType,
@@ -26,7 +26,6 @@ import MyTooltip from '@fastgpt/web/components/common/MyTooltip';
 import CostTooltip from '@/components/core/app/tool/CostTooltip';
 import {
   FlowNodeTypeEnum,
-  AppNodeFlowNodeTypeMap,
   isNestedParentNodeType,
   isInteractiveNodeType
 } from '@fastgpt/global/core/workflow/node/constant';
@@ -81,6 +80,8 @@ const NodeTemplateListItem = ({
   const handleParams = useContextSelector(WorkflowModalContext, (v) => v.handleParams);
   const isToolHandle = handleParams?.handleId === 'selectedTools';
   const isSystemTool = templateType === TemplateTypeEnum.systemTools;
+  const isSystemToolSet = isSystemTool && template.flowNodeType === FlowNodeTypeEnum.toolSet;
+  const showExpandArrow = template.isFolder || isSystemToolSet;
 
   return (
     <MyTooltip
@@ -178,8 +179,7 @@ const NodeTemplateListItem = ({
             {t(template.name as any)}
           </Box>
         </Box>
-        {/* Folder right arrow */}
-        {template.isFolder && (
+        {showExpandArrow && (
           <Box
             color={'myGray.500'}
             _hover={{
@@ -220,14 +220,11 @@ const NodeTemplateList = ({
   onUpdateParentId
 }: TemplateListProps) => {
   const { t, i18n } = useTranslation();
-  const { feConfigs } = useSystemStore();
   const { toast } = useToast();
   const { computedNewNodeName } = useWorkflowUtils();
   const { getNodeList, getNodeById } = useContextSelector(WorkflowBufferDataContext, (v) => v);
   const handleParams = useContextSelector(WorkflowModalContext, (v) => v.handleParams);
   const { getIntersectingNodes } = useReactFlow();
-
-  const showSkill = !!feConfigs?.show_skill;
 
   const handleAddNode = useCallback(
     async ({
@@ -240,10 +237,25 @@ const NodeTemplateList = ({
       try {
         const templateNode = await (async () => {
           try {
-            if (AppNodeFlowNodeTypeMap[template.flowNodeType]) {
-              const node = await getToolPreviewNode({ appId: template.id });
+            const shouldLoadPreviewNode = [
+              FlowNodeTypeEnum.tool,
+              FlowNodeTypeEnum.toolSet,
+              FlowNodeTypeEnum.appModule,
+              FlowNodeTypeEnum.pluginModule
+            ].includes(template.flowNodeType);
+
+            if (shouldLoadPreviewNode) {
+              const node = await getClientToolPreviewNode({
+                appId: template.id,
+                getLatestVersion: true
+              });
               return {
                 ...node,
+                flowNodeType:
+                  template.flowNodeType === FlowNodeTypeEnum.toolSet
+                    ? FlowNodeTypeEnum.toolSet
+                    : node.flowNodeType,
+                isFolder: template.flowNodeType === FlowNodeTypeEnum.toolSet ? true : node.isFolder,
                 colorSchema: node.colorSchema ?? getColorSchemaByFlowNodeType(node.flowNodeType)
               };
             }
@@ -264,6 +276,7 @@ const NodeTemplateList = ({
 
         const defaultValueMap: Record<string, any> = {
           [NodeInputKeyEnum.userChatInput]: undefined,
+          [NodeInputKeyEnum.datasetSearchInput]: undefined,
           [NodeInputKeyEnum.fileUrlList]: undefined
         };
 
@@ -274,6 +287,10 @@ const NodeTemplateList = ({
               NodeOutputKeyEnum.userChatInput
             ];
             defaultValueMap[NodeInputKeyEnum.fileUrlList] = [
+              [node.nodeId, NodeOutputKeyEnum.userFiles]
+            ];
+            defaultValueMap[NodeInputKeyEnum.datasetSearchInput] = [
+              [node.nodeId, NodeOutputKeyEnum.userChatInput],
               [node.nodeId, NodeOutputKeyEnum.userFiles]
             ];
           }
@@ -413,7 +430,7 @@ const NodeTemplateList = ({
     [
       computedNewNodeName,
       getNodeById,
-      handleParams?.nodeId,
+      handleParams,
       getNodeList,
       getIntersectingNodes,
       onAddNode,
@@ -442,7 +459,7 @@ const NodeTemplateList = ({
         }, {});
 
         templates.forEach((item) => {
-          if (!showSkill && item.flowNodeType === FlowNodeTypeEnum.agent) {
+          if (item.flowNodeType === FlowNodeTypeEnum.agent) {
             return;
           }
           if (item.templateType && map[item.templateType]) {
@@ -488,7 +505,7 @@ const NodeTemplateList = ({
     return data.filter(({ list }) => list.length > 0);
   }, [templateType, templates, t, i18n.language]);
 
-  const NodeListRender = useMemoizedFn(({ list = [] }: { list: NodeTemplateListType }) => {
+  const renderNodeList = useMemoizedFn((list: NodeTemplateListType = []) => {
     return (
       <>
         {list.map((item) => {
@@ -559,14 +576,12 @@ const NodeTemplateList = ({
                   {t(label as any)}
                   <AccordionIcon />
                 </AccordionButton>
-                <AccordionPanel py={0}>
-                  <NodeListRender list={list} />
-                </AccordionPanel>
+                <AccordionPanel py={0}>{renderNodeList(list)}</AccordionPanel>
               </AccordionItem>
             ))}
           </>
         ) : (
-          <NodeListRender list={formatTemplatesArrayData?.[0]?.list} />
+          <>{renderNodeList(formatTemplatesArrayData?.[0]?.list)}</>
         )}
       </Accordion>
     </Box>

@@ -7,16 +7,18 @@ import { ChatCompletionRequestMessageRoleEnum } from '@fastgpt/global/core/ai/co
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // Mock external dependencies
-vi.mock('@fastgpt/service/common/string/tiktoken/index', () => ({
-  countGptMessagesTokens: vi.fn()
-}));
+vi.mock('@fastgpt/service/common/string/tiktoken/index', () => {
+  const countGptMessagesTokens = vi.fn();
+  return {
+    countGptMessagesTokens,
+    countGptMessagesTokensBatch: vi.fn((messageGroups: ChatCompletionMessageParam[][]) =>
+      Promise.all(messageGroups.map((messages) => countGptMessagesTokens({ messages })))
+    )
+  };
+});
 
 vi.mock('@fastgpt/service/common/file/image/utils', () => ({
   getImageBase64: vi.fn()
-}));
-
-vi.mock('@fastgpt/web/i18n/utils', () => ({
-  i18nT: vi.fn((key: string) => key)
 }));
 
 vi.mock('@fastgpt/service/common/system/log', () => ({
@@ -26,25 +28,28 @@ vi.mock('@fastgpt/service/common/system/log', () => ({
   }
 }));
 
-vi.mock('axios', () => ({
-  default: {
-    head: vi.fn()
+vi.mock('@fastgpt/service/common/api/axios', () => ({
+  axios: {
+    head: vi.fn(),
+    get: vi.fn()
   }
 }));
 
 import { countGptMessagesTokens } from '@fastgpt/service/common/string/tiktoken/index';
 import { getImageBase64 } from '@fastgpt/service/common/file/image/utils';
-
-// @ts-ignore
-import axios from 'axios';
+import { serviceEnv } from '@fastgpt/service/env';
+import { axios } from '@fastgpt/service/common/api/axios';
 
 const mockCountGptMessagesTokens = vi.mocked(countGptMessagesTokens);
 const mockGetImageBase64 = vi.mocked(getImageBase64);
 const mockAxiosHead = vi.mocked(axios.head);
+const mockAxiosGet = vi.mocked(axios.get);
+const originalMultipleDataToBase64 = serviceEnv.MULTIPLE_DATA_TO_BASE64;
 
 describe('filterGPTMessageByMaxContext function tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    serviceEnv.MULTIPLE_DATA_TO_BASE64 = originalMultipleDataToBase64;
     mockCountGptMessagesTokens.mockResolvedValue(10);
   });
 
@@ -175,6 +180,103 @@ describe('filterGPTMessageByMaxContext function tests', () => {
       expect(result[1].content).toBe('Large user message');
       expect(result[2].content).toBe('Large assistant response');
     });
+
+    it('should preserve a leading context checkpoint before recent chat messages', async () => {
+      const checkpointMessage: ChatCompletionMessageParam = {
+        role: ChatCompletionRequestMessageRoleEnum.User,
+        content: '<context_checkpoint>old context summary</context_checkpoint>',
+        hideInUI: true
+      };
+      const currentUserMessage: ChatCompletionMessageParam = {
+        role: ChatCompletionRequestMessageRoleEnum.User,
+        content: 'current user request'
+      };
+      const messages: ChatCompletionMessageParam[] = [
+        { role: ChatCompletionRequestMessageRoleEnum.System, content: 'System' },
+        { role: ChatCompletionRequestMessageRoleEnum.Developer, content: 'Developer' },
+        checkpointMessage,
+        { role: ChatCompletionRequestMessageRoleEnum.User, content: 'old user request' },
+        { role: ChatCompletionRequestMessageRoleEnum.Assistant, content: 'old assistant answer' },
+        currentUserMessage
+      ];
+
+      mockCountGptMessagesTokens
+        .mockResolvedValueOnce(30) // system + developer + checkpoint
+        .mockResolvedValueOnce(20) // current user
+        .mockResolvedValueOnce(80); // previous full round exceeds remaining context
+
+      const result = await filterGPTMessageByMaxContext({
+        messages,
+        maxContext: 100
+      });
+
+      expect(result).toEqual([
+        { role: ChatCompletionRequestMessageRoleEnum.System, content: 'System' },
+        { role: ChatCompletionRequestMessageRoleEnum.Developer, content: 'Developer' },
+        checkpointMessage,
+        currentUserMessage
+      ]);
+    });
+
+    it('should not treat visible user text containing checkpoint tags as a context checkpoint', async () => {
+      const visibleCheckpointLikeMessage: ChatCompletionMessageParam = {
+        role: ChatCompletionRequestMessageRoleEnum.User,
+        content: 'please explain <context_checkpoint> as plain text'
+      };
+      const messages: ChatCompletionMessageParam[] = [
+        { role: ChatCompletionRequestMessageRoleEnum.System, content: 'System' },
+        visibleCheckpointLikeMessage,
+        { role: ChatCompletionRequestMessageRoleEnum.Assistant, content: 'Assistant 1' },
+        { role: ChatCompletionRequestMessageRoleEnum.User, content: 'current user request' }
+      ];
+
+      mockCountGptMessagesTokens
+        .mockResolvedValueOnce(20) // system only, no leading checkpoint is counted here
+        .mockResolvedValueOnce(20) // current user
+        .mockResolvedValueOnce(120); // visible checkpoint-like user round exceeds remaining context
+
+      const result = await filterGPTMessageByMaxContext({
+        messages,
+        maxContext: 60
+      });
+
+      expect(result).toEqual([
+        { role: ChatCompletionRequestMessageRoleEnum.System, content: 'System' },
+        { role: ChatCompletionRequestMessageRoleEnum.User, content: 'current user request' }
+      ]);
+      expect(mockCountGptMessagesTokens).toHaveBeenNthCalledWith(1, {
+        messages: [{ role: ChatCompletionRequestMessageRoleEnum.System, content: 'System' }]
+      });
+    });
+
+    it('should not preserve malformed hidden checkpoint-like messages as leading checkpoints', async () => {
+      const malformedCheckpointMessage: ChatCompletionMessageParam = {
+        role: ChatCompletionRequestMessageRoleEnum.User,
+        content: 'prefix <context_checkpoint>old context summary</context_checkpoint>',
+        hideInUI: true
+      };
+      const messages: ChatCompletionMessageParam[] = [
+        { role: ChatCompletionRequestMessageRoleEnum.System, content: 'System' },
+        malformedCheckpointMessage,
+        { role: ChatCompletionRequestMessageRoleEnum.Assistant, content: 'Assistant 1' },
+        { role: ChatCompletionRequestMessageRoleEnum.User, content: 'current user request' }
+      ];
+
+      mockCountGptMessagesTokens
+        .mockResolvedValueOnce(20) // system only, malformed checkpoint is not preserved
+        .mockResolvedValueOnce(20) // current user
+        .mockResolvedValueOnce(120); // malformed checkpoint round exceeds remaining context
+
+      const result = await filterGPTMessageByMaxContext({
+        messages,
+        maxContext: 60
+      });
+
+      expect(result).toEqual([
+        { role: ChatCompletionRequestMessageRoleEnum.System, content: 'System' },
+        { role: ChatCompletionRequestMessageRoleEnum.User, content: 'current user request' }
+      ]);
+    });
   });
 
   describe('Complex conversation patterns', () => {
@@ -291,6 +393,7 @@ describe('filterGPTMessageByMaxContext function tests', () => {
 describe('loadRequestMessages function tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    serviceEnv.MULTIPLE_DATA_TO_BASE64 = originalMultipleDataToBase64;
     mockGetImageBase64.mockResolvedValue({
       completeBase64: 'data:image/png;base64,test',
       base64: 'test',
@@ -431,6 +534,184 @@ describe('loadRequestMessages function tests', () => {
       expect(result[0].content).toBe('Look at https://example.com/image.png');
     });
 
+    it('should extract audio and video links when enabled', async () => {
+      serviceEnv.MULTIPLE_DATA_TO_BASE64 = false;
+
+      const messages: ChatCompletionMessageParam[] = [
+        {
+          role: ChatCompletionRequestMessageRoleEnum.User,
+          content:
+            'Check https://example.com/audio.mp3, https://example.com/voice.ogg and https://example.com/video.mp4?download=1'
+        }
+      ];
+
+      const result = await loadRequestMessages({
+        messages,
+        useAudio: true,
+        useVideo: true,
+        extractFiles: true
+      });
+
+      expect(result).toHaveLength(1);
+      expect(Array.isArray(result[0].content)).toBe(true);
+      const content = result[0].content as any[];
+      expect(content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'input_audio',
+            input_audio: {
+              data: 'https://example.com/audio.mp3',
+              format: 'mp3'
+            }
+          }),
+          expect.objectContaining({
+            type: 'input_audio',
+            input_audio: {
+              data: 'https://example.com/voice.ogg',
+              format: 'ogg'
+            }
+          }),
+          expect.objectContaining({
+            type: 'video_url',
+            video_url: {
+              url: 'https://example.com/video.mp4?download=1'
+            }
+          }),
+          expect.objectContaining({ type: 'text' })
+        ])
+      );
+      expect(content.some((item: any) => item.type === 'file_url')).toBe(false);
+      expect(content.some((item: any) => item.type === 'file')).toBe(false);
+      expect(mockAxiosGet).not.toHaveBeenCalled();
+    });
+
+    it('should convert extracted audio and video links when MULTIPLE_DATA_TO_BASE64 is enabled', async () => {
+      serviceEnv.MULTIPLE_DATA_TO_BASE64 = true;
+      mockAxiosGet.mockResolvedValue({
+        data: Buffer.from('media bytes')
+      });
+      const audioUrl =
+        'http://localhost:9000/fastgpt-private/chat/fastgpt_intro.wav?X-Amz-Signature=test';
+      const videoUrl = 'http://127.0.0.1:9000/fastgpt-private/chat/demo.mp4';
+      const messages: ChatCompletionMessageParam[] = [
+        {
+          role: ChatCompletionRequestMessageRoleEnum.User,
+          content: `Check ${audioUrl} and ${videoUrl}`
+        }
+      ];
+
+      const result = await loadRequestMessages({
+        messages,
+        useAudio: true,
+        useVideo: true,
+        extractFiles: true
+      });
+
+      expect(result).toHaveLength(1);
+      const content = result[0].content as any[];
+      expect(content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'input_audio',
+            input_audio: {
+              data: `data:;base64,${Buffer.from('media bytes').toString('base64')}`,
+              format: 'wav'
+            }
+          }),
+          expect.objectContaining({
+            type: 'video_url',
+            video_url: {
+              url: `data:;base64,${Buffer.from('media bytes').toString('base64')}`
+            }
+          })
+        ])
+      );
+      expect(mockAxiosGet).toHaveBeenCalledWith(audioUrl, {
+        responseType: 'arraybuffer',
+        timeout: 10000
+      });
+      expect(mockAxiosGet).toHaveBeenCalledWith(videoUrl, {
+        responseType: 'arraybuffer',
+        timeout: 10000
+      });
+    });
+
+    it('should ignore file keys and normalize audio and video file_url from existing urls', async () => {
+      serviceEnv.MULTIPLE_DATA_TO_BASE64 = false;
+      const audioUrl = 'https://cdn.example.com/preview/audio.mp3';
+      const videoUrl = 'https://cdn.example.com/preview/video.mp4';
+      const messages: ChatCompletionMessageParam[] = [
+        {
+          role: ChatCompletionRequestMessageRoleEnum.User,
+          content: [
+            {
+              type: 'file_url',
+              name: 'audio.mp3',
+              url: audioUrl,
+              fileType: 'audio',
+              key: 'chat/audio.mp3'
+            },
+            {
+              type: 'file_url',
+              name: 'video.mp4',
+              url: videoUrl,
+              fileType: 'video',
+              key: 'chat/video.mp4'
+            },
+            {
+              type: 'text',
+              text: 'Analyze these files'
+            }
+          ]
+        }
+      ];
+
+      const result = await loadRequestMessages({
+        messages,
+        useAudio: true,
+        useVideo: true
+      });
+
+      expect(result).toHaveLength(1);
+      const content = result[0].content as any[];
+      expect(content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'input_audio',
+            input_audio: {
+              data: audioUrl,
+              format: 'mp3'
+            }
+          }),
+          expect.objectContaining({
+            type: 'video_url',
+            video_url: {
+              url: videoUrl
+            }
+          }),
+          expect.objectContaining({ type: 'text', text: 'Analyze these files' })
+        ])
+      );
+      expect(content.some((item: any) => item.type === 'file_url')).toBe(false);
+      expect(content.some((item: any) => item.key)).toBe(false);
+      expect(mockAxiosGet).not.toHaveBeenCalled();
+    });
+
+    it('should preserve legacy vision extraction when extractFiles is omitted', async () => {
+      const messages: ChatCompletionMessageParam[] = [
+        {
+          role: ChatCompletionRequestMessageRoleEnum.User,
+          content: 'Look at https://example.com/image.png'
+        }
+      ];
+
+      const result = await loadRequestMessages({ messages, useVision: true });
+
+      expect(result).toHaveLength(1);
+      const content = result[0].content as any[];
+      expect(content.some((item: any) => item.type === 'image_url')).toBe(true);
+    });
+
     it('should not extract images from very long text (>500 chars)', async () => {
       const longText = 'A'.repeat(600) + ' https://example.com/image.png';
       const messages: ChatCompletionMessageParam[] = [
@@ -566,8 +847,7 @@ describe('loadRequestMessages function tests', () => {
     });
 
     it('should handle invalid remote images gracefully', async () => {
-      const originalEnv = process.env.MULTIPLE_DATA_TO_BASE64;
-      process.env.MULTIPLE_DATA_TO_BASE64 = 'false'; // Disable base64 conversion
+      serviceEnv.MULTIPLE_DATA_TO_BASE64 = false;
 
       const messages: ChatCompletionMessageParam[] = [
         {
@@ -581,19 +861,13 @@ describe('loadRequestMessages function tests', () => {
 
       mockAxiosHead.mockRejectedValue(new Error('Network error'));
 
-      const result = await loadRequestMessages({ messages, useVision: true });
+      try {
+        const result = await loadRequestMessages({ messages, useVision: true });
 
-      expect(result).toHaveLength(1);
-      // When image is filtered out and only one text item remains, it becomes string
-      expect(typeof result[0].content).toBe('string');
-      expect(result[0].content).toBe('Text');
-
-      // Restore original environment
-      if (originalEnv !== undefined) {
-        process.env.MULTIPLE_DATA_TO_BASE64 = originalEnv;
-      } else {
-        // @ts-ignore
-        delete process.env.MULTIPLE_DATA_TO_BASE64;
+        expect(result).toHaveLength(1);
+        expect(result[0].content).toBe('Text');
+      } finally {
+        serviceEnv.MULTIPLE_DATA_TO_BASE64 = originalMultipleDataToBase64;
       }
     });
 
@@ -868,8 +1142,7 @@ describe('loadRequestMessages function tests', () => {
     });
 
     it('should handle environment variable MULTIPLE_DATA_TO_BASE64', async () => {
-      const originalEnv = process.env.MULTIPLE_DATA_TO_BASE64;
-      process.env.MULTIPLE_DATA_TO_BASE64 = 'true';
+      serviceEnv.MULTIPLE_DATA_TO_BASE64 = true;
 
       const messages: ChatCompletionMessageParam[] = [
         {
@@ -890,13 +1163,6 @@ describe('loadRequestMessages function tests', () => {
       expect(result).toHaveLength(1);
       const content = result[0].content as any[];
       expect(content[0].image_url.url).toBe('data:image/png;base64,converted');
-
-      // Restore original environment
-      if (originalEnv !== undefined) {
-        process.env.MULTIPLE_DATA_TO_BASE64 = originalEnv;
-      } else {
-        process.env.MULTIPLE_DATA_TO_BASE64 = '';
-      }
     });
   });
 });

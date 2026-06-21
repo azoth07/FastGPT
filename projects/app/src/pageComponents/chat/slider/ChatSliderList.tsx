@@ -17,7 +17,7 @@ const ChatSliderList = () => {
   const { isPc } = useSystem();
   const { t } = useTranslation();
 
-  const { chatId: activeChatId } = useChatStore();
+  const { chatId: activeChatId, appId } = useChatStore();
 
   const histories = useContextSelector(ChatContext, (v) => v.histories);
   const ScrollData = useContextSelector(ChatContext, (v) => v.ScrollData);
@@ -26,9 +26,14 @@ const ChatSliderList = () => {
   const onChangeChatId = useContextSelector(ChatContext, (v) => v.onChangeChatId);
 
   const setCiteModalData = useContextSelector(ChatItemContext, (v) => v.setCiteModalData);
+  const clearChatRecords = useContextSelector(ChatItemContext, (v) => v.clearChatRecords);
   const chatBoxData = useContextSelector(ChatItemContext, (v) => v.chatBoxData);
 
   const concatHistory = useMemo(() => {
+    const newChatTitle = t('common:core.chat.New Chat');
+    const getHistoryDisplayTitle = (title?: string) => title?.trim() || newChatTitle;
+    const scopedHistories = histories.filter((item) => item.appId === appId);
+
     const formatHistories: {
       id: string;
       title: string;
@@ -37,19 +42,26 @@ const ChatSliderList = () => {
       updateTime: Date;
       chatGenerateStatus?: ChatGenerateStatusEnum;
       hasBeenRead?: boolean;
-    }[] = histories.map((item) => {
-      const isActiveChat = item.chatId === activeChatId && chatBoxData.chatId === item.chatId;
+      isTemporary?: boolean;
+    }[] = scopedHistories.map((item) => {
+      const isActiveChat =
+        item.chatId === activeChatId &&
+        chatBoxData.chatId === item.chatId &&
+        chatBoxData.appId === item.appId;
+      const customTitle = item.customTitle?.trim() ? item.customTitle : undefined;
+      const realtimeTitle = chatBoxData.title?.trim() ? chatBoxData.title : undefined;
+      const title = (isActiveChat ? realtimeTitle : undefined) || customTitle || item.title;
 
       return {
         id: item.chatId,
-        title: item.title,
-        customTitle: item.customTitle,
+        title: getHistoryDisplayTitle(title),
+        customTitle,
         top: item.top,
         updateTime: item.updateTime,
         chatGenerateStatus: isActiveChat
-          ? chatBoxData.chatGenerateStatus ?? item.chatGenerateStatus
+          ? (chatBoxData.chatGenerateStatus ?? item.chatGenerateStatus)
           : item.chatGenerateStatus,
-        hasBeenRead: isActiveChat ? chatBoxData.hasBeenRead ?? item.hasBeenRead : item.hasBeenRead
+        hasBeenRead: isActiveChat ? (chatBoxData.hasBeenRead ?? item.hasBeenRead) : item.hasBeenRead
       };
     });
 
@@ -61,22 +73,28 @@ const ChatSliderList = () => {
       updateTime: Date;
       chatGenerateStatus?: ChatGenerateStatusEnum;
       hasBeenRead?: boolean;
+      isTemporary?: boolean;
     } = {
       id: activeChatId,
-      title: t('common:core.chat.New Chat'),
+      title: getHistoryDisplayTitle(chatBoxData.chatId === activeChatId ? chatBoxData.title : ''),
       updateTime: new Date(),
+      isTemporary: true,
       chatGenerateStatus:
         chatBoxData.chatId === activeChatId ? chatBoxData.chatGenerateStatus : undefined,
       hasBeenRead: chatBoxData.chatId === activeChatId ? chatBoxData.hasBeenRead : undefined
     };
-    const activeChat = histories.find((item) => item.chatId === activeChatId);
+    const activeChat = scopedHistories.find((item) => item.chatId === activeChatId);
+    const shouldPrependActiveChat = !!appId && !!activeChatId && !activeChat;
 
-    return !activeChat ? [newChat].concat(formatHistories) : formatHistories;
+    return shouldPrependActiveChat ? [newChat].concat(formatHistories) : formatHistories;
   }, [
     activeChatId,
+    appId,
     histories,
     t,
     chatBoxData.chatId,
+    chatBoxData.appId,
+    chatBoxData.title,
     chatBoxData.chatGenerateStatus,
     chatBoxData.hasBeenRead
   ]);
@@ -89,14 +107,33 @@ const ChatSliderList = () => {
 
   return (
     <>
-      <ScrollData flex={'1 0 0'} h={0} px={[2, 5]} overflow={'overlay'}>
+      {/* 移动端侧栏只需要纵向滚动；隐藏横向滚动条，避免底部语言入口上方出现灰线。 */}
+      {/* eslint-disable-next-line react-hooks/static-components -- ScrollData is supplied by useScrollPagination. */}
+      <ScrollData
+        flex={'1 0 0'}
+        h={0}
+        pt={0}
+        pl={0}
+        pr={'16px'}
+        pb={'16px'}
+        mr={'-16px'}
+        overflowY={'auto'}
+        overflowX={'hidden'}
+        sx={{
+          '& > div > div:last-of-type:not(.chatHistoryItem)': {
+            color: 'var(--chakra-colors-myGray-400)'
+          }
+        }}
+      >
         {concatHistory.map((item, i) => (
           <Flex
             position={'relative'}
+            className="chatHistoryItem"
             key={item.id}
             alignItems={'center'}
-            px={4}
-            h={'44px'}
+            p="8px"
+            h={'40px'}
+            minH={'40px'}
             cursor={'pointer'}
             userSelect={'none'}
             borderRadius={'md'}
@@ -116,7 +153,7 @@ const ChatSliderList = () => {
             bg={item.top ? '#E6F6F6 !important' : ''}
             {...(item.id === activeChatId
               ? {
-                  backgroundColor: 'primary.50 !important',
+                  backgroundColor: 'primary.100 !important',
                   color: 'primary.600'
                 }
               : {
@@ -126,15 +163,11 @@ const ChatSliderList = () => {
                   }
                 })}
             {...(i !== concatHistory.length - 1 && {
-              mb: '8px'
+              mb: '4px'
             })}
           >
-            <MyIcon
-              name={item.id === activeChatId ? 'core/chat/chatFill' : 'core/chat/chatLight'}
-              w={'16px'}
-            />
-            <Box flex={'1 0 0'} ml={3} className="textEllipsis">
-              {item.customTitle || item.title}
+            <Box flex={'1 0 0'} className="textEllipsis">
+              {item.title}
             </Box>
             {!!item.id && (
               <Flex gap={2} alignItems={'center'}>
@@ -148,7 +181,7 @@ const ChatSliderList = () => {
                     bg={'primary.500'}
                     flexShrink={0}
                   />
-                ) : (
+                ) : item.isTemporary ? null : (
                   <Box
                     className="time"
                     display={'block'}
@@ -170,8 +203,13 @@ const ChatSliderList = () => {
                     Button={
                       <IconButton
                         size={'xs'}
-                        variant={'whiteBase'}
-                        icon={<MyIcon name={'more'} w={'14px'} p={1} />}
+                        variant={'ghost'}
+                        border={'none'}
+                        bg={'transparent'}
+                        color={'myGray.500'}
+                        _hover={{ bg: 'transparent', color: 'myGray.700' }}
+                        _active={{ bg: 'transparent' }}
+                        icon={<MyIcon name={'more'} w={'14px'} p={1} color={'currentColor'} />}
                         aria-label={''}
                       />
                     }
@@ -211,6 +249,7 @@ const ChatSliderList = () => {
                             onClick: () => {
                               onDelHistory(item.id);
                               if (item.id === activeChatId) {
+                                clearChatRecords();
                                 onChangeChatId();
                                 setCiteModalData(undefined);
                               }

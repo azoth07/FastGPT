@@ -13,12 +13,13 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     testTimeout: 30000,
     hookTimeout: 30000,
-    fileParallelism: false,
-    maxConcurrency: 1,
+    fileParallelism: true,
     isolate: false,
     env: {
       CHECK_INTERNAL_IP: 'true',
+      SANDBOX_API_MAX_BODY_MB: '1',
       SANDBOX_MAX_TIMEOUT: '5000',
+      SANDBOX_QUEUE_ID_CONCURRENCY: '1',
       SANDBOX_TOKEN: 'test'
     }
   }

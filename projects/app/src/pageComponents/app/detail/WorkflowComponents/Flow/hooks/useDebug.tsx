@@ -5,8 +5,7 @@ import {
   type StoreEdgeItemType
 } from '@fastgpt/global/core/workflow/type/edge';
 import { useCallback, useState, useMemo } from 'react';
-import { checkWorkflowNodeAndConnection } from '@/web/core/workflow/utils';
-import { useTranslation } from 'next-i18next';
+import { checkWorkflowNodeAndConnection, getNodeAllSource } from '@/web/core/workflow/utils';
 import { useToast } from '@fastgpt/web/hooks/useToast';
 import { uiWorkflow2StoreWorkflow } from '../../utils';
 import { type RuntimeNodeItemType } from '@fastgpt/global/core/workflow/runtime/type';
@@ -14,14 +13,11 @@ import { type RuntimeNodeItemType } from '@fastgpt/global/core/workflow/runtime/
 import dynamic from 'next/dynamic';
 import { Box, Button, Flex } from '@chakra-ui/react';
 import { type FieldErrors, useForm } from 'react-hook-form';
-import {
-  VariableInputEnum,
-  WorkflowIOValueTypeEnum
-} from '@fastgpt/global/core/workflow/constants';
-import { checkInputIsReference } from '@fastgpt/global/core/workflow/utils';
+import { VariableInputEnum } from '@fastgpt/global/core/workflow/constants';
 import { useContextSelector } from 'use-context-selector';
 import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
 import { AppContext } from '../../../context';
+import { useTranslation } from 'next-i18next';
 import LightRowTabs from '@fastgpt/web/components/common/Tabs/LightRowTabs';
 import { WorkflowBufferDataContext } from '../../context/workflowInitContext';
 import LabelAndFormRender from '@/components/core/app/formRender/LabelAndForm';
@@ -30,9 +26,14 @@ import {
   variableInputTypeToInputType
 } from '@/components/core/app/formRender/utils';
 import { useSafeTranslation } from '@fastgpt/web/hooks/useSafeTranslation';
-import { WorkflowUtilsContext } from '../../context/workflowUtilsContext';
 import { WorkflowActionsContext } from '../../context/workflowActionsContext';
 import { WorkflowDebugContext } from '../../context/workflowDebugContext';
+import {
+  checkInputShouldRenderInDebug,
+  getDebugInputFormProps,
+  getDebugInputFormValue,
+  getDebugRuntimeInputs
+} from './useDebugInput';
 
 const MyRightDrawer = dynamic(
   () => import('@fastgpt/web/components/common/MyDrawer/MyRightDrawer')
@@ -45,11 +46,18 @@ enum TabEnum {
 
 export const useDebug = () => {
   const { t } = useSafeTranslation();
+  const { t: workflowT } = useTranslation();
   const { toast } = useToast();
 
   const setNodes = useContextSelector(WorkflowBufferDataContext, (v) => v.setNodes);
   const getNodes = useContextSelector(WorkflowBufferDataContext, (v) => v.getNodes);
   const edges = useContextSelector(WorkflowBufferDataContext, (v) => v.edges);
+  const systemConfigNode = useContextSelector(WorkflowBufferDataContext, (v) => v.systemConfigNode);
+  const getNodeById = useContextSelector(WorkflowBufferDataContext, (v) => v.getNodeById);
+  const childrenNodeIdListMap = useContextSelector(
+    WorkflowBufferDataContext,
+    (v) => v.childrenNodeIdListMap
+  );
   const { onUpdateNodeError, onRemoveError } = useContextSelector(WorkflowActionsContext, (v) => v);
   const onStartNodeDebug = useContextSelector(WorkflowDebugContext, (v) => v.onStartNodeDebug);
 
@@ -150,24 +158,26 @@ export const useDebug = () => {
     const runtimeNode = runtimeNodes.find((node) => node.nodeId === runtimeNodeId);
 
     if (!runtimeNode) return <></>;
+    const referenceSourceNodes = getNodeAllSource({
+      nodeId: runtimeNode.nodeId,
+      systemConfigNode,
+      getNodeById,
+      edges,
+      chatConfig: appDetail.chatConfig,
+      t: workflowT,
+      childrenNodeIdListMap
+    });
     const renderInputs = runtimeNode.inputs.filter((input) => {
-      if (runtimeNode.flowNodeType === FlowNodeTypeEnum.pluginInput) return true;
-      if (checkInputIsReference(input)) return true;
-      if (input.required && !input.value) return true;
+      return checkInputShouldRenderInDebug(input, {
+        showAllInputs: runtimeNode.flowNodeType === FlowNodeTypeEnum.pluginInput,
+        referenceSourceNodes
+      });
     });
 
     const variablesForm = useForm<Record<string, any>>({
       defaultValues: {
         nodeVariables: renderInputs.reduce((acc: Record<string, any>, input) => {
-          const isReference = checkInputIsReference(input);
-          if (isReference) {
-            acc[input.key] = undefined;
-          } else if (typeof input.value === 'object') {
-            acc[input.key] = JSON.stringify(input.value, null, 2);
-          } else {
-            acc[input.key] = input.value;
-          }
-
+          acc[input.key] = getDebugInputFormValue(input);
           return acc;
         }, {}),
         variables: defaultGlobalVariables
@@ -188,27 +198,9 @@ export const useDebug = () => {
           node.nodeId === runtimeNode.nodeId
             ? {
                 ...runtimeNode,
-                inputs: runtimeNode.inputs.map((input) => {
-                  let parseValue = (() => {
-                    try {
-                      if (
-                        input.valueType === WorkflowIOValueTypeEnum.string ||
-                        input.valueType === WorkflowIOValueTypeEnum.number ||
-                        input.valueType === WorkflowIOValueTypeEnum.boolean
-                      ) {
-                        return data.nodeVariables[input.key];
-                      }
-
-                      return JSON.parse(data.nodeVariables[input.key]);
-                    } catch (e) {
-                      return data.nodeVariables[input.key];
-                    }
-                  })();
-
-                  return {
-                    ...input,
-                    value: parseValue ?? input.value
-                  };
+                inputs: getDebugRuntimeInputs({
+                  inputs: runtimeNode.inputs,
+                  nodeVariables: data.nodeVariables
                 })
               }
             : node
@@ -263,19 +255,23 @@ export const useDebug = () => {
             />
           )}
           <Box display={currentTab === TabEnum.node ? 'block' : 'none'}>
-            {renderInputs.map((item) => (
-              <LabelAndFormRender
-                {...item}
-                key={item.key}
-                label={item.label}
-                required={item.required}
-                description={t(item.placeholder || item.description)}
-                inputType={nodeInputTypeToInputType(item.renderTypeList)}
-                form={variablesForm}
-                fieldName={`nodeVariables.${item.key}`}
-                bg={'myGray.50'}
-              />
-            ))}
+            {renderInputs.map((item) => {
+              const inputProps = getDebugInputFormProps(item);
+
+              return (
+                <LabelAndFormRender
+                  {...inputProps}
+                  key={item.key}
+                  label={item.debugLabel || item.label}
+                  required={item.required}
+                  description={t(item.placeholder || item.description)}
+                  inputType={nodeInputTypeToInputType(item.renderTypeList)}
+                  form={variablesForm}
+                  fieldName={`nodeVariables.${item.key}`}
+                  bg={'myGray.50'}
+                />
+              );
+            })}
           </Box>
           <Box display={currentTab === TabEnum.global ? 'block' : 'none'}>
             {customVar.map((item) => (
@@ -329,12 +325,18 @@ export const useDebug = () => {
     runtimeEdges,
     defaultGlobalVariables,
     t,
+    workflowT,
     variables.length,
     customVar,
     internalVar,
     filteredVar,
     runtimeNodeId,
-    onStartNodeDebug
+    onStartNodeDebug,
+    systemConfigNode,
+    getNodeById,
+    edges,
+    appDetail.chatConfig,
+    childrenNodeIdListMap
   ]);
 
   return {

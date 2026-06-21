@@ -130,6 +130,25 @@ const createMockBucketClass = (defaultName: string) => {
     async putObject(key: string, body: any) {
       await this.client.uploadObject({ key, body });
     }
+    async uploadFileByBody(params: {
+      key: string;
+      body: any;
+      contentType?: string;
+      filename?: string;
+    }) {
+      await this.client.uploadObject({
+        key: params.key,
+        body: params.body,
+        contentType: params.contentType,
+        metadata: {
+          originFilename: encodeURIComponent(params.filename || 'mock-file')
+        }
+      });
+      return {
+        key: params.key,
+        accessUrl: await this.createExternalUrl({ key: params.key })
+      };
+    }
     async getFileStream() {
       return null;
     }
@@ -220,9 +239,15 @@ vi.mock('@fastgpt/service/common/s3/sources/chat/index', () => ({
       fields: { key: 'mock-key' },
       maxSize: 5 * 1024 * 1024
     }),
+    createGetChatFileURL: vi.fn(async ({ key }: { key: string }) => ({
+      url: `http://localhost:9000/mock-bucket/${key}`
+    })),
     deleteChatFilesByPrefix: vi.fn().mockResolvedValue(undefined),
     deleteChatFile: vi.fn().mockResolvedValue(undefined)
-  }))
+  })),
+  createChatFilePreviewUrlGetter: vi.fn(
+    () => async (key: string) => `http://localhost:9000/mock-bucket/${key}`
+  )
 }));
 
 // Mock S3 initialization

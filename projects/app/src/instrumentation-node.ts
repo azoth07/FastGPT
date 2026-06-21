@@ -24,7 +24,6 @@ export async function registerNodeInstrumentation() {
       { startTrainingQueue },
       { preLoadWorker },
       { loadSystemModels },
-      { getSystemTools },
       { trackTimerProcess },
       { initBullMQWorkers },
       { initS3Buckets },
@@ -32,6 +31,8 @@ export async function registerNodeInstrumentation() {
       { instrumentationCheck },
       { getErrText },
       { configureLogger, getLogger, LogCategories },
+      { configureMetrics },
+      { configureTracing },
       { InitialErrorEnum }
     ] = await Promise.all([
       import('@fastgpt/service/common/mongo/init'),
@@ -45,7 +46,6 @@ export async function registerNodeInstrumentation() {
       import('@/service/core/dataset/training/utils'),
       import('@fastgpt/service/worker/preload'),
       import('@fastgpt/service/core/ai/config/utils'),
-      import('@fastgpt/service/core/app/tool/controller'),
       import('@fastgpt/service/common/middle/tracks/processor'),
       import('@/service/common/bullmq'),
       import('@fastgpt/service/common/s3'),
@@ -53,13 +53,16 @@ export async function registerNodeInstrumentation() {
       import('@/service/common/system/health'),
       import('@fastgpt/global/common/error/utils'),
       import('@fastgpt/service/common/logger'),
+      import('@fastgpt/service/common/metrics'),
+      import('@fastgpt/service/common/tracing'),
       import('@fastgpt/service/common/system/constants')
     ]);
 
-    await runInitializationStep({
-      step: 'configure-logger',
-      action: () => configureLogger()
-    });
+    await Promise.all([
+      runInitializationStep({ step: 'configure-tracing', action: () => configureTracing() }),
+      runInitializationStep({ step: 'configure-metrics', action: () => configureMetrics() }),
+      runInitializationStep({ step: 'configure-logger', action: () => configureLogger() })
+    ]);
     const logger = getLogger(LogCategories.SYSTEM);
     logger.info('Starting system initialization...');
 
@@ -155,13 +158,13 @@ export async function registerNodeInstrumentation() {
         logger,
         getErrText
       }),
-      runInitializationStep({
-        step: 'load-system-tools',
-        stage: InitialErrorEnum.PLUGIN_ERROR,
-        action: () => getSystemTools(),
-        logger,
-        getErrText
-      }),
+      // runInitializationStep({
+      //   step: 'load-system-tools',
+      //   stage: InitialErrorEnum.PLUGIN_ERROR,
+      //   action: () => getSystemTools(),
+      //   logger,
+      //   getErrText
+      // }),
       runInitializationStep({
         step: 'init-system-plugin-tags',
         stage: InitialErrorEnum.PLUGIN_ERROR,

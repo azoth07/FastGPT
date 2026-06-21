@@ -3,6 +3,7 @@ import { MongoDatasetTraining } from '@fastgpt/service/core/dataset/training/sch
 import { authDatasetCollection } from '@fastgpt/service/support/permission/dataset/auth';
 import { NextAPI } from '@/service/middleware/entry';
 import { type ApiRequestProps } from '@fastgpt/service/type/next';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import {
   DeleteTrainingDataBodySchema,
   DeleteTrainingDataResponseSchema,
@@ -10,9 +11,12 @@ import {
 } from '@fastgpt/global/openapi/core/dataset/training/api';
 
 async function handler(req: ApiRequestProps): Promise<DeleteTrainingDataResponse> {
-  const { datasetId, collectionId, dataId } = DeleteTrainingDataBodySchema.parse(req.body);
+  const { collectionId, dataId } = parseApiInput({
+    req,
+    bodySchema: DeleteTrainingDataBodySchema
+  }).body;
 
-  const { teamId } = await authDatasetCollection({
+  const { collection } = await authDatasetCollection({
     req,
     authToken: true,
     authApiKey: true,
@@ -21,12 +25,16 @@ async function handler(req: ApiRequestProps): Promise<DeleteTrainingDataResponse
   });
 
   await MongoDatasetTraining.deleteOne({
-    teamId,
-    datasetId,
+    teamId: collection.teamId,
+    datasetId: collection.datasetId,
+    collectionId: collection._id,
     _id: dataId
   });
 
-  return DeleteTrainingDataResponseSchema.parse({});
+  return DeleteTrainingDataResponseSchema.parse(undefined);
 }
 
 export default NextAPI(handler);
+export type deleteTrainingDataBody =
+  import('@fastgpt/global/openapi/core/dataset/training/api').DeleteTrainingDataBody;
+export type deleteTrainingDataResponse = DeleteTrainingDataResponse;

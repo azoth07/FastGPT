@@ -1,6 +1,5 @@
 import z from 'zod';
 import { Readable } from 'node:stream';
-import type { S3BaseBucket } from '../buckets/base';
 
 export const S3MetadataSchema = z.object({
   filename: z.string(),
@@ -59,23 +58,30 @@ export const CreatePostPresignedUrlResultSchema = z.object({
   url: z.string().nonempty(),
   key: z.string().nonempty(),
   headers: z.record(z.string(), z.string()),
+  previewUrl: z.string().nonempty(),
   maxSize: z.number().positive().optional()
 });
 export type CreatePostPresignedUrlResult = z.infer<typeof CreatePostPresignedUrlResultSchema>;
 export const CreateGetPresignedUrlParamsSchema = z.object({
   key: z.string().nonempty(),
   expiredHours: z.number().positive().optional(),
-  mode: DownloadModeSchema.optional()
+  mode: DownloadModeSchema.optional(),
+  responseContentType: z.string().nonempty().optional()
 });
 export type createPreviewUrlParams = z.infer<typeof CreateGetPresignedUrlParamsSchema>;
 
-export const UploadImage2S3BucketParamsSchema = z.object({
-  base64Img: z.string().nonempty(),
-  uploadKey: z.string().nonempty(),
-  mimetype: z.string().nonempty(),
-  filename: z.string().nonempty(),
-  expiredTime: z.coerce.date().optional()
-});
+export const UploadImage2S3BucketParamsSchema = z
+  .object({
+    base64Img: z.string().nonempty().optional(),
+    buffer: z.instanceof(Buffer).optional(),
+    uploadKey: z.string().nonempty(),
+    mimetype: z.string().nonempty(),
+    filename: z.string().nonempty(),
+    expiredTime: z.coerce.date().optional()
+  })
+  .refine((value) => value.base64Img || value.buffer, {
+    message: 'base64Img or buffer is required'
+  });
 export type UploadImage2S3BucketParams = z.infer<typeof UploadImage2S3BucketParamsSchema>;
 
 export const UploadFileByBodySchema = z.object({
@@ -87,9 +93,3 @@ export const UploadFileByBodySchema = z.object({
 });
 export type UploadFileByBodyParams = z.infer<typeof UploadFileByBodySchema>;
 export type UploadFileByBufferParams = UploadFileByBodyParams;
-
-declare global {
-  var s3BucketMap: {
-    [key: string]: S3BaseBucket;
-  };
-}

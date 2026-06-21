@@ -12,6 +12,7 @@ import {
   TeamCollectionName,
   TeamMemberCollectionName
 } from '@fastgpt/global/support/user/team/constant';
+import { userCollectionName } from '../../support/user/schema';
 import type { DatasetSchemaType } from '@fastgpt/global/core/dataset/type';
 import { getLogger, LogCategories } from '../../common/logger';
 
@@ -65,7 +66,7 @@ const DatasetSchema = new Schema({
   userId: {
     //abandon
     type: Schema.Types.ObjectId,
-    ref: 'user'
+    ref: userCollectionName
   },
   teamId: {
     type: Schema.Types.ObjectId,
@@ -138,12 +139,16 @@ const DatasetSchema = new Schema({
     default: null // null表示未删除，有值表示删除时间
   },
 
-  // abandoned
   autoSync: Boolean,
+  /** @deprecated */
   externalReadUrl: String,
+  /** @deprecated */
   defaultPermission: Number,
+  /** @deprecated */
   apiServer: Object,
+  /** @deprecated */
   feishuServer: Object,
+  /** @deprecated */
   yuqueServer: Object
 });
 

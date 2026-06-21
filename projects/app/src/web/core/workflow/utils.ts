@@ -21,13 +21,15 @@ import {
   getAppChatConfig,
   getHandleId,
   isValidReferenceValue,
-  isValidReferenceValueFormat
+  isValidReferenceValueFormat,
+  nodeInputIsReference
 } from '@fastgpt/global/core/workflow/utils';
 import { type TFunction } from 'next-i18next';
 import {
   type FlowNodeInputItemType,
   type FlowNodeOutputItemType,
-  type ReferenceItemValueType
+  type ReferenceItemValueType,
+  type ReferenceValueType
 } from '@fastgpt/global/core/workflow/type/io';
 import { type IfElseListItemType } from '@fastgpt/global/core/workflow/template/system/ifElse/type';
 import { LoopRunModeEnum } from '@fastgpt/global/core/workflow/template/system/loopRun/loopRun';
@@ -41,6 +43,32 @@ import { useSystemStore } from '@/web/common/system/useSystemStore';
 import type { LLMModelItemType } from '@fastgpt/global/core/ai/model.schema';
 
 /* ====== node ======= */
+/**
+ * 适配从数据库读取出的节点输入。
+ * 旧知识库搜索节点使用 userChatInput；当前节点改为 datasetSearchInput 数组。
+ * 这里仅处理旧字段到新字段的 key 和 valueType 迁移。
+ */
+export const adaptStoreNodeInputs = (storeNode: StoreNodeItemType): FlowNodeInputItemType[] => {
+  if (storeNode.flowNodeType !== FlowNodeTypeEnum.datasetSearchNode) {
+    return storeNode.inputs;
+  }
+
+  return storeNode.inputs.map((input) => {
+    if (input.key !== NodeInputKeyEnum.userChatInput) return input;
+
+    const isReferenceValue = isValidReferenceValueFormat(input.value);
+
+    return {
+      ...input,
+      key: NodeInputKeyEnum.datasetSearchInput,
+      label: 'workflow:search_query',
+      value: isReferenceValue ? [input.value] : input.value,
+      valueType: WorkflowIOValueTypeEnum.arrayString,
+      selectedTypeIndex: isReferenceValue ? 0 : 1
+    };
+  });
+};
+
 export const nodeTemplate2FlowNode = ({
   template,
   position,
@@ -100,6 +128,7 @@ export const storeNode2FlowNode = ({
   const dynamicInput = template.inputs.find(
     (input) => input.renderTypeList[0] === FlowNodeInputTypeEnum.addInputParam
   );
+  const adaptedStoreInputs = adaptStoreNodeInputs(storeNode);
 
   // replace item data
   const nodeItem: FlowNodeItemType = {
@@ -113,7 +142,7 @@ export const storeNode2FlowNode = ({
     inputs: templateInputs
       .map<FlowNodeInputItemType>((templateInput) => {
         const storeInput =
-          storeNode.inputs.find((item) => item.key === templateInput.key) || templateInput;
+          adaptedStoreInputs.find((item) => item.key === templateInput.key) || templateInput;
 
         return {
           ...storeInput,
@@ -126,11 +155,17 @@ export const storeNode2FlowNode = ({
       })
       .concat(
         // 合并 store 中有，template 中没有的输入
-        storeNode.inputs
+        adaptedStoreInputs
           .filter((item) => !templateInputs.find((input) => input.key === item.key))
           .map((item) => {
-            if (!dynamicInput) return item;
             const templateInput = template.inputs.find((input) => input.key === item.key);
+
+            if (!dynamicInput) {
+              return {
+                ...item,
+                deprecated: templateInput?.deprecated
+              };
+            }
 
             return {
               ...item,
@@ -353,6 +388,93 @@ export const filterWorkflowNodeOutputsByType = (
   );
 };
 
+export type WorkflowReferenceSourceNode = {
+  nodeId: string;
+  outputs: FlowNodeOutputItemType[];
+  catchError?: boolean;
+};
+
+/**
+ * 过滤引用选择器中真正可选的输出。
+ * ReferenceSelector 和节点 debug 的引用有效性判断必须共用这套规则，避免已删除、类型不匹配、
+ * addOutputParam、invalid output 或未开启 catchError 的错误输出在不同入口表现不一致。
+ */
+export const filterSelectableWorkflowNodeOutputs = ({
+  outputs,
+  valueType,
+  catchError
+}: {
+  outputs: FlowNodeOutputItemType[];
+  valueType?: WorkflowIOValueTypeEnum;
+  catchError?: boolean;
+}) => {
+  return filterWorkflowNodeOutputsByType(outputs, valueType ?? WorkflowIOValueTypeEnum.any).filter(
+    (output) => {
+      if (output.type === FlowNodeOutputTypeEnum.error) {
+        return catchError === true;
+      }
+
+      return output.id !== NodeOutputKeyEnum.addOutputParam && output.invalid !== true;
+    }
+  );
+};
+
+const referenceItemIsSelectable = ({
+  value,
+  sourceNodes,
+  valueType
+}: {
+  value: ReferenceItemValueType;
+  sourceNodes: WorkflowReferenceSourceNode[];
+  valueType?: WorkflowIOValueTypeEnum;
+}) => {
+  const [sourceNodeId, outputId] = value;
+  if (!sourceNodeId || !outputId) return false;
+
+  const sourceNode = sourceNodes.find((node) => node.nodeId === sourceNodeId);
+  if (!sourceNode) return false;
+
+  return filterSelectableWorkflowNodeOutputs({
+    outputs: sourceNode.outputs,
+    valueType,
+    catchError: sourceNode.catchError
+  }).some((output) => output.id === outputId);
+};
+
+/**
+ * 判断引用值是否仍能被 ReferenceSelector 选中。
+ * 单选引用要求当前二元组命中；多选引用只要存在一个仍可选的引用项，选择器就会展示有效值。
+ */
+export const workflowReferenceValueIsSelectable = ({
+  value,
+  sourceNodes,
+  valueType
+}: {
+  value?: ReferenceValueType;
+  sourceNodes: WorkflowReferenceSourceNode[];
+  valueType?: WorkflowIOValueTypeEnum;
+}) => {
+  if (!Array.isArray(value)) return false;
+
+  if (typeof value[0] === 'string') {
+    return referenceItemIsSelectable({
+      value: value as ReferenceItemValueType,
+      sourceNodes,
+      valueType
+    });
+  }
+
+  return value.some((item) => {
+    if (!Array.isArray(item)) return false;
+
+    return referenceItemIsSelectable({
+      value: item as ReferenceItemValueType,
+      sourceNodes,
+      valueType
+    });
+  });
+};
+
 export const getNodeAllSource = ({
   nodeId,
   systemConfigNode,
@@ -404,7 +526,7 @@ export const getNodeAllSource = ({
     const parentNode = getNodeById(parentId);
     if (parentNode) {
       parentNode.inputs.forEach((input) => {
-        if (!input.renderTypeList?.includes(FlowNodeInputTypeEnum.reference)) return;
+        if (!nodeInputIsReference(input)) return;
         const val = input.value as ReferenceItemValueType | undefined;
         if (!Array.isArray(val) || val.length < 2) return;
         const [refNodeId] = val;
@@ -627,8 +749,7 @@ export const checkWorkflowNodeAndConnection = ({
           if (Array.isArray(input.value) && input.value.length === 0) return true;
         }
         // check reference invalid
-        const renderType = input.renderTypeList[input.selectedTypeIndex || 0];
-        if (renderType === FlowNodeInputTypeEnum.reference) {
+        if (nodeInputIsReference(input)) {
           // 无效引用时，返回 true
           const checkValueValid = (value: ReferenceItemValueType) => {
             const nodeId = value?.[0];

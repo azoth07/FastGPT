@@ -23,6 +23,7 @@ import { refreshVersionKey } from '../../../common/cache';
 import { SystemCacheKeyEnum } from '../../../common/cache/type';
 import { getLogger, LogCategories } from '../../../common/logger';
 import { getRuntimeResolvedPriceTiers } from '@fastgpt/global/core/ai/pricing';
+import { serviceEnv } from '../../../env';
 
 export const loadSystemModels = async (init = false, language = 'en') => {
   if (!init && global.systemModelList) return;
@@ -35,14 +36,14 @@ export const loadSystemModels = async (init = false, language = 'en') => {
     return Promise.reject(error);
   }
 
-  let _systemModelList: SystemModelItemType[] = [];
-  let _systemActiveModelList: SystemModelItemType[] = [];
-  let _llmModelMap = new Map<string, LLMModelItemType>();
-  let _embeddingModelMap = new Map<string, EmbeddingModelItemType>();
-  let _ttsModelMap = new Map<string, TTSModelType>();
-  let _sttModelMap = new Map<string, STTModelType>();
-  let _reRankModelMap = new Map<string, RerankModelItemType>();
-  let _systemDefaultModel: SystemDefaultModelType = {};
+  const _systemModelList: SystemModelItemType[] = [];
+  const _systemActiveModelList: SystemModelItemType[] = [];
+  const _llmModelMap = new Map<string, LLMModelItemType>();
+  const _embeddingModelMap = new Map<string, EmbeddingModelItemType>();
+  const _ttsModelMap = new Map<string, TTSModelType>();
+  const _sttModelMap = new Map<string, STTModelType>();
+  const _reRankModelMap = new Map<string, RerankModelItemType>();
+  const _systemDefaultModel: SystemDefaultModelType = {};
 
   if (!global.systemModelList) {
     global.systemModelList = [];
@@ -76,7 +77,7 @@ export const loadSystemModels = async (init = false, language = 'en') => {
         if (model.isDefaultDatasetImageModel) {
           _systemDefaultModel.datasetImageLLM = model;
         }
-        if (model.model === process.env.HELPER_BOT_MODEL) {
+        if (model.model === serviceEnv.HELPER_BOT_MODEL) {
           _systemDefaultModel.helperBotLLM = model;
         }
       } else if (model.type === ModelTypeEnum.embedding) {
@@ -119,13 +120,6 @@ export const loadSystemModels = async (init = false, language = 'en') => {
 
     // Load system model from local
     systemModels.forEach((model) => {
-      const mergeObject = (obj1: any, obj2: any) => {
-        if (!obj1 && !obj2) return undefined;
-        const formatObj1 = typeof obj1 === 'object' ? obj1 : {};
-        const formatObj2 = typeof obj2 === 'object' ? obj2 : {};
-        return { ...formatObj1, ...formatObj2 };
-      };
-
       const dbModel = dbModels.find((item) => item.model === model.model);
       const provider = getModelProvider(dbModel?.metadata?.provider || model.provider, language);
       const dbLlmMetadata =
@@ -148,8 +142,14 @@ export const loadSystemModels = async (init = false, language = 'en') => {
         ...(model.type === ModelTypeEnum.llm && dbModel?.metadata?.type === ModelTypeEnum.llm
           ? {
               maxResponse: dbModel?.metadata?.maxResponse ?? model.maxTokens ?? 8000,
-              defaultConfig: mergeObject(model.defaultConfig, dbModel?.metadata?.defaultConfig),
-              fieldMap: mergeObject(model.fieldMap, dbModel?.metadata?.fieldMap),
+              defaultConfig:
+                typeof dbModel?.metadata?.defaultConfig === 'object'
+                  ? dbModel?.metadata?.defaultConfig
+                  : model.defaultConfig,
+              fieldMap:
+                typeof dbModel?.metadata?.fieldMap === 'object'
+                  ? dbModel?.metadata?.fieldMap
+                  : model.fieldMap,
               /** @deprecated */
               maxTokens: undefined
             }
@@ -189,9 +189,8 @@ export const loadSystemModels = async (init = false, language = 'en') => {
         );
       }
       if (!_systemDefaultModel.helperBotLLM) {
-        _systemDefaultModel.helperBotLLM = _systemActiveModelList.find(
-          (item) => item.type === ModelTypeEnum.llm
-        );
+        // HELPER_BOT_MODEL 未配置或未命中已启用模型时，回退到系统默认 LLM。
+        _systemDefaultModel.helperBotLLM = _systemDefaultModel.llm;
       }
       if (!_systemDefaultModel.embedding) {
         _systemDefaultModel.embedding = Array.from(_embeddingModelMap.values())[0];

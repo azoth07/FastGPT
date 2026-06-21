@@ -11,11 +11,15 @@ import {
   type GetTrainingDataDetailResponse
 } from '@fastgpt/global/openapi/core/dataset/training/api';
 import { S3Buckets } from '@fastgpt/service/common/s3/config/constants';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 
 async function handler(req: ApiRequestProps): Promise<GetTrainingDataDetailResponse> {
-  const { datasetId, collectionId, dataId } = GetTrainingDataDetailBodySchema.parse(req.body);
+  const { collectionId, dataId } = parseApiInput({
+    req,
+    bodySchema: GetTrainingDataDetailBodySchema
+  }).body;
 
-  const { teamId } = await authDatasetCollection({
+  const { collection } = await authDatasetCollection({
     req,
     authToken: true,
     authApiKey: true,
@@ -23,7 +27,12 @@ async function handler(req: ApiRequestProps): Promise<GetTrainingDataDetailRespo
     per: ReadPermissionVal
   });
 
-  const data = await MongoDatasetTraining.findOne({ teamId, datasetId, _id: dataId }).lean();
+  const data = await MongoDatasetTraining.findOne({
+    teamId: collection.teamId,
+    datasetId: collection.datasetId,
+    collectionId: collection._id,
+    _id: dataId
+  }).lean();
 
   if (!data) {
     return GetTrainingDataDetailResponseSchema.parse(null);
@@ -32,6 +41,7 @@ async function handler(req: ApiRequestProps): Promise<GetTrainingDataDetailRespo
   return GetTrainingDataDetailResponseSchema.parse({
     _id: data._id,
     datasetId: data.datasetId,
+    collectionId: data.collectionId,
     mode: data.mode,
     imagePreviewUrl:
       data.imageId && isS3ObjectKey(data.imageId, 'dataset')

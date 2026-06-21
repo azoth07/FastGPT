@@ -7,10 +7,10 @@ import { pushTrack } from '@fastgpt/service/common/middle/tracks/utils';
 import { UserErrEnum } from '@fastgpt/global/common/error/code/user';
 import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
 import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
+import { serviceEnv } from '@fastgpt/service/env';
 import { UserAuthTypeEnum } from '@fastgpt/global/support/user/auth/constants';
 import { authCode } from '@fastgpt/service/support/user/auth/controller';
 import { createUserSession } from '@fastgpt/service/support/user/session';
-import requestIp from 'request-ip';
 import { setCookie } from '@fastgpt/service/support/permission/auth/common';
 import { UserError } from '@fastgpt/global/common/error/utils';
 import {
@@ -19,12 +19,17 @@ import {
   type LoginSuccessResponseType
 } from '@fastgpt/global/openapi/support/user/account/login/api';
 import type { ApiRequestProps, ApiResponseType } from '@fastgpt/service/type/next';
+import { getClientIpFromRequest } from '@fastgpt/service/common/security/clientIp';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 
 async function handler(
   req: ApiRequestProps<LoginByPasswordBodyType>,
   res: ApiResponseType
 ): Promise<LoginSuccessResponseType> {
-  const { username, password, code, language } = LoginByPasswordBodySchema.parse(req.body);
+  const { username, password, code, language } = parseApiInput({
+    req,
+    bodySchema: LoginByPasswordBodySchema
+  }).body;
 
   // Auth prelogin code
   await authCode({
@@ -53,7 +58,8 @@ async function handler(
 
   const userDetail = await getUserDetail({
     tmbId: user?.lastLoginTmbId,
-    userId: user._id
+    userId: user._id,
+    isRoot: username === 'root'
   });
 
   user.lastLoginTmbId = userDetail.team.tmbId;
@@ -65,7 +71,7 @@ async function handler(
     teamId: userDetail.team.teamId,
     tmbId: userDetail.team.tmbId,
     isRoot: username === 'root',
-    ip: requestIp.getClientIp(req)
+    ip: getClientIpFromRequest(req)
   });
 
   setCookie(res, token);
@@ -88,7 +94,7 @@ async function handler(
   };
 }
 
-const lockTime = Number(process.env.PASSWORD_LOGIN_LOCK_SECONDS || 120);
+const lockTime = serviceEnv.PASSWORD_LOGIN_LOCK_SECONDS;
 export default NextAPI(
   useIPFrequencyLimit({ id: 'login-by-password', seconds: lockTime, limit: 10, force: true }),
   handler

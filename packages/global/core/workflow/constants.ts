@@ -1,4 +1,4 @@
-import { i18nT } from '../../../web/i18n/utils';
+import { i18nT } from '../../common/i18n/utils';
 import type { JsonSchemaPropertiesItemType } from '../app/jsonschema';
 
 export enum FlowNodeTemplateTypeEnum {
@@ -161,6 +161,9 @@ export enum NodeInputKeyEnum {
   aiChatQuotePrompt = 'quotePrompt',
   aiChatDatasetQuote = 'quoteQA',
   aiChatVision = 'aiChatVision',
+  aiChatAudio = 'aiChatAudio',
+  aiChatVideo = 'aiChatVideo',
+  aiChatExtractFiles = 'aiChatExtractFiles',
   stringQuoteText = 'stringQuoteText',
   aiChatReasoning = 'aiChatReasoning',
   aiChatReasoningEffort = 'aiChatReasoningEffort',
@@ -174,7 +177,7 @@ export enum NodeInputKeyEnum {
   datasetParams = 'agent_datasetParams',
   skills = 'skills',
   useAgentSandbox = 'useAgentSandbox',
-  useEditDebugSandbox = 'useEditDebugSandbox',
+  editSkillId = 'editSkillId',
 
   // dataset
   datasetSelectList = 'datasets',
@@ -190,6 +193,7 @@ export enum NodeInputKeyEnum {
   datasetSearchUsingExtensionQuery = 'datasetSearchUsingExtensionQuery',
   datasetSearchExtensionModel = 'datasetSearchExtensionModel',
   datasetSearchExtensionBg = 'datasetSearchExtensionBg',
+  datasetSearchInput = 'datasetSearchInput',
   collectionFilterMatch = 'collectionFilterMatch',
   authTmbId = 'authTmbId',
   datasetDeepSearch = 'datasetDeepSearch',
@@ -282,8 +286,10 @@ export enum NodeOutputKeyEnum {
   text = 'system_text',
   addOutputParam = 'system_addOutputParam',
   rawResponse = 'system_rawResponse',
+
   systemError = 'system_error',
   errorText = 'system_error_text',
+  error = 'error',
 
   // start
   userFiles = 'userFiles',
@@ -305,6 +311,7 @@ export enum NodeOutputKeyEnum {
 
   // http
   httpRawResponse = 'httpRawResponse',
+  httpRawError = 'system_httpRawError',
 
   // plugin
   pluginStart = 'pluginStart',
@@ -335,10 +342,7 @@ export enum NodeOutputKeyEnum {
   formInputResult = 'formInputResult',
 
   // File
-  fileTitle = 'fileTitle',
-
-  /** @deprecated */
-  error = 'error'
+  fileTitle = 'fileTitle'
 }
 
 export enum ParallelRunStatusEnum {

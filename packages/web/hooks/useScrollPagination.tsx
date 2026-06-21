@@ -1,4 +1,4 @@
-import React, { type ReactNode, type RefObject, useMemo, useRef, useState } from 'react';
+import React, { type ReactNode, type RefObject, useRef, useState } from 'react';
 import { Box, type BoxProps } from '@chakra-ui/react';
 import { useToast } from './useToast';
 import { getErrText } from '@fastgpt/global/common/error/utils';
@@ -190,6 +190,7 @@ export function useScrollPagination<
     EmptyTip,
     showErrorToast = true,
     disabled = false,
+    showNoMoreTip = true,
 
     ...props
   }: {
@@ -200,6 +201,7 @@ export function useScrollPagination<
     EmptyTip?: React.JSX.Element;
     showErrorToast?: boolean;
     disabled?: boolean;
+    showNoMoreTip?: boolean;
   } & Parameters<typeof useRequest>[1]
 ) {
   const { t } = useTranslation();
@@ -215,16 +217,21 @@ export function useScrollPagination<
   const loadData = useLockFn(
     async ({
       init = false,
-      ScrollContainerRef
+      ScrollContainerRef,
+      silent = false
     }: {
       init?: boolean;
       ScrollContainerRef?: RefObject<HTMLDivElement>;
+      silent?: boolean;
     } = {}) => {
       if (noMore && !init) return;
 
-      setTrue();
+      // 静默刷新用于后台校准数据，保留旧列表并避免整块 loading 闪烁。
+      if (!silent) {
+        setTrue();
+      }
 
-      if (init) {
+      if (init && !silent) {
         setData([]);
         setTotal(0);
       }
@@ -275,11 +282,13 @@ export function useScrollPagination<
         console.log(error);
       }
 
-      setFalse();
+      if (!silent) {
+        setFalse();
+      }
     }
   );
 
-  let ScrollRef = useRef<HTMLDivElement>(null);
+  const ScrollRef = useRef<HTMLDivElement>(null);
   const ScrollData = useMemoizedFn(
     ({
       children,
@@ -292,11 +301,11 @@ export function useScrollPagination<
       ScrollContainerRef?: RefObject<HTMLDivElement>;
     } & BoxProps) => {
       const ref = ScrollContainerRef || ScrollRef;
-      const loadText = useMemo(() => {
+      const loadText = (() => {
         if (isLoading || isLoadingProp) return t('common:is_requesting');
         if (noMore) return t('common:request_end');
         return t('common:request_more');
-      }, [isLoading, noMore]);
+      })();
 
       const scroll = useScroll(ref);
 
@@ -332,7 +341,7 @@ export function useScrollPagination<
             </Box>
           )}
           {children}
-          {scrollLoadType === 'bottom' && !isEmpty && (
+          {scrollLoadType === 'bottom' && !isEmpty && (showNoMoreTip || !noMore) && (
             <Box
               mt={2}
               fontSize={'xs'}
@@ -375,6 +384,7 @@ export function useScrollPagination<
     total: Math.max(total, data.length),
     data,
     setData,
+    setTotal,
     fetchData: loadData,
     refreshList
   };

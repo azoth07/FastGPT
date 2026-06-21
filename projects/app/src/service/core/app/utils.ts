@@ -2,13 +2,17 @@ import { getErrText } from '@fastgpt/global/common/error/utils';
 import { getNextTimeByCronStringAndTimezone } from '@fastgpt/global/common/string/time';
 import { getNanoid } from '@fastgpt/global/common/string/tools';
 import { batchRun, retryFn } from '@fastgpt/global/common/system/utils';
-import { ChatRoleEnum, ChatSourceEnum } from '@fastgpt/global/core/chat/constants';
+import {
+  ChatGenerateStatusEnum,
+  ChatRoleEnum,
+  ChatSourceEnum
+} from '@fastgpt/global/core/chat/constants';
 import type {
+  UserChatItemType,
   AIChatItemValueItemType,
-  UserChatItemValueItemType,
-  ChatHistoryItemResType
+  UserChatItemValueItemType
 } from '@fastgpt/global/core/chat/type';
-import { DispatchNodeResponseKeyEnum } from '@fastgpt/global/core/workflow/runtime/constants';
+import type { NodeResponseWriteSummary } from '@fastgpt/service/core/chat/nodeResponseStorage';
 import {
   getWorkflowEntryNodeIds,
   storeEdges2RuntimeEdges,
@@ -18,7 +22,13 @@ import { UsageSourceEnum } from '@fastgpt/global/support/wallet/usage/constants'
 import { getLogger } from '@fastgpt/service/common/logger';
 import { MongoApp } from '@fastgpt/service/core/app/schema';
 import { getAppLatestVersion } from '@fastgpt/service/core/app/version/controller';
-import { pushChatRecords } from '@fastgpt/service/core/chat/saveChat';
+import {
+  failChatRound,
+  finalizeChatRound,
+  type Props as SaveChatProps
+} from '@fastgpt/service/core/chat/saveChat';
+import { preChatRound } from '@fastgpt/service/core/chat/utils/prepare';
+import { updateChatGenerateStatus } from '@fastgpt/service/core/chat/chatGenerateStatus';
 import { WORKFLOW_MAX_RUN_TIMES } from '@fastgpt/service/core/workflow/constants';
 import { dispatchWorkFlow } from '@fastgpt/service/core/workflow/dispatch';
 import { getRunningUserInfoByTmbId } from '@fastgpt/service/support/user/team/utils';
@@ -55,6 +65,8 @@ export const getScheduleTriggerApp = async () => {
     async (app) => {
       if (!app.scheduledTriggerConfig) return;
       const chatId = getNanoid();
+      const responseChatItemId = getNanoid(24);
+      let chatRoundFinalized = false;
 
       // Get app latest version
       const { versionId, nodes, edges, chatConfig } = await retryFn(() =>
@@ -78,58 +90,78 @@ export const getScheduleTriggerApp = async () => {
         })
       );
 
-      const onSave = async ({
+      const userContent: UserChatItemType & { dataId?: string } = {
+        obj: ChatRoleEnum.Human,
+        value: userQuery
+      };
+
+      const preparedRound = await preChatRound({
+        chatId,
+        appId: String(app._id),
+        teamId: String(app.teamId),
+        tmbId: String(app.tmbId),
+        source: ChatSourceEnum.cronJob,
+        userContent,
+        responseChatItemId
+      });
+
+      const saveChatRound = async ({
         error,
         durationSeconds = 0,
         assistantResponses = [],
-        flowResponses = [],
         system_memories,
-        customFeedbacks
+        customFeedbacks,
+        nodeResponseSummary
       }: {
         error?: any;
         durationSeconds?: number;
         assistantResponses?: AIChatItemValueItemType[];
-        flowResponses?: ChatHistoryItemResType[];
         system_memories?: Record<string, any>;
         customFeedbacks?: string[];
+        nodeResponseSummary?: NodeResponseWriteSummary;
       }) => {
-        return pushChatRecords({
-          chatId,
-          appId: app._id,
+        if (!preparedRound.shouldFinalizePreparedRound) {
+          return;
+        }
+
+        const saveParams: SaveChatProps = {
+          chatId: preparedRound.chatId,
+          appId: String(app._id),
           versionId,
           teamId: String(app.teamId),
           tmbId: String(app.tmbId),
           nodes,
           appChatConfig: chatConfig,
           variables: {},
-          newTitle: 'Cron Job',
           source: ChatSourceEnum.cronJob,
-          userContent: {
-            obj: ChatRoleEnum.Human,
-            value: userQuery
-          },
+          userContent,
           aiContent: {
             obj: ChatRoleEnum.AI,
+            dataId: preparedRound.responseChatItemId,
             value: assistantResponses,
-            [DispatchNodeResponseKeyEnum.nodeResponse]: flowResponses,
             memories: system_memories,
             customFeedbacks
           },
           durationSeconds,
-          errorMsg: getErrText(error)
-        });
+          errorMsg: getErrText(error),
+          nodeResponseSummary
+        };
+
+        await finalizeChatRound(saveParams);
+        chatRoundFinalized = true;
       };
 
       try {
         const {
           assistantResponses,
-          flowResponses,
           durationSeconds,
           system_memories,
-          customFeedbacks
+          customFeedbacks,
+          nodeResponseSummary
         } = await retryFn(async () => {
           return dispatchWorkFlow({
-            chatId,
+            chatId: preparedRound.chatId,
+            responseChatItemId: preparedRound.responseChatItemId,
             mode: 'chat',
             usageId,
             runningAppInfo: {
@@ -147,20 +179,22 @@ export const getScheduleTriggerApp = async () => {
             chatConfig,
             histories: [],
             stream: false,
-            maxRunTimes: WORKFLOW_MAX_RUN_TIMES
+            maxRunTimes: WORKFLOW_MAX_RUN_TIMES,
+            nodeResponseWriteConfig: {
+              persistToDb: true,
+              retainInMemory: false
+            }
           });
         });
 
-        const error = flowResponses[flowResponses.length - 1]?.error;
-
         // Save chat
-        await onSave({
-          error,
+        await saveChatRound({
+          error: nodeResponseSummary?.lastError,
           durationSeconds,
           assistantResponses,
-          flowResponses,
           system_memories,
-          customFeedbacks
+          customFeedbacks,
+          nodeResponseSummary
         });
       } catch (error) {
         logger.error('Schedule trigger workflow run failed', {
@@ -173,9 +207,22 @@ export const getScheduleTriggerApp = async () => {
           usageId
         });
 
-        await onSave({
-          error
-        }).catch();
+        if (!chatRoundFinalized && preparedRound?.shouldPersistChatRound) {
+          if (preparedRound.shouldFinalizePreparedRound) {
+            await failChatRound({
+              appId: String(app._id),
+              chatId: preparedRound.chatId,
+              responseChatItemId: preparedRound.responseChatItemId,
+              error
+            }).catch();
+          } else {
+            await updateChatGenerateStatus({
+              appId: String(app._id),
+              chatId: preparedRound.chatId,
+              status: ChatGenerateStatusEnum.error
+            }).catch();
+          }
+        }
       } finally {
         // update next time
         const nextTime = getNextTimeByCronStringAndTimezone(app.scheduledTriggerConfig);

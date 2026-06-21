@@ -1,5 +1,4 @@
 import type { SubPlanType } from '../../../support/wallet/sub/type';
-import { StandSubPlanLevelMapType } from '../../../support/wallet/sub/type';
 import type {
   LLMModelItemType,
   EmbeddingModelItemType,
@@ -7,7 +6,6 @@ import type {
   STTModelType,
   RerankModelItemType
 } from '../../../core/ai/model.schema';
-import { SubTypeEnum } from '../../../support/wallet/sub/constants';
 
 export type NavbarItemType = {
   id: string;
@@ -80,6 +78,7 @@ export type FastGPTFeConfigsType = {
 
   concatMd?: string;
   docUrl?: string;
+  loginGuideDocUrl?: string;
   openAPIDocUrl?: string;
   submitPluginRequestUrl?: string;
   appTemplateCourse?: string;
@@ -112,7 +111,11 @@ export type FastGPTFeConfigsType = {
     websiteSyncLimitMinuted?: number;
     agentSandboxMaxEditDebug?: number;
     agentSandboxMaxSessionRuntime?: number;
+    agentSandboxArchiveMaxBytes?: number;
+    skillSandboxMaxBytes?: number;
+    agentSandboxMaxFileBytes?: number;
     workflowParallelRunMaxConcurrency?: number;
+    maxFolderDepth?: number;
   };
 
   uploadFileMaxAmount: number;
@@ -147,13 +150,11 @@ export type FastGPTFeConfigsType = {
 
   // tmp
   agentSandboxFree?: boolean;
-  // Beta features
-  show_skill?: boolean;
+  agentSandboxProxyUrl?: string;
 };
 
 export type SystemEnvType = {
   openapiPrefix?: string;
-  tokenWorkers: number; // token count max worker
 
   datasetParseMaxProcess: number;
   vectorMaxProcess: number;
@@ -169,6 +170,10 @@ export type SystemEnvType = {
   customPdfParse?: customPdfParseType;
   fileUrlWhitelist?: string[];
   customDomain?: customDomainType;
+  workflowHttpNode?: {
+    /** 是否允许工作流 HTTP 节点忽略 HTTPS 证书校验。 */
+    ignoreHttpsCertificate?: boolean;
+  };
 };
 
 export type customDomainType = {

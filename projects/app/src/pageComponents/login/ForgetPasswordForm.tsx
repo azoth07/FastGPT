@@ -10,10 +10,13 @@ import { useTranslation } from 'next-i18next';
 import { useRequest } from '@fastgpt/web/hooks/useRequest';
 import { checkPasswordRule } from '@fastgpt/global/common/string/password';
 import type { LoginSuccessResponseType } from '@fastgpt/global/openapi/support/user/account/login/api';
+import type { LangEnum } from '@fastgpt/global/common/i18n/type';
+
+type LoginSuccessHandler = (res: LoginSuccessResponseType) => void | Promise<void>;
 
 interface Props {
   setPageType: Dispatch<`${LoginPageTypeEnum}`>;
-  loginSuccess: (e: LoginSuccessResponseType) => void;
+  loginSuccess: LoginSuccessHandler;
 }
 
 interface RegisterType {
@@ -25,7 +28,7 @@ interface RegisterType {
 
 const RegisterForm = ({ setPageType, loginSuccess }: Props) => {
   const { toast } = useToast();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { feConfigs } = useSystemStore();
   const {
     register,
@@ -55,20 +58,20 @@ const RegisterForm = ({ setPageType, loginSuccess }: Props) => {
 
   const { runAsync: onclickFindPassword, loading: requesting } = useRequest(
     async ({ username, code, password }: RegisterType) => {
-      loginSuccess(
-        await postFindPassword({
-          username,
-          code,
-          password
-        })
-      );
+      const loginResponse = await postFindPassword({
+        username,
+        code,
+        password,
+        language: i18n.language as LangEnum
+      });
+      await loginSuccess(loginResponse);
       toast({
         status: 'success',
         title: t('user:password.retrieved')
       });
     },
     {
-      refreshDeps: [loginSuccess, t, toast]
+      refreshDeps: [i18n.language, loginSuccess, t, toast]
     }
   );
   const onSubmitErr = (err: Record<string, any>) => {

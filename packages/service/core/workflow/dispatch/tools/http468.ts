@@ -8,7 +8,6 @@ import {
   WorkflowIOValueTypeEnum
 } from '@fastgpt/global/core/workflow/constants';
 import { DispatchNodeResponseKeyEnum } from '@fastgpt/global/core/workflow/runtime/constants';
-import { valueTypeFormat } from '@fastgpt/global/core/workflow/runtime/utils';
 import { type DispatchNodeResultType } from '@fastgpt/global/core/workflow/runtime/type';
 import type {
   ModuleDispatchProps,
@@ -17,19 +16,48 @@ import type {
 import {
   formatVariableValByType,
   getReferenceVariableValue,
-  replaceEditorVariable
+  valueTypeFormat
 } from '@fastgpt/global/core/workflow/runtime/utils';
+import type { AxiosRequestConfig } from 'axios';
 import json5 from 'json5';
 import { JSONPath } from 'jsonpath-plus';
 import { getSecretValue } from '../../../../common/secret/utils';
 import type { StoreSecretValueType } from '@fastgpt/global/common/secret/type';
 import { getLogger, LogCategories } from '../../../../common/logger';
-import { formatHttpError } from '../utils';
+import { formatHttpError, getNodeErrResponse } from '../utils';
 import { isInternalAddress, PRIVATE_URL_TEXT } from '../../../../common/system/utils';
 import { serviceRequestMaxContentLength } from '../../../../common/system/constants';
-import { axios } from '../../../../common/api/axios';
+import { axios, httpsCertificateIgnoreAgent } from '../../../../common/api/axios';
+import { replaceEditorVariable } from '../utils/replaceEditorVariable';
 
 const logger = getLogger(LogCategories.MODULE.WORKFLOW.TOOLS);
+
+/**
+ * 仅工作流 HTTP 节点允许按系统配置跳过 HTTPS 证书校验。
+ * 该配置不下沉到通用 axios,避免影响模型请求、HTTP 工具集等其它出站链路。
+ */
+export const getWorkflowHttpNodeHttpsAgentConfig = (
+  url: string
+): Pick<AxiosRequestConfig, 'httpsAgent'> => {
+  const ignoreHttpsCertificate =
+    global.systemEnv?.workflowHttpNode?.ignoreHttpsCertificate === true;
+
+  if (!ignoreHttpsCertificate) {
+    return {};
+  }
+
+  try {
+    if (new URL(url).protocol !== 'https:') {
+      return {};
+    }
+  } catch {
+    return {};
+  }
+
+  return {
+    httpsAgent: httpsCertificateIgnoreAgent
+  };
+};
 
 type PropsArrType = {
   key: string;
@@ -55,37 +83,39 @@ type HttpResponse = DispatchNodeResultType<
     [key: string]: any;
   },
   {
-    [NodeOutputKeyEnum.error]?: string;
+    [NodeOutputKeyEnum.errorText]: string; //未使用，仅作类型。
+    [NodeOutputKeyEnum.error]: string; // 适配字段
+    [NodeOutputKeyEnum.httpRawError]?: ReturnType<typeof formatHttpError>;
   }
 >;
 
 const UNDEFINED_SIGN = 'UNDEFINED_SIGN';
 
 export const dispatchHttp468Request = async (props: HttpRequestProps): Promise<HttpResponse> => {
-  let {
+  const {
     runningAppInfo: { id: appId },
     chatId,
     responseChatItemId,
-    variables,
+    variableState,
     node,
     runtimeNodesMap,
     histories,
     params: {
-      system_httpMethod: httpMethod = 'POST',
       system_httpReqUrl: httpReqUrl,
       system_httpHeader: httpHeader = [],
       system_httpParams: httpParams = [],
       system_httpJsonBody: httpJsonBody = '',
       system_httpFormBody: httpFormBody = [],
-      system_httpContentType: httpContentType = ContentTypes.json,
-      system_httpTimeout: httpTimeout = 60,
-      system_header_secret: headerSecret,
-      [NodeInputKeyEnum.addInputParam]: dynamicInput,
       ...body
     }
   } = props;
+  const httpMethod = props.params.system_httpMethod || 'POST';
+  const httpContentType = props.params.system_httpContentType || ContentTypes.json;
+  const httpTimeout = props.params.system_httpTimeout || 60;
+  const headerSecret = props.params.system_header_secret;
+  let requestUrl = httpReqUrl;
 
-  if (!httpReqUrl) {
+  if (!requestUrl) {
     return Promise.reject('Http url is empty');
   }
 
@@ -96,13 +126,13 @@ export const dispatchHttp468Request = async (props: HttpRequestProps): Promise<H
     histories: histories?.slice(-10) || []
   };
   const concatVariables = {
-    ...variables,
+    ...variableState.toRuntimeRecord(),
     ...body,
     ...systemVariables
   };
   const allVariables: Record<string, any> = {
-    [NodeInputKeyEnum.addInputParam]: concatVariables,
-    ...concatVariables
+    ...concatVariables,
+    [NodeInputKeyEnum.addInputParam]: concatVariables
   };
 
   // General data for variable substitution（Exclude: json body)
@@ -114,22 +144,22 @@ export const dispatchHttp468Request = async (props: HttpRequestProps): Promise<H
     });
   };
 
-  httpReqUrl = replaceStringVariables(httpReqUrl);
+  requestUrl = replaceStringVariables(requestUrl);
 
   const publicHeaders = await (async () => {
     try {
       const contentType = contentTypeMap[httpContentType];
-      if (contentType) {
-        httpHeader = [{ key: 'Content-Type', value: contentType, type: 'string' }, ...httpHeader];
-      }
+      const requestHeaders = contentType
+        ? [{ key: 'Content-Type', value: contentType, type: 'string' }, ...httpHeader]
+        : httpHeader;
 
-      return httpHeader.reduce((acc: Record<string, string>, item) => {
+      return requestHeaders.reduce((acc: Record<string, string>, item) => {
         const key = replaceStringVariables(item.key);
         const value = replaceStringVariables(item.value);
         acc[key] = valueTypeFormat(value, WorkflowIOValueTypeEnum.string);
         return acc;
       }, {});
-    } catch (error) {
+    } catch {
       return Promise.reject('Header 为非法 JSON 格式');
     }
   })();
@@ -149,43 +179,46 @@ export const dispatchHttp468Request = async (props: HttpRequestProps): Promise<H
     try {
       if (httpContentType === ContentTypes.formData) {
         if (!Array.isArray(httpFormBody)) return {};
-        httpFormBody = httpFormBody.map((item) => ({
+        const formBody = httpFormBody.map((item) => ({
           key: replaceStringVariables(item.key),
           type: item.type,
           value: replaceStringVariables(item.value)
         }));
         const formData = new FormData();
-        for (const { key, value } of httpFormBody) {
+        for (const { key, value } of formBody) {
           formData.append(key, value);
         }
         return formData;
       }
       if (httpContentType === ContentTypes.xWwwFormUrlencoded) {
         if (!Array.isArray(httpFormBody)) return {};
-        httpFormBody = httpFormBody.map((item) => ({
+        const formBody = httpFormBody.map((item) => ({
           key: replaceStringVariables(item.key),
           type: item.type,
           value: replaceStringVariables(item.value)
         }));
         const urlSearchParams = new URLSearchParams();
-        for (const { key, value } of httpFormBody) {
+        for (const { key, value } of formBody) {
           urlSearchParams.append(key, value);
         }
         return urlSearchParams;
       }
       if (!httpJsonBody) return {};
       if (httpContentType === ContentTypes.json) {
-        httpJsonBody = replaceJsonBodyString(
+        const jsonBody = replaceJsonBodyString(
           { text: httpJsonBody },
-          { variables, allVariables, runtimeNodesMap }
+          {
+            allVariables,
+            runtimeNodesMap
+          }
         );
-        return json5.parse(httpJsonBody);
+        return json5.parse(jsonBody);
       }
 
       // Raw text, xml
-      httpJsonBody = replaceStringVariables(httpJsonBody);
-      return httpJsonBody.replaceAll(UNDEFINED_SIGN, 'null');
-    } catch (error) {
+      const rawBody = replaceStringVariables(httpJsonBody);
+      return rawBody.replaceAll(UNDEFINED_SIGN, 'null');
+    } catch {
       return Promise.reject(`Invalid JSON body: ${httpJsonBody}`);
     }
   })();
@@ -210,7 +243,7 @@ export const dispatchHttp468Request = async (props: HttpRequestProps): Promise<H
     const { formatResponse, rawResponse } = await (async () => {
       return fetchData({
         method: httpMethod,
-        url: httpReqUrl,
+        url: requestUrl,
         headers: { ...sensitiveHeaders, ...publicHeaders },
         body: requestBody,
         params,
@@ -224,6 +257,7 @@ export const dispatchHttp468Request = async (props: HttpRequestProps): Promise<H
       .filter(
         (item) =>
           item.id !== NodeOutputKeyEnum.error &&
+          item.id !== NodeOutputKeyEnum.httpRawError &&
           item.id !== NodeOutputKeyEnum.httpRawResponse &&
           item.id !== NodeOutputKeyEnum.addOutputParam
       )
@@ -261,11 +295,15 @@ export const dispatchHttp468Request = async (props: HttpRequestProps): Promise<H
         headers: Object.keys(publicHeaders).length > 0 ? publicHeaders : undefined,
         httpResult: rawResponse
       },
-      [DispatchNodeResponseKeyEnum.toolResponses]:
+      [DispatchNodeResponseKeyEnum.toolResponse]:
         Object.keys(results).length > 0 ? results : rawResponse
     };
   } catch (error) {
-    logger.warn('HTTP tool request failed', { error, httpReqUrl });
+    logger.warn('HTTP tool request failed', {
+      error,
+      httpReqUrl: requestUrl,
+      ignoreHttpsCertificate: global.systemEnv?.workflowHttpNode?.ignoreHttpsCertificate === true
+    });
 
     // @adapt
     if (node.catchError === undefined) {
@@ -282,17 +320,21 @@ export const dispatchHttp468Request = async (props: HttpRequestProps): Promise<H
       };
     }
 
-    return {
-      error: {
-        [NodeOutputKeyEnum.error]: getErrText(error)
+    const errText = getErrText(error);
+    const errObj = formatHttpError(error);
+    return getNodeErrResponse({
+      error: errText,
+      customErr: {
+        [NodeOutputKeyEnum.error]: errText,
+        [NodeOutputKeyEnum.httpRawError]: errObj
       },
-      [DispatchNodeResponseKeyEnum.nodeResponse]: {
+      responseData: {
         params: Object.keys(params).length > 0 ? params : undefined,
         body: Object.keys(formattedRequestBody).length > 0 ? formattedRequestBody : undefined,
         headers: Object.keys(publicHeaders).length > 0 ? publicHeaders : undefined,
-        httpResult: { error: formatHttpError(error) }
+        httpErrorResult: errObj
       }
-    };
+    });
   }
 };
 
@@ -303,12 +345,11 @@ export const dispatchHttp468Request = async (props: HttpRequestProps): Promise<H
 export const replaceJsonBodyString = (
   { text, depth = 0 }: { text: string; depth?: number },
   props: {
-    variables: Record<string, any>;
     allVariables: Record<string, any>;
     runtimeNodesMap: Map<string, RuntimeNodeItemType>;
   }
 ) => {
-  const { variables, allVariables, runtimeNodesMap } = props;
+  const { allVariables, runtimeNodesMap } = props;
 
   const MAX_REPLACEMENT_DEPTH = 10;
   const processedVariables = new Set<string>();
@@ -354,7 +395,7 @@ export const replaceJsonBodyString = (
       try {
         JSON.parse(val);
         return val;
-      } catch (error) {
+      } catch {
         const str = JSON.stringify(val);
         return str.startsWith('"') && str.endsWith('"') ? str.slice(1, -1) : str;
       }
@@ -401,7 +442,7 @@ export const replaceJsonBodyString = (
 
     const variableVal = (() => {
       if (nodeId === VARIABLE_NODE_ID) {
-        return variables[id];
+        return allVariables[id];
       }
       // Find upstream node input/output
       const node = runtimeNodesMap.get(nodeId);
@@ -415,7 +456,7 @@ export const replaceJsonBodyString = (
         return getReferenceVariableValue({
           value: input.value,
           nodesMap: runtimeNodesMap,
-          variables
+          variables: allVariables
         });
       }
     })();
@@ -513,7 +554,8 @@ async function fetchData({
     },
     timeout: timeout * 1000,
     params: params,
-    data: ['POST', 'PUT', 'PATCH'].includes(method) ? body : undefined
+    data: ['POST', 'PUT', 'PATCH'].includes(method) ? body : undefined,
+    ...getWorkflowHttpNodeHttpsAgentConfig(url)
   });
 
   return {

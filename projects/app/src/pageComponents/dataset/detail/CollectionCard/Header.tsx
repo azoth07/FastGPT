@@ -40,7 +40,15 @@ const FileSourceSelector = dynamic(() => import('../Import/components/FileSource
 const BackupImportModal = dynamic(() => import('./BackupImportModal'));
 const TemplateImportModal = dynamic(() => import('./TemplateImportModal'));
 
-const Header = ({ hasTrainingData }: { hasTrainingData: boolean }) => {
+const Header = ({
+  hasTrainingData,
+  hasTrainingError,
+  onOpenTrainingErrorModal
+}: {
+  hasTrainingData: boolean;
+  hasTrainingError: boolean;
+  onOpenTrainingErrorModal: () => void;
+}) => {
   const { t } = useTranslation();
   const { feConfigs } = useSystemStore();
   const { isPc } = useSystem();
@@ -196,6 +204,23 @@ const Header = ({ hasTrainingData }: { hasTrainingData: boolean }) => {
         {datasetDetail.type !== DatasetTypeEnum.websiteDataset &&
           datasetDetail.permission.hasWritePer &&
           feConfigs?.isPlus && <HeaderTagPopOver />}
+
+        {hasTrainingError && (
+          <Button
+            variant={'whiteBase'}
+            h={'36px'}
+            px={'14px'}
+            color={'#F97066'}
+            borderColor={'#F97066'}
+            _hover={{
+              color: '#F97066',
+              borderColor: '#F97066'
+            }}
+            onClick={onOpenTrainingErrorModal}
+          >
+            {t('dataset:training_error_list')}
+          </Button>
+        )}
       </HStack>
 
       {/* diff collection button */}
@@ -331,11 +356,12 @@ const Header = ({ hasTrainingData }: { hasTrainingData: boolean }) => {
                       >
                         {t('dataset:params_config')}
                       </Button>
-                      {!hasTrainingData && feConfigs?.isPlus && (
+                      {feConfigs?.isPlus && (
                         <Button
                           variant={'whitePrimary'}
                           onClick={openDatasetSyncConfirm}
                           leftIcon={<Icon name="common/confirm/restoreTip" w={'1rem'} />}
+                          isDisabled={hasTrainingData}
                         >
                           {t('dataset:immediate_sync')}
                         </Button>

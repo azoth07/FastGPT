@@ -1,4 +1,3 @@
-import type { NextApiResponse } from 'next';
 import { MongoChatItem } from '@fastgpt/service/core/chat/chatItemSchema';
 import { authChatCrud } from '@/service/support/permission/auth/chat';
 import { NextAPI } from '@/service/middleware/entry';
@@ -7,18 +6,18 @@ import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
 import { updateChatFeedbackCount } from '@fastgpt/service/core/chat/controller';
 import { MongoAppChatLog } from '@fastgpt/service/core/app/logs/chatLogsSchema';
 import { ChatRoleEnum } from '@fastgpt/global/core/chat/constants';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 import {
   UpdateUserFeedbackBodySchema,
   UpdateUserFeedbackResponseSchema,
   type UpdateUserFeedbackResponseType
 } from '@fastgpt/global/openapi/core/chat/feedback/api';
 
-async function handler(
-  req: ApiRequestProps,
-  res: NextApiResponse
-): Promise<UpdateUserFeedbackResponseType> {
-  const { appId, chatId, dataId, userBadFeedback, userGoodFeedback } =
-    UpdateUserFeedbackBodySchema.parse(req.body);
+async function handler(req: ApiRequestProps): Promise<UpdateUserFeedbackResponseType> {
+  const { appId, chatId, dataId, userBadFeedback, userGoodFeedback } = parseApiInput({
+    req,
+    bodySchema: UpdateUserFeedbackBodySchema
+  }).body;
 
   const { teamId } = await authChatCrud({
     req,
@@ -95,7 +94,7 @@ async function handler(
     }
   });
 
-  return UpdateUserFeedbackResponseSchema.parse({});
+  return UpdateUserFeedbackResponseSchema.parse(undefined);
 }
 
 export default NextAPI(handler);

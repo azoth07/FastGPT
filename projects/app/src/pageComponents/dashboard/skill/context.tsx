@@ -1,11 +1,12 @@
 import React, { type Dispatch, type ReactNode, type SetStateAction, useState } from 'react';
 import { createContext } from 'use-context-selector';
 import { useRequest } from '@fastgpt/web/hooks/useRequest';
-import { getSkillList, getSkillFolderPath } from '@/web/core/skill/api';
-import type { ListSkillsResponse } from '@fastgpt/global/core/agentSkills/api';
+import { getSkillList, getSkillFolderPath, getSkillDetail } from '@/web/core/skill/api';
+import type { ListSkillsResponse } from '@fastgpt/global/core/ai/skill/api';
 import type { ParentTreePathItemType } from '@fastgpt/global/common/parentFolder/type';
+import { normalizeParentId } from '@fastgpt/global/common/parentFolder/depth';
 import { useRouter } from 'next/router';
-import { SkillPermission } from '@fastgpt/global/support/permission/agentSkill/controller';
+import type { SkillPermission } from '@fastgpt/global/support/permission/skill/controller';
 
 export type SkillListItemType = Omit<
   ListSkillsResponse['list'][number],
@@ -24,6 +25,9 @@ type SkillListContextType = {
   setSearchKey: Dispatch<SetStateAction<string>>;
   parentId: string | null;
   paths: ParentTreePathItemType[];
+  folderDetail?: {
+    permission: SkillPermission;
+  };
 };
 
 export const SkillListContext = createContext<SkillListContextType>({
@@ -37,15 +41,13 @@ export const SkillListContext = createContext<SkillListContextType>({
     throw new Error('Function not implemented.');
   },
   parentId: null,
-  paths: []
+  paths: [],
+  folderDetail: undefined
 });
 
 const SkillListContextProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter();
-  // 归一化 parentId：非空字符串时取值，否则为 null
-  const rawParentId = router.query.parentId;
-  const parentId: string | null =
-    typeof rawParentId === 'string' && rawParentId.length > 0 ? rawParentId : null;
+  const parentId = normalizeParentId(router.query.parentId);
 
   const [searchKey, setSearchKey] = useState('');
 
@@ -59,8 +61,7 @@ const SkillListContextProvider = ({ children }: { children: ReactNode }) => {
         res.list.map((item) => ({
           ...item,
           createTime: new Date(item.createTime),
-          updateTime: new Date(item.updateTime),
-          permission: new SkillPermission({ role: item.permission ?? 0 })
+          updateTime: new Date(item.updateTime)
         }))
       ),
     {
@@ -83,6 +84,19 @@ const SkillListContextProvider = ({ children }: { children: ReactNode }) => {
     }
   );
 
+  const { data: folderDetail } = useRequest(
+    () => {
+      if (!parentId) return Promise.resolve(undefined);
+      return getSkillDetail({ skillId: parentId }).then((res) => ({
+        permission: res.permission
+      }));
+    },
+    {
+      manual: false,
+      refreshDeps: [parentId]
+    }
+  );
+
   const contextValue: SkillListContextType = {
     skills: data || [],
     isFetchingSkills,
@@ -90,7 +104,8 @@ const SkillListContextProvider = ({ children }: { children: ReactNode }) => {
     searchKey,
     setSearchKey,
     parentId,
-    paths
+    paths,
+    folderDetail
   };
 
   return <SkillListContext.Provider value={contextValue}>{children}</SkillListContext.Provider>;

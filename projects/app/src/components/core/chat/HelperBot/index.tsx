@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useImperativeHandle, useRef, useState } from 'react';
+import React, { useEffect, useImperativeHandle, useRef, useState } from 'react';
 
 import HelperBotContextProvider, { type HelperBotProps } from './context';
 import type { AIChatItemValueItemType } from '@fastgpt/global/core/chat/helperBot/type';
@@ -20,23 +20,26 @@ import type { ChatBoxInputFormType } from '../ChatContainer/ChatBox/type';
 import { useForm } from 'react-hook-form';
 import { useToast } from '@fastgpt/web/hooks/useToast';
 import { useTranslation } from 'next-i18next';
-import { useMemoizedFn, useThrottleFn } from 'ahooks';
+import { useMemoizedFn } from 'ahooks';
 import {
   HelperBotTypeEnum,
   type HelperBotChatItemSiteType
 } from '@fastgpt/global/core/chat/helperBot/type';
 import type { onSendMessageParamsType } from './type';
-import { textareaMinH } from '../ChatContainer/ChatBox/constants';
+import { ChatInputWrapperStyle, textareaMinH } from '../ChatContainer/ChatBox/constants';
 import { streamFetch } from '@/web/common/api/fetch';
 import type { generatingMessageProps } from '../ChatContainer/type';
 import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
 import { getErrText } from '@fastgpt/global/common/error/utils';
+import { useChatScroll } from '../ChatContainer/ChatBox/hooks/useChatScroll';
+import ScrollToBottomButton from '../ChatContainer/ChatBox/components/ScrollToBottomButton';
 
 const ChatBox = ({ type, metadata, onApply, ChatBoxRef, ...props }: HelperBotProps) => {
   const { toast } = useToast();
   const { t } = useTranslation();
 
-  const ScrollContainerRef = useRef<HTMLDivElement>(null);
+  const { ScrollContainerRef, scrollToBottom, generatingScroll, isScrollToBottomButtonVisible } =
+    useChatScroll();
   // Messages 管理
   const [chatId, setChatId] = useState<string>(getNanoid(12));
   const [isChatting, setIsChatting] = useState(false);
@@ -58,20 +61,6 @@ const ChatBox = ({ type, metadata, onApply, ChatBoxRef, ...props }: HelperBotPro
     };
   }, []);
 
-  const scrollToBottom = useCallback((behavior: 'smooth' | 'auto' = 'smooth', delay = 0) => {
-    setTimeout(() => {
-      if (!ScrollContainerRef.current) {
-        setTimeout(() => {
-          scrollToBottom(behavior);
-        }, 500);
-      } else {
-        ScrollContainerRef.current.scrollTo({
-          top: ScrollContainerRef.current.scrollHeight,
-          behavior
-        });
-      }
-    }, delay);
-  }, []);
   const {
     data: chatRecords,
     setData: setChatRecords,
@@ -126,21 +115,6 @@ const ChatBox = ({ type, metadata, onApply, ChatBoxRef, ...props }: HelperBotPro
   const TextareaDom = useRef<HTMLTextAreaElement>(null);
 
   // Message request
-  const { run: generatingScroll } = useThrottleFn(
-    (force?: boolean) => {
-      if (!ScrollContainerRef.current) return;
-      const isBottom =
-        ScrollContainerRef.current.scrollTop + ScrollContainerRef.current.clientHeight + 150 >=
-        ScrollContainerRef.current.scrollHeight;
-
-      if (isBottom || force) {
-        scrollToBottom('auto');
-      }
-    },
-    {
-      wait: 100
-    }
-  );
   const generatingMessage = useMemoizedFn(
     ({ event, text = '', reasoningText, collectionForm, formData }: generatingMessageProps) => {
       setChatRecords((state) =>
@@ -180,17 +154,31 @@ const ChatBox = ({ type, metadata, onApply, ChatBoxRef, ...props }: HelperBotPro
           }
 
           if (event === SseResponseEventEnum.answer || event === SseResponseEventEnum.fastAnswer) {
+            const replaceUpdateValue = (nextValue: AIChatItemValueItemType) => ({
+              ...item,
+              value: [
+                ...item.value.slice(0, updateIndex),
+                nextValue,
+                ...item.value.slice(updateIndex + 1)
+              ]
+            });
+
             if (reasoningText) {
               if ('reasoning' in updateValue && updateValue.reasoning) {
-                updateValue.reasoning.content += reasoningText;
-                return {
-                  ...item,
-                  value: [
-                    ...item.value.slice(0, updateIndex),
-                    updateValue,
-                    ...item.value.slice(updateIndex + 1)
-                  ]
-                };
+                return replaceUpdateValue({
+                  ...updateValue,
+                  reasoning: {
+                    ...updateValue.reasoning,
+                    content: updateValue.reasoning.content + reasoningText
+                  }
+                });
+              } else if ('text' in updateValue && updateValue.text && !updateValue.text.content) {
+                return replaceUpdateValue({
+                  ...updateValue,
+                  reasoning: {
+                    content: reasoningText
+                  }
+                });
               } else {
                 const val: AIChatItemValueItemType = {
                   reasoning: {
@@ -205,15 +193,20 @@ const ChatBox = ({ type, metadata, onApply, ChatBoxRef, ...props }: HelperBotPro
             }
             if (text) {
               if ('text' in updateValue && updateValue.text) {
-                updateValue.text.content += text;
-                return {
-                  ...item,
-                  value: [
-                    ...item.value.slice(0, updateIndex),
-                    updateValue,
-                    ...item.value.slice(updateIndex + 1)
-                  ]
-                };
+                return replaceUpdateValue({
+                  ...updateValue,
+                  text: {
+                    ...updateValue.text,
+                    content: updateValue.text.content + text
+                  }
+                });
+              } else if ('reasoning' in updateValue && updateValue.reasoning) {
+                return replaceUpdateValue({
+                  ...updateValue,
+                  text: {
+                    content: text
+                  }
+                });
               } else {
                 const newValue: AIChatItemValueItemType = {
                   text: {
@@ -258,7 +251,7 @@ const ChatBox = ({ type, metadata, onApply, ChatBoxRef, ...props }: HelperBotPro
       }
 
       const chatItemDataId = getNanoid(24);
-      let newChatList: HelperBotChatItemSiteType[] = [
+      const newChatList: HelperBotChatItemSiteType[] = [
         ...chatRecords,
         // 用户消息
         {
@@ -300,7 +293,7 @@ const ChatBox = ({ type, metadata, onApply, ChatBoxRef, ...props }: HelperBotPro
         chatController.current = abortSignal;
 
         const response = await streamFetch({
-          url: '/api/core/chat/helperBot/completions',
+          url: '/api/proApi/core/chat/helperBot/completions',
           data: {
             chatId,
             chatItemId: chatItemDataId,
@@ -389,20 +382,22 @@ const ChatBox = ({ type, metadata, onApply, ChatBoxRef, ...props }: HelperBotPro
           </Box>
         ))}
       </ScrollData>
-      <Box
-        px={[3, 5]}
-        m={['0 auto 10px', '10px auto']}
-        w={'100%'}
-        maxW={['auto', 'min(820px, 100%)']}
-      >
-        <ChatInput
-          TextareaDom={TextareaDom}
-          chatId={chatId}
-          chatForm={chatForm}
-          isChatting={isChatting}
-          onSendMessage={handleSendMessage}
-          onStop={() => {}}
-        />
+      <Box {...ChatInputWrapperStyle}>
+        <Box position="relative">
+          <ScrollToBottomButton
+            isVisible={isScrollToBottomButtonVisible}
+            onClick={() => scrollToBottom('smooth')}
+          />
+
+          <ChatInput
+            TextareaDom={TextareaDom}
+            chatId={chatId}
+            chatForm={chatForm}
+            isChatting={isChatting}
+            onSendMessage={handleSendMessage}
+            onStop={() => {}}
+          />
+        </Box>
       </Box>
     </MyBox>
   );

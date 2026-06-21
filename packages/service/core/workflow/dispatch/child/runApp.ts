@@ -13,7 +13,8 @@ import {
 import type { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
 import { NodeOutputKeyEnum } from '@fastgpt/global/core/workflow/constants';
 import { DispatchNodeResponseKeyEnum } from '@fastgpt/global/core/workflow/runtime/constants';
-import { getSystemVariables, getNodeErrResponse, getHistories } from '../utils';
+import { getNodeErrResponse, getHistories } from '../utils';
+import { WorkflowVariableState } from '../utils/variables';
 import { chatValue2RuntimePrompt, runtimePrompt2ChatsValue } from '@fastgpt/global/core/chat/adapt';
 import { type DispatchNodeResultType } from '@fastgpt/global/core/workflow/runtime/type';
 import { authAppByTmbId } from '../../../../support/permission/app/auth';
@@ -22,6 +23,8 @@ import { getAppVersionById } from '../../../app/version/controller';
 import { parseUrlToFileType } from '../../utils/context';
 import { getUserChatInfo } from '../../../../support/user/team/utils';
 import { getRunningUserInfoByTmbId } from '../../../../support/user/team/utils';
+import type { WorkflowNodeResponseWriter } from '../../../chat/nodeResponseStorage';
+import { getRuntimeNodeResponseSummary } from '../utils';
 
 type Props = ModuleDispatchProps<{
   [NodeInputKeyEnum.userChatInput]: string;
@@ -29,7 +32,9 @@ type Props = ModuleDispatchProps<{
   [NodeInputKeyEnum.fileUrlList]?: string[];
   [NodeInputKeyEnum.forbidStream]?: boolean;
   [NodeInputKeyEnum.fileUrlList]?: string[];
-}>;
+}> & {
+  nodeResponseWriter?: WorkflowNodeResponseWriter;
+};
 type Response = DispatchNodeResultType<{
   [NodeOutputKeyEnum.answerText]: string;
   [NodeOutputKeyEnum.history]: ChatItemMiniType[];
@@ -44,7 +49,7 @@ export const dispatchRunAppNode = async (props: Props): Promise<Response> => {
     node: { pluginId: appId, version },
     workflowStreamResponse,
     params,
-    variables
+    variableState
   } = props;
 
   const {
@@ -101,24 +106,25 @@ export const dispatchRunAppNode = async (props: Props): Promise<Response> => {
 
     // Rewrite children app variables
     const { externalProvider } = await getUserChatInfo(appData.tmbId);
-    const childrenRunVariables = {
-      ...(await getSystemVariables({
-        timezone: props.timezone,
-        runningAppInfo: {
-          id: String(appData._id),
-          teamId: appData.teamId,
-          tmbId: appData.tmbId,
-          name: appData.name
-        },
-        chatId: props.chatId,
-        responseChatItemId: props.responseChatItemId,
-        histories: chatHistories,
-        uid: props.uid,
-        chatConfig,
-        variables: childrenAppVariables
-      })),
-      ...(externalProvider ? externalProvider.externalWorkflowVariables : {})
+    const childRunningAppInfo = {
+      id: String(appData._id),
+      teamId: appData.teamId,
+      tmbId: appData.tmbId,
+      name: appData.name,
+      isChildApp: true
     };
+    const childrenVariableState = await WorkflowVariableState.create({
+      timezone: props.timezone,
+      runningAppInfo: childRunningAppInfo,
+      chatId: props.chatId,
+      responseChatItemId: props.responseChatItemId,
+      histories: chatHistories,
+      uid: props.uid,
+      variablesConfig: chatConfig.variables,
+      inputVariables: childrenAppVariables,
+      externalVariables: externalProvider?.externalWorkflowVariables,
+      sourceVariableState: variableState
+    });
 
     const childrenInteractive =
       lastInteractive?.type === 'childrenInteractive'
@@ -138,13 +144,13 @@ export const dispatchRunAppNode = async (props: Props): Promise<Response> => {
       : runtimePrompt2ChatsValue({ files: userInputFiles, text: userChatInput });
 
     const {
-      flowResponses,
       flowUsages,
       assistantResponses,
       runTimes,
       workflowInteractiveResponse,
       system_memories,
-      customFeedbacks
+      customFeedbacks,
+      runtimeNodeResponseSummary
     } = await runWorkflow({
       ...props,
       lastInteractive: childrenInteractive,
@@ -166,7 +172,7 @@ export const dispatchRunAppNode = async (props: Props): Promise<Response> => {
       runtimeNodes,
       runtimeEdges,
       histories: chatHistories,
-      variables: childrenRunVariables,
+      variableState: childrenVariableState,
       query: theQuery,
       chatConfig
     });
@@ -191,6 +197,10 @@ export const dispatchRunAppNode = async (props: Props): Promise<Response> => {
         totalPoints: usagePoints
       }
     ]);
+    const runtimeSummary = getRuntimeNodeResponseSummary({
+      runtimeNodeResponseSummary
+    });
+    const childResponseCount = runtimeSummary.childResponseCount;
 
     return {
       data: {
@@ -214,10 +224,9 @@ export const dispatchRunAppNode = async (props: Props): Promise<Response> => {
         totalPoints: usagePoints,
         query: userChatInput,
         textOutput: text,
-        pluginDetail: appData.permission.hasWritePer ? flowResponses : undefined,
-        mergeSignId: props.node.nodeId
+        childResponseCount
       },
-      [DispatchNodeResponseKeyEnum.toolResponses]: text,
+      [DispatchNodeResponseKeyEnum.toolResponse]: text,
       [DispatchNodeResponseKeyEnum.customFeedbacks]: customFeedbacks
     };
   } catch (error) {

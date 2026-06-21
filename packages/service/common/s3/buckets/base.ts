@@ -1,11 +1,4 @@
-import {
-  Client,
-  type RemoveOptions,
-  type CopyConditions,
-  S3Error,
-  InvalidObjectNameError,
-  InvalidXMLError
-} from 'minio';
+import { S3Error, InvalidObjectNameError, InvalidXMLError } from 'minio';
 import {
   type CreatePostPresignedUrlOptions,
   type CreatePostPresignedUrlParams,
@@ -14,7 +7,11 @@ import {
   CreatePostPresignedUrlOptionsSchema,
   type CreatePostPresignedUrlResult
 } from '../contracts/type';
-import { storageDownloadMode, getSystemMaxFileSize } from '../config/constants';
+import {
+  storageDownloadMode,
+  getSystemMaxFileSize,
+  replaceS3UrlWithCdnEndpoint
+} from '../config/constants';
 import { S3ErrEnum } from '@fastgpt/global/common/error/code/s3';
 import { createUploadConstraints } from '../utils/uploadConstraints';
 import path from 'node:path';
@@ -76,7 +73,7 @@ export class S3BaseBucket {
 
     await this.client.uploadObject({
       key,
-      body: 'ok',
+      body: Buffer.from('ok'),
       contentType: 'text/plain',
       metadata: {
         contentDisposition: getContentDisposition({ filename, type: 'attachment' }),
@@ -86,10 +83,14 @@ export class S3BaseBucket {
     });
 
     try {
-      await Promise.all([
-        this.client.getObjectMetadata({ key }),
-        this._externalClient?.checkObjectExists({ key })
-      ]);
+      await this.client.getObjectMetadata({ key });
+      if (this._externalClient) {
+        this._externalClient.checkObjectExists({ key }).catch((err) => {
+          logger.warn('External S3 endpoint check failed, using internal only', {
+            error: err?.message || String(err)
+          });
+        });
+      }
     } finally {
       await this.client.deleteObject({ key }).catch((err) => {
         if (isFileNotFoundError(err)) {
@@ -131,7 +132,7 @@ export class S3BaseBucket {
   }
 
   async removeObject(objectKey: string): Promise<void> {
-    this.client.deleteObject({ key: objectKey }).catch((err) => {
+    await this.client.deleteObject({ key: objectKey }).catch((err) => {
       if (isFileNotFoundError(err)) {
         return Promise.resolve();
       }
@@ -186,6 +187,11 @@ export class S3BaseBucket {
         });
       }
 
+      const { url: previewUrl } = await this.createExternalUrl({
+        key: params.rawKey,
+        expiredHours
+      });
+
       return {
         url: jwtSignS3UploadToken({
           objectKey: params.rawKey,
@@ -199,6 +205,7 @@ export class S3BaseBucket {
         headers: {
           'content-type': resolvedUploadConstraints.defaultContentType
         },
+        previewUrl,
         maxSize: formatMaxFileSize
       };
     } catch (error) {
@@ -226,10 +233,17 @@ export class S3BaseBucket {
     }
   }
 
+  /**
+   * 为对象 key 生成外部可访问 URL。
+   *
+   * 该方法只负责存储层签名，不做 team/app/dataset/user 的业务归属校验。任何 API 边界或
+   * 用户可控 key 调用到这里前，必须先使用对应 S3 source 的 key helper 校验 key
+   * 属于当前已鉴权资源。
+   */
   async createExternalUrl(params: createPreviewUrlParams) {
     const parsed = CreateGetPresignedUrlParamsSchema.parse(params);
 
-    const { key, expiredHours, mode } = parsed;
+    const { key, expiredHours, mode, responseContentType } = parsed;
     const expires = expiredHours ? expiredHours * 60 * 60 : 30 * 60; // expires 的单位是秒 默认 30 分钟
 
     if ((mode || storageDownloadMode) === 'proxy') {
@@ -245,16 +259,29 @@ export class S3BaseBucket {
       };
     }
 
-    return await this.externalClient.generatePresignedGetUrl({ key, expiredSeconds: expires });
+    const result = await this.externalClient.generatePresignedGetUrl({
+      key,
+      expiredSeconds: expires,
+      ...(responseContentType ? { responseContentType } : {})
+    });
+
+    return {
+      ...result,
+      url: replaceS3UrlWithCdnEndpoint(result.url)
+    };
   }
 
   async createPreviewUrl(params: createPreviewUrlParams) {
     const parsed = CreateGetPresignedUrlParamsSchema.parse(params);
 
-    const { key, expiredHours } = parsed;
+    const { key, expiredHours, responseContentType } = parsed;
     const expires = expiredHours ? expiredHours * 60 * 60 : 30 * 60; // expires 的单位是秒 默认 30 分钟
 
-    return await this.client.generatePresignedGetUrl({ key, expiredSeconds: expires });
+    return await this.client.generatePresignedGetUrl({
+      key,
+      expiredSeconds: expires,
+      ...(responseContentType ? { responseContentType } : {})
+    });
   }
 
   async uploadFileByBody(params: UploadFileByBufferParams) {

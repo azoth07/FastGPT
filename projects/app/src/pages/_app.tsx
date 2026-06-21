@@ -16,6 +16,7 @@ import { getWebReqUrl } from '@fastgpt/web/common/system/utils';
 import SystemStoreContextProvider from '@fastgpt/web/context/useSystem';
 import { useRouter } from 'next/router';
 import { errorLogger } from '@/web/common/utils/errorLogger';
+import { appClientEnv } from '@/web/common/system/env';
 
 import '@scalar/api-reference-react/style.css';
 
@@ -27,8 +28,9 @@ type AppPropsWithLayout = AppProps & {
 };
 
 const routesWithCustomHead = ['/chat', '/chat/share', '/app/detail', '/dataset/detail'];
+const openAPIReferenceRoutes = ['/openapi', '/devapidoc'];
 // 哪些路由不需要 Layout
-const routesWithoutLayout = ['/openapi'];
+const routesWithoutLayout = openAPIReferenceRoutes;
 
 function App({ Component, pageProps }: AppPropsWithLayout) {
   const { feConfigs, scripts, title } = useInitApp();
@@ -55,17 +57,13 @@ function App({ Component, pageProps }: AppPropsWithLayout) {
   const router = useRouter();
   const showHead = !router?.pathname || !routesWithCustomHead.includes(router.pathname);
   const shouldUseLayout = !router?.pathname || !routesWithoutLayout.includes(router.pathname);
+  const headDesc = appClientEnv.systemDescription || t('common:system_intro', { title });
+  const headIcon = getWebReqUrl(feConfigs?.favicon || appClientEnv.systemFavicon);
 
-  if (router.pathname === '/openapi') {
+  if (openAPIReferenceRoutes.includes(router.pathname)) {
     return (
       <>
-        {showHead && (
-          <NextHead
-            title={title}
-            desc={process.env.SYSTEM_DESCRIPTION || t('common:system_intro', { title })}
-            icon={getWebReqUrl(feConfigs?.favicon || process.env.SYSTEM_FAVICON)}
-          />
-        )}
+        {showHead && <NextHead title={title} desc={headDesc} icon={headIcon} />}
         {setLayout(<Component {...pageProps} />)}
       </>
     );
@@ -73,15 +71,11 @@ function App({ Component, pageProps }: AppPropsWithLayout) {
 
   return (
     <>
-      {showHead && (
-        <NextHead
-          title={title}
-          desc={process.env.SYSTEM_DESCRIPTION || t('common:system_intro', { title })}
-          icon={getWebReqUrl(feConfigs?.favicon || process.env.SYSTEM_FAVICON)}
-        />
-      )}
+      {showHead && <NextHead title={title} desc={headDesc} icon={headIcon} />}
 
-      {scripts?.map((item, i) => <Script key={i} strategy="lazyOnload" {...item}></Script>)}
+      {scripts?.map((item, i) => (
+        <Script key={i} strategy="lazyOnload" {...item}></Script>
+      ))}
 
       <QueryClientContext>
         <SystemStoreContextProvider device={pageProps.deviceSize}>

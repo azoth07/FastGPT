@@ -2,7 +2,6 @@ import type { StreamResponseType } from '@/web/common/api/fetch';
 import type { ChatCompletionMessageParam } from '@fastgpt/global/core/ai/llm/type';
 import type {
   ChatHistoryItemResType,
-  StepTitleItemType,
   ToolModuleResponseItemType,
   SandboxStatusItemType,
   SkillModuleResponseItemType
@@ -12,13 +11,12 @@ import type {
   UserInputInteractive,
   WorkflowInteractiveResponseType
 } from '@fastgpt/global/core/workflow/template/system/interactive/type';
-import type { TopAgentFormDataType } from '@fastgpt/service/core/chat/HelperBot/dispatch/topAgent/type';
-import type { AgentPlanType } from '@fastgpt/global/core/ai/agent/type';
+import type { TopAgentFormDataType } from '@fastgpt/global/core/chat/helperBot/topAgent/type';
+import type { AgentPlanStatusType, AgentPlanType } from '@fastgpt/global/core/ai/agent/type';
 
 export type generatingMessageProps = {
   event: SseResponseEventEnum;
   responseValueId?: string;
-  stepId?: string;
 
   text?: string;
   reasoningText?: string;
@@ -29,10 +27,11 @@ export type generatingMessageProps = {
   variables?: Record<string, any>;
   nodeResponse?: ChatHistoryItemResType;
   durationSeconds?: number;
+  title?: string;
 
   // Agent
   plan?: AgentPlanType;
-  stepTitle?: StepTitleItemType;
+  planStatus?: AgentPlanStatusType;
 
   // Sandbox
   sandboxStatus?: SandboxStatusItemType;

@@ -13,23 +13,23 @@ import {
   getBdVId,
   getFastGPTSem,
   getMsclkid,
-  getSourceDomain,
   removeFastGPTSem,
   getInviterId
 } from '@/web/support/marketing/utils';
-import { useSystemStore } from '@/web/common/system/useSystemStore';
 import PolicyTip from './PolicyTip';
 import type { LoginSuccessResponseType } from '@fastgpt/global/openapi/support/user/account/login/api';
+import type { LangEnum } from '@fastgpt/global/common/i18n/type';
+
+type LoginSuccessHandler = (res: LoginSuccessResponseType) => void | Promise<void>;
 
 interface Props {
-  loginSuccess: (e: LoginSuccessResponseType) => void;
+  loginSuccess: LoginSuccessHandler;
   setPageType: Dispatch<`${LoginPageTypeEnum}`>;
 }
 
 const WechatForm = ({ setPageType, loginSuccess }: Props) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { toast } = useToast();
-  const { feConfigs } = useSystemStore();
 
   const { data: wechatInfo } = useQuery(['getWXLoginQR'], getWXLoginQR, {
     onError(err) {
@@ -41,7 +41,7 @@ const WechatForm = ({ setPageType, loginSuccess }: Props) => {
   });
 
   useQuery(
-    ['getWXLoginResult', wechatInfo?.code],
+    ['getWXLoginResult', wechatInfo?.code, i18n.language],
     () =>
       getWXLoginResult({
         inviterId: getInviterId(),
@@ -49,15 +49,15 @@ const WechatForm = ({ setPageType, loginSuccess }: Props) => {
         bd_vid: getBdVId(),
         msclkid: getMsclkid(),
         fastgpt_sem: getFastGPTSem(),
-        sourceDomain: getSourceDomain()
+        language: i18n.language as LangEnum
       }),
     {
       refetchInterval: 3 * 1000,
       enabled: !!wechatInfo?.code,
-      onSuccess(data: LoginSuccessResponseType | undefined) {
+      async onSuccess(data: LoginSuccessResponseType | undefined) {
         if (data) {
           removeFastGPTSem();
-          loginSuccess(data);
+          await loginSuccess(data);
         }
       }
     }
@@ -88,7 +88,7 @@ const WechatForm = ({ setPageType, loginSuccess }: Props) => {
             </Center>
           )}
         </Box>
-        <PolicyTip isCenter />
+        <PolicyTip />
       </Box>
     </FormLayout>
   );

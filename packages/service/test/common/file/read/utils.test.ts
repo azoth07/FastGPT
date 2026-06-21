@@ -9,34 +9,35 @@ const {
   mockAxiosPost,
   mockDoc2xParsePDF,
   mockTextinParsePDF,
-  mockUploadImage2S3Bucket
+  mockUploadImage2S3Bucket,
+  mockGetImageBuffer
 } = vi.hoisted(() => ({
   mockReadRawContentFromBuffer: vi.fn(async ({ extension, buffer, encoding }: any) => {
     if (extension === 'txt') {
       return {
         rawText: buffer.toString(encoding || 'utf-8'),
-        formatText: buffer.toString(encoding || 'utf-8'),
-        imageList: []
+        formatText: buffer.toString(encoding || 'utf-8')
       };
     }
     return {
       rawText: `parsed-${extension}-content`,
-      formatText: `parsed-${extension}-content`,
-      imageList: []
+      formatText: `parsed-${extension}-content`
     };
   }),
   mockAxiosPost: vi.fn(),
   mockDoc2xParsePDF: vi.fn().mockResolvedValue({
     pages: 1,
-    text: 'doc2x-parsed-text',
-    imageList: []
+    text: 'doc2x-parsed-text'
   }),
   mockTextinParsePDF: vi.fn().mockResolvedValue({
     pages: 1,
-    text: 'textin-parsed-text',
-    imageList: []
+    text: 'textin-parsed-text'
   }),
-  mockUploadImage2S3Bucket: vi.fn().mockResolvedValue('https://s3.example.com/uploaded-image.png')
+  mockUploadImage2S3Bucket: vi.fn().mockResolvedValue('https://s3.example.com/uploaded-image.png'),
+  mockGetImageBuffer: vi.fn().mockResolvedValue({
+    buffer: Buffer.from('image-bytes'),
+    mime: 'image/png'
+  })
 }));
 
 vi.mock('@fastgpt/service/worker/function', () => ({
@@ -74,6 +75,10 @@ vi.mock('@fastgpt/service/common/s3/utils', async (importOriginal) => {
   };
 });
 
+vi.mock('@fastgpt/service/common/file/image/utils', () => ({
+  getImageBuffer: mockGetImageBuffer
+}));
+
 import {
   readRawTextByLocalFile,
   readFileContentByBuffer
@@ -101,6 +106,11 @@ describe('readRawTextByLocalFile', () => {
     });
 
     expect(result.rawText).toBe('Hello World');
+    expect(mockReadRawContentFromBuffer).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        extension: 'txt'
+      })
+    );
   });
 
   it('should extract extension from file path', async () => {
@@ -135,6 +145,11 @@ describe('readFileContentByBuffer', () => {
     });
 
     expect(result.rawText).toBe('Hello from buffer');
+    expect(mockReadRawContentFromBuffer).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        extension: 'txt'
+      })
+    );
   });
 
   it('should use system parse for non-pdf files', async () => {
@@ -186,6 +201,12 @@ describe('readFileContentByBuffer', () => {
   it('should return formatText when getFormatText is true', async () => {
     const buffer = Buffer.from('content');
 
+    mockReadRawContentFromBuffer.mockResolvedValueOnce({
+      rawText: 'raw-text-with-|',
+      formatText: '| escaped\\|cell |',
+      imageList: []
+    });
+
     const result = await readFileContentByBuffer({
       teamId,
       tmbId,
@@ -195,7 +216,7 @@ describe('readFileContentByBuffer', () => {
       getFormatText: true
     });
 
-    expect(result.rawText).toBeDefined();
+    expect(result.rawText).toBe('| escaped\\|cell |');
   });
 
   it('should return rawText when getFormatText is false', async () => {
@@ -239,6 +260,64 @@ describe('readFileContentByBuffer', () => {
     expect(result.rawText).toBe('custom-service-parsed-text');
   });
 
+  it('should upload custom URL service base64 and http markdown images with shared handler', async () => {
+    global.systemEnv = {
+      customPdfParse: { url: 'http://custom-pdf-service.com/parse', key: 'test-key' }
+    } as any;
+    const expiredTime = new Date('2030-01-01T00:00:00.000Z');
+    mockAxiosPost.mockResolvedValueOnce({
+      data: {
+        pages: 3,
+        markdown: [
+          'base64 ![b](data:image/png;base64,iVBORw0KGgo=)',
+          'http ![h](https://img.example.com/h.png)'
+        ].join('\n')
+      }
+    });
+    mockUploadImage2S3Bucket
+      .mockResolvedValueOnce('dataset/ds1/file-parsed/base64.png')
+      .mockResolvedValueOnce('dataset/ds1/file-parsed/http.png');
+
+    const result = await readFileContentByBuffer({
+      teamId,
+      tmbId,
+      extension: 'pdf',
+      buffer: Buffer.from('pdf content'),
+      encoding: 'utf-8',
+      customPdfParse: true,
+      imageKeyOptions: {
+        prefix: 'dataset/ds1/file-parsed',
+        expiredTime
+      }
+    });
+
+    expect(mockGetImageBuffer).toHaveBeenCalledWith('https://img.example.com/h.png');
+    expect(mockUploadImage2S3Bucket).toHaveBeenNthCalledWith(
+      1,
+      'private',
+      expect.objectContaining({
+        base64Img: 'data:image/png;base64,iVBORw0KGgo=',
+        uploadKey: expect.stringMatching(/^dataset\/ds1\/file-parsed\/.+\.png$/),
+        mimetype: 'image/png',
+        filename: expect.stringMatching(/\.png$/),
+        expiredTime
+      })
+    );
+    expect(mockUploadImage2S3Bucket).toHaveBeenNthCalledWith(
+      2,
+      'private',
+      expect.objectContaining({
+        buffer: Buffer.from('image-bytes'),
+        uploadKey: expect.stringMatching(/^dataset\/ds1\/file-parsed\/.+\.png$/),
+        mimetype: 'image/png',
+        filename: expect.stringMatching(/\.png$/),
+        expiredTime
+      })
+    );
+    expect(result.rawText).toContain('![b](dataset/ds1/file-parsed/base64.png)');
+    expect(result.rawText).toContain('![h](dataset/ds1/file-parsed/http.png)');
+  });
+
   it('should use textin service for pdf when textinAppId is configured', async () => {
     global.systemEnv = {
       customPdfParse: { textinAppId: 'app-id', textinSecretCode: 'secret' }
@@ -258,6 +337,66 @@ describe('readFileContentByBuffer', () => {
     expect(result.rawText).toBe('textin-parsed-text');
   });
 
+  it('should pass Textin image upload handler when imageKeyOptions is provided', async () => {
+    global.systemEnv = {
+      customPdfParse: { textinAppId: 'app-id', textinSecretCode: 'secret' }
+    } as any;
+    const expiredTime = new Date('2030-01-01T00:00:00.000Z');
+
+    await readFileContentByBuffer({
+      teamId,
+      tmbId,
+      extension: 'pdf',
+      buffer: Buffer.from('pdf content'),
+      encoding: 'utf-8',
+      customPdfParse: true,
+      imageKeyOptions: {
+        prefix: 'dataset/ds1/file-parsed',
+        expiredTime
+      }
+    });
+
+    const [, options] = mockTextinParsePDF.mock.calls.at(-1)!;
+    expect(options.uploadImage).toBeInstanceOf(Function);
+
+    const uploadResult = await options.uploadImage({
+      type: 'base64',
+      mime: 'image/png',
+      base64: 'iVBORw0KGgo=',
+      dataUrl: 'data:image/png;base64,iVBORw0KGgo='
+    });
+
+    expect(uploadResult).toEqual({
+      key: 'https://s3.example.com/uploaded-image.png'
+    });
+    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith('private', {
+      base64Img: 'data:image/png;base64,iVBORw0KGgo=',
+      uploadKey: expect.stringMatching(/^dataset\/ds1\/file-parsed\/.+\.png$/),
+      mimetype: 'image/png',
+      filename: expect.stringMatching(/\.png$/),
+      expiredTime
+    });
+
+    mockUploadImage2S3Bucket.mockClear();
+    const httpUploadResult = await options.uploadImage({
+      type: 'http',
+      url: 'https://textin.example.com/image.png',
+      mime: 'image/png',
+      buffer: Buffer.from('image-bytes')
+    });
+
+    expect(httpUploadResult).toEqual({
+      key: 'https://s3.example.com/uploaded-image.png'
+    });
+    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith('private', {
+      buffer: Buffer.from('image-bytes'),
+      uploadKey: expect.stringMatching(/^dataset\/ds1\/file-parsed\/.+\.png$/),
+      mimetype: 'image/png',
+      filename: expect.stringMatching(/\.png$/),
+      expiredTime
+    });
+  });
+
   it('should use doc2x service for pdf when doc2xKey is configured', async () => {
     global.systemEnv = {
       customPdfParse: { doc2xKey: 'doc2x-api-key' }
@@ -275,6 +414,66 @@ describe('readFileContentByBuffer', () => {
     });
 
     expect(result.rawText).toBe('doc2x-parsed-text');
+  });
+
+  it('should pass Doc2x image upload handler when imageKeyOptions is provided', async () => {
+    global.systemEnv = {
+      customPdfParse: { doc2xKey: 'doc2x-api-key' }
+    } as any;
+    const expiredTime = new Date('2030-01-01T00:00:00.000Z');
+
+    await readFileContentByBuffer({
+      teamId,
+      tmbId,
+      extension: 'pdf',
+      buffer: Buffer.from('pdf content'),
+      encoding: 'utf-8',
+      customPdfParse: true,
+      imageKeyOptions: {
+        prefix: 'dataset/ds1/file-parsed',
+        expiredTime
+      }
+    });
+
+    const [, options] = mockDoc2xParsePDF.mock.calls.at(-1)!;
+    expect(options.uploadImage).toBeInstanceOf(Function);
+
+    const uploadResult = await options.uploadImage({
+      type: 'http',
+      url: 'https://doc2x.example.com/image.png',
+      mime: 'image/png',
+      buffer: Buffer.from('image-bytes')
+    });
+
+    expect(uploadResult).toEqual({
+      key: 'https://s3.example.com/uploaded-image.png'
+    });
+    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith('private', {
+      buffer: Buffer.from('image-bytes'),
+      uploadKey: expect.stringMatching(/^dataset\/ds1\/file-parsed\/.+\.png$/),
+      mimetype: 'image/png',
+      filename: expect.stringMatching(/\.png$/),
+      expiredTime
+    });
+
+    mockUploadImage2S3Bucket.mockClear();
+    const base64UploadResult = await options.uploadImage({
+      type: 'base64',
+      mime: 'image/png',
+      base64: 'iVBORw0KGgo=',
+      dataUrl: 'data:image/png;base64,iVBORw0KGgo='
+    });
+
+    expect(base64UploadResult).toEqual({
+      key: 'https://s3.example.com/uploaded-image.png'
+    });
+    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith('private', {
+      base64Img: 'data:image/png;base64,iVBORw0KGgo=',
+      uploadKey: expect.stringMatching(/^dataset\/ds1\/file-parsed\/.+\.png$/),
+      mimetype: 'image/png',
+      filename: expect.stringMatching(/\.png$/),
+      expiredTime
+    });
   });
 
   it('should reject when custom URL service returns error', async () => {
@@ -323,60 +522,100 @@ describe('readFileContentByBuffer', () => {
     expect(result.rawText).toBe('parsed-pdf-content');
   });
 
-  it('should process images from parsed document with imageKeyOptions', async () => {
-    mockReadRawContentFromBuffer.mockResolvedValueOnce({
-      rawText: 'text with ![img](IMAGE_abc123_IMAGE)',
-      formatText: 'text with ![img](IMAGE_abc123_IMAGE)',
-      imageList: [
-        {
-          uuid: 'IMAGE_abc123_IMAGE',
-          base64: 'iVBORw0KGgo=',
-          mime: 'image/png'
-        }
-      ]
+  it('should upload custom service markdown base64 images when imageKeyOptions is provided', async () => {
+    global.systemEnv = {
+      customPdfParse: { url: 'http://custom-pdf-service.com/parse' }
+    } as any;
+    mockAxiosPost.mockResolvedValueOnce({
+      data: {
+        pages: 1,
+        markdown: 'text with ![img](data:image/png;base64,iVBORw0KGgo=)'
+      }
     });
-
-    const buffer = Buffer.from('content with images');
 
     const result = await readFileContentByBuffer({
       teamId,
       tmbId,
-      extension: 'md',
-      buffer,
+      extension: 'pdf',
+      buffer: Buffer.from('pdf content'),
       encoding: 'utf-8',
+      customPdfParse: true,
       imageKeyOptions: {
         prefix: 'test/prefix'
       }
     });
 
     expect(result.rawText).toContain('https://s3.example.com/uploaded-image.png');
-    expect(result.rawText).not.toContain('IMAGE_abc123_IMAGE');
+    expect(result.rawText).not.toContain('data:image/png;base64');
+    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith(
+      'private',
+      expect.objectContaining({
+        base64Img: 'data:image/png;base64,iVBORw0KGgo=',
+        uploadKey: expect.stringMatching(/^test\/prefix\/.+\.png$/),
+        mimetype: 'image/png',
+        filename: expect.stringMatching(/\.png$/)
+      })
+    );
   });
 
-  it('should skip image upload when imageKeyOptions is not provided', async () => {
-    mockReadRawContentFromBuffer.mockResolvedValueOnce({
-      rawText: 'text with ![img](IMAGE_abc123_IMAGE)',
-      formatText: 'text with ![img](IMAGE_abc123_IMAGE)',
-      imageList: [
-        {
-          uuid: 'IMAGE_abc123_IMAGE',
-          base64: 'iVBORw0KGgo=',
-          mime: 'image/png'
-        }
-      ]
+  it('should remove custom service markdown base64 images when imageKeyOptions is not provided', async () => {
+    global.systemEnv = {
+      customPdfParse: { url: 'http://custom-pdf-service.com/parse' }
+    } as any;
+    mockAxiosPost.mockResolvedValueOnce({
+      data: {
+        pages: 1,
+        markdown: 'text with ![img](data:image/png;base64,iVBORw0KGgo=)'
+      }
     });
-
-    const buffer = Buffer.from('content with images');
 
     const result = await readFileContentByBuffer({
       teamId,
       tmbId,
-      extension: 'md',
+      extension: 'pdf',
+      buffer: Buffer.from('pdf content'),
+      encoding: 'utf-8',
+      customPdfParse: true
+    });
+
+    expect(result.rawText).toBe('text with');
+    expect(result.rawText).not.toContain('data:image/png;base64');
+  });
+  it('应将大写扩展名归一化为小写后再传给解析器（#6996）', async () => {
+    const buffer = Buffer.from('pdf content');
+
+    const result = await readFileContentByBuffer({
+      teamId,
+      tmbId,
+      extension: 'PDF',
       buffer,
       encoding: 'utf-8'
     });
 
-    // Without imageKeyOptions, images get empty string replacement
-    expect(result.rawText).not.toContain('IMAGE_abc123_IMAGE');
+    // 解析器应收到小写扩展名，从而命中对应分支而非报 "not supported"
+    expect(mockReadRawContentFromBuffer).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        extension: 'pdf'
+      })
+    );
+    expect(result.rawText).toBe('parsed-pdf-content');
+  });
+
+  it('应将混合大小写扩展名归一化为小写', async () => {
+    const buffer = Buffer.from('docx content');
+
+    await readFileContentByBuffer({
+      teamId,
+      tmbId,
+      extension: 'Docx',
+      buffer,
+      encoding: 'utf-8'
+    });
+
+    expect(mockReadRawContentFromBuffer).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        extension: 'docx'
+      })
+    );
   });
 });

@@ -30,7 +30,7 @@ ARG proxy
 ARG base_url
 
 # copy common node_modules and one project node_modules
-COPY package.json pnpm-workspace.yaml .npmrc tsconfig.json .eslintrc.json ./
+COPY package.json pnpm-workspace.yaml .npmrc tsconfig.json eslint.config.mjs ./
 COPY --from=maindeps /app/node_modules ./node_modules
 COPY --from=maindeps /app/packages ./packages
 COPY --from=maindeps /app/sdk ./sdk
@@ -48,17 +48,6 @@ ENV NEXT_PUBLIC_BASE_URL=$base_url
 RUN pnpm build:sdks
 RUN pnpm --filter=app build
 
-# Bundle server.ts into a single CJS file; only 'next' is kept external (already in standalone output)
-# Banner: mirrors what standalone server.js does — chdir to __dirname and load pre-serialized
-# Next.js config so that next() skips webpack (config-utils) during startup.
-RUN cd projects/app && ./node_modules/.bin/esbuild server.ts \
-    --bundle \
-    --platform=node \
-    --format=cjs \
-    --outfile=server-proxy.js \
-    --external:next \
-    '--banner:js=process.chdir(__dirname);try{const d=require("./.next/required-server-files.json");process.env.__NEXT_PRIVATE_STANDALONE_CONFIG=JSON.stringify(d.config);}catch(e){}'
-
 # Remove build-time-only packages from standalone output before copying to runner.
 # These are traced into standalone by mistake (rspack bindings, gnu platform binaries, etc.)
 RUN rm -rf projects/app/.next/standalone/node_modules/.pnpm/@next+rspack-binding-*/ \
@@ -74,15 +63,13 @@ WORKDIR /app
 
 ARG proxy
 ARG base_url
-ARG SHOW_SKILL=false
-ENV SHOW_SKILL=$SHOW_SKILL
 
 # create user and use it
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
 RUN [ -z "$proxy" ] || sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories
-RUN apk add --no-cache curl ca-certificates \
+RUN apk add --no-cache curl ca-certificates libc++ \
   && update-ca-certificates
 
 # copy running files
@@ -99,9 +86,6 @@ COPY --from=builder --chown=nextjs:nodejs /app/projects/app/.next/server/chunks 
 COPY --from=builder --chown=nextjs:nodejs /app/projects/app/worker /app/projects/app/worker
 COPY --from=builder --chown=nextjs:nodejs /app/projects/app/worker /app/worker
 
-# copy standload packages
-COPY --from=maindeps /app/node_modules/tiktoken ./node_modules/tiktoken
-RUN rm -rf ./node_modules/tiktoken/encoders
 COPY --from=maindeps /app/node_modules/@zilliz/milvus2-sdk-node ./node_modules/@zilliz/milvus2-sdk-node
 
 # copy package.json to version file
@@ -120,4 +104,4 @@ EXPOSE 3000
 
 USER nextjs
 
-ENTRYPOINT ["sh","-c","if [ \"$SHOW_SKILL\" = \"true\" ]; then node --max-old-space-size=4096 ./projects/app/server-proxy.js; else node --max-old-space-size=4096 ./projects/app/server.js; fi"]
+ENTRYPOINT ["node","--max-old-space-size=4096","./projects/app/server.js"]

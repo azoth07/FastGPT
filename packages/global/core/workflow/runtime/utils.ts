@@ -1,5 +1,4 @@
 import json5 from 'json5';
-import { checkStrOversize, replaceVariable, valToStr } from '../../../common/string/tools';
 import { ChatRoleEnum } from '../../../core/chat/constants';
 import type { ChatItemMiniType } from '../../../core/chat/type';
 import type { NodeOutputItemType } from './type';
@@ -109,7 +108,7 @@ export const valueTypeFormat = (value: any, valueType?: WorkflowIOValueTypeEnum)
       const trimmedValue = value.trim();
       try {
         return json5.parse(trimmedValue);
-      } catch (error) {}
+      } catch {}
     }
     return {};
   }
@@ -119,7 +118,7 @@ export const valueTypeFormat = (value: any, valueType?: WorkflowIOValueTypeEnum)
     if (isObjectString(value)) {
       try {
         return json5.parse(value);
-      } catch (error) {}
+      } catch {}
     }
     return [value];
   }
@@ -135,7 +134,7 @@ export const valueTypeFormat = (value: any, valueType?: WorkflowIOValueTypeEnum)
     if (isObjectString(value)) {
       try {
         return json5.parse(value);
-      } catch (error) {}
+      } catch {}
     }
     return [];
   }
@@ -145,7 +144,7 @@ export const valueTypeFormat = (value: any, valueType?: WorkflowIOValueTypeEnum)
     if (isObjectString(value)) {
       try {
         return json5.parse(value);
-      } catch (error) {}
+      } catch {}
     }
     return [];
   }
@@ -178,19 +177,14 @@ export const getLastInteractiveValue = (
 
     // Check is user select
     if (
-      (lastValue.interactive.type === 'userSelect' ||
-        lastValue.interactive.type === 'agentPlanAskUserSelect') &&
+      lastValue.interactive.type === 'userSelect' &&
       !lastValue.interactive?.params?.userSelectedVal
     ) {
       return lastValue.interactive;
     }
 
     // Check is user input
-    if (
-      (lastValue.interactive.type === 'userInput' ||
-        lastValue.interactive.type === 'agentPlanAskUserForm') &&
-      !lastValue.interactive?.params?.submitted
-    ) {
+    if (lastValue.interactive.type === 'userInput' && !lastValue.interactive?.params?.submitted) {
       return lastValue.interactive;
     }
 
@@ -198,16 +192,11 @@ export const getLastInteractiveValue = (
       return lastValue.interactive;
     }
 
-    // Agent plan check
-    if (
-      lastValue.interactive.type === 'agentPlanCheck' &&
-      !lastValue.interactive?.params?.confirmed
-    ) {
-      return lastValue.interactive;
-    }
-
     // Agent plan ask query
-    if (lastValue.interactive.type === 'agentPlanAskQuery') {
+    if (
+      lastValue.interactive.type === 'agentPlanAskQuery' &&
+      !lastValue.interactive.params.answer
+    ) {
       return lastValue.interactive;
     }
   }
@@ -297,13 +286,15 @@ export const filterWorkflowEdges = (edges: RuntimeEdgeItemType[]) => {
 export const getReferenceVariableValue = ({
   value,
   nodesMap,
-  variables
+  variables,
+  isReferenceVal = true
 }: {
   value?: ReferenceValueType;
   nodesMap: Record<string, RuntimeNodeItemType> | Map<string, RuntimeNodeItemType>;
-  variables: Record<string, any>;
+  variables: Record<string, unknown>;
+  isReferenceVal?: boolean;
 }) => {
-  if (!value) return value;
+  if (!value || !isReferenceVal) return value;
 
   const resoleValue = (value: [string, string | undefined]) => {
     const sourceNodeId = value[0];
@@ -332,7 +323,7 @@ export const getReferenceVariableValue = ({
   if (
     Array.isArray(value) &&
     value.length > 0 &&
-    value.every((item) => isValidReferenceValueFormat(item))
+    value.every((item) => isValidReferenceValueFormat(item, nodesMap))
   ) {
     return value
       .map<any>((val) => {
@@ -369,146 +360,6 @@ export const formatVariableValByType = (val: any, valueType?: WorkflowIOValueTyp
   return val;
 };
 
-// 模块级 RegExp 缓存，避免每次变量替换都重新编译正则
-const _replaceRegexCache = new Map<string, RegExp>();
-const _MAX_REGEX_CACHE_SIZE = 5000;
-
-const _getCachedRegex = (pattern: string): RegExp => {
-  let re = _replaceRegexCache.get(pattern);
-  if (!re) {
-    if (_replaceRegexCache.size >= _MAX_REGEX_CACHE_SIZE) {
-      _replaceRegexCache.clear();
-    }
-    re = new RegExp(pattern, 'g');
-    _replaceRegexCache.set(pattern, re);
-  }
-  return re;
-};
-
-// replace {{$xx.xx$}} variables for text
-export function replaceEditorVariable({
-  text,
-  nodesMap,
-  variables,
-  depth = 0
-}: {
-  text: any;
-  nodesMap: Record<string, RuntimeNodeItemType> | Map<string, RuntimeNodeItemType>;
-  variables: Record<string, any>; // global variables
-  depth?: number;
-}) {
-  const getNode = (nodeId: string) => {
-    return nodesMap instanceof Map ? nodesMap.get(nodeId) : nodesMap[nodeId];
-  };
-  if (typeof text !== 'string') return text;
-  if (text === '') return text;
-  if (checkStrOversize(text)) {
-    throw new Error('Text length exceeds 100,000,000 characters.');
-  }
-
-  const MAX_REPLACEMENT_DEPTH = 10;
-  const processedVariables = new Set<string>();
-
-  // Prevent infinite recursion
-  if (depth > MAX_REPLACEMENT_DEPTH) {
-    return text;
-  }
-
-  text = replaceVariable(text, variables);
-
-  // Check for circular references in variable values
-  const hasCircularReference = (value: any, targetKey: string): boolean => {
-    if (typeof value !== 'string') return false;
-
-    // Check if the value contains the target variable pattern (direct self-reference)
-    const selfRefPattern = _getCachedRegex(
-      `\\{\\{\\$${targetKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\$\\}\\}`
-    );
-    selfRefPattern.lastIndex = 0;
-    return selfRefPattern.test(value);
-  };
-
-  const variablePattern = /\{\{\$([^.]+)\.([^$]+)\$\}\}/g;
-  const matches = [...text.matchAll(variablePattern)];
-  if (matches.length === 0) return text;
-
-  let result = text;
-  let hasReplacements = false;
-
-  // Build replacement map first to avoid modifying string during iteration
-  const replacements: Array<{ pattern: string; replacement: string }> = [];
-
-  const variableRegex = /[.*+?^${}()|[\]\\]/g;
-  for (const match of matches) {
-    const nodeId = match[1];
-    const id = match[2];
-    const variableKey = `${nodeId}.${id}`;
-
-    // Skip if already processed to avoid immediate circular reference
-    if (processedVariables.has(variableKey)) {
-      continue;
-    }
-
-    const variableVal = (() => {
-      if (nodeId === VARIABLE_NODE_ID) {
-        return variables[id];
-      }
-      // Find upstream node input/output
-      const node = getNode(nodeId);
-      if (!node) return;
-
-      const output = node.outputs.find((output) => output.id === id);
-      if (output) return formatVariableValByType(output.value, output.valueType);
-
-      // Use the node's input as the variable value(Example: HTTP data will reference its own dynamic input)
-      const input = node.inputs.find((input) => input.key === id);
-      if (input) {
-        return getReferenceVariableValue({
-          value: input.value,
-          nodesMap,
-          variables
-        });
-      }
-    })();
-
-    // Check for direct circular reference
-    if (hasCircularReference(String(variableVal), variableKey)) {
-      continue;
-    }
-
-    const formatVal = valToStr(variableVal);
-    const escapedNodeId = nodeId.replace(variableRegex, '\\$&');
-    const escapedId = id.replace(variableRegex, '\\$&');
-
-    replacements.push({
-      pattern: `\\{\\{\\$${escapedNodeId}\\.${escapedId}\\$\\}\\}`,
-      replacement: formatVal
-    });
-
-    processedVariables.add(variableKey);
-    hasReplacements = true;
-  }
-
-  // Apply all replacements
-  for (const { pattern, replacement } of replacements) {
-    if (checkStrOversize(result)) {
-      console.warn('Text length exceeds 100,000,000 characters.');
-      break;
-    }
-
-    const re = _getCachedRegex(pattern);
-    re.lastIndex = 0;
-    result = result.replace(re, () => replacement);
-  }
-
-  // If we made replacements and there might be nested variables, recursively process
-  if (hasReplacements && /\{\{\$[^.]+\.[^$]+\$\}\}/.test(result)) {
-    result = replaceEditorVariable({ text: result, nodesMap, variables, depth: depth + 1 });
-  }
-
-  return result || '';
-}
-
 export const textAdaptGptResponse = ({
   text,
   reasoning_content,
@@ -520,7 +371,7 @@ export const textAdaptGptResponse = ({
   text?: string | null;
   reasoning_content?: string | null;
   finish_reason?: null | 'stop';
-  extraData?: Object;
+  extraData?: object;
 }) => {
   return {
     ...extraData,

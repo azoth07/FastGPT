@@ -12,9 +12,13 @@ import { getRandomUserAvatar } from '@fastgpt/global/support/user/utils';
 import { presignVariablesFileUrls } from '@fastgpt/service/core/chat/utils';
 import { InitOutLinkChatQuerySchema } from '@fastgpt/global/openapi/core/chat/outLink/api';
 import { ChatGenerateStatusEnum } from '@fastgpt/global/core/chat/constants';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 
 async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const { chatId, shareId, outLinkUid } = InitOutLinkChatQuerySchema.parse(req.query);
+  const { chatId, shareId, outLinkUid } = parseApiInput({
+    req,
+    querySchema: InitOutLinkChatQuerySchema
+  }).query;
 
   // auth link permission
   const { uid, appId } = await authOutLink({ shareId, outLinkUid });
@@ -41,6 +45,14 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
   }
 
   const { nodes, chatConfig } = await getAppLatestVersion(app._id, app);
+  const systemConfigNode = getGuideModule(nodes);
+  const appChatConfig = getAppChatConfig({
+    chatConfig,
+    systemConfigNode,
+    storeVariables: chat?.variableList,
+    storeWelcomeText: chat?.welcomeText,
+    isPublicFetch: false
+  });
   const pluginInputs =
     chat?.pluginInputs ??
     nodes?.find((node) => node.flowNodeType === FlowNodeTypeEnum.pluginInput)?.inputs ??
@@ -48,7 +60,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
 
   const variables = await presignVariablesFileUrls({
     variables: chat?.variables,
-    variableConfig: chat?.variableList
+    variableConfig: appChatConfig.variables
   });
 
   return {
@@ -60,13 +72,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
     chatGenerateStatus: chat?.chatGenerateStatus,
     hasBeenRead: chat?.hasBeenRead,
     app: {
-      chatConfig: getAppChatConfig({
-        chatConfig,
-        systemConfigNode: getGuideModule(nodes),
-        storeVariables: chat?.variableList,
-        storeWelcomeText: chat?.welcomeText,
-        isPublicFetch: false
-      }),
+      chatConfig: appChatConfig,
       name: app.name,
       avatar: app.avatar,
       intro: app.intro,

@@ -1,9 +1,10 @@
 import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
-import { SANDBOX_ICON, SANDBOX_NAME } from '@fastgpt/global/core/ai/sandbox/constants';
+import { SANDBOX_ICON, SANDBOX_NAME } from '@fastgpt/global/core/ai/sandbox/tools';
 import { parseI18nString } from '@fastgpt/global/common/i18n/utils';
 import type { localeType } from '@fastgpt/global/common/i18n/type';
 import { runSandboxTools } from '../../../../../../ai/sandbox/toolCall';
 import type { DispatchSubAppResponse } from '../../type';
+import type { SandboxClient } from '../../../../../../ai/sandbox/service/runtime';
 
 export const dispatchSandboxTool = async ({
   toolName,
@@ -11,21 +12,27 @@ export const dispatchSandboxTool = async ({
   appId,
   userId,
   chatId,
-  lang
+  sandboxId,
+  lang,
+  sandboxClient
 }: {
   toolName: string;
   rawArgs: string;
   appId: string;
   userId: string;
   chatId: string;
+  sandboxId?: string;
   lang?: localeType;
+  sandboxClient?: SandboxClient;
 }): Promise<DispatchSubAppResponse> => {
   const { input, response } = await runSandboxTools({
     toolName,
     args: rawArgs,
     appId,
     userId,
-    chatId
+    chatId,
+    sandboxId,
+    sandboxClient
   });
 
   return {
@@ -41,19 +48,4 @@ export const dispatchSandboxTool = async ({
   };
 };
 
-// Agent Skills re-exports
-export type { AgentSandboxContext } from './types';
-export {
-  createAgentSandbox,
-  releaseAgentSandbox,
-  connectEditDebugSandbox,
-  disconnectEditDebugSandbox
-} from './lifecycle';
-export {
-  dispatchSandboxReadFile,
-  dispatchSandboxWriteFile,
-  dispatchSandboxEditFile,
-  dispatchSandboxExecute,
-  dispatchSandboxSearch
-} from './skill';
-export { buildSkillsContextPrompt } from './prompt';
+export { useSandbox } from './useSandbox';

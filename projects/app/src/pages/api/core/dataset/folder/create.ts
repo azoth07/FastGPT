@@ -16,13 +16,18 @@ import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
 import type { ApiRequestProps } from '@fastgpt/service/type/next';
 import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
 import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
+import { checkCreateFolderDepth } from '@fastgpt/service/common/parentFolder/depth';
 import {
   CreateDatasetFolderBodySchema,
   type CreateDatasetFolderBody
 } from '@fastgpt/global/openapi/core/dataset/api';
 
 async function handler(req: ApiRequestProps<CreateDatasetFolderBody>) {
-  const { parentId, name, intro } = CreateDatasetFolderBodySchema.parse(req.body);
+  const { parentId, name, intro } = parseApiInput({
+    req,
+    bodySchema: CreateDatasetFolderBodySchema
+  }).body;
 
   const { teamId, tmbId } = parentId
     ? await authDataset({
@@ -40,6 +45,8 @@ async function handler(req: ApiRequestProps<CreateDatasetFolderBody>) {
       });
 
   await checkTeamDatasetFolderLimit({ teamId });
+
+  await checkCreateFolderDepth({ parentId, teamId, model: MongoDataset });
 
   await mongoSessionRun(async (session) => {
     const dataset = await MongoDataset.create({

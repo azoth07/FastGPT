@@ -47,6 +47,11 @@ x-log-config: &x-log-config
   LOG_ENABLE_OTEL: false
   LOG_OTEL_LEVEL: info
   LOG_OTEL_URL: http://localhost:4318/v1/logs
+# 容器运行环境可能会自动注入 HTTP_PROXY/HTTPS_PROXY。
+# 明确绕过 compose 内部服务，避免内部请求被代理劫持。
+x-no-proxy-config: &x-no-proxy-config
+  NO_PROXY: localhost,127.0.0.1,::1,fastgpt,fastgpt-plugin,fastgpt-code-sandbox,fastgpt-aiproxy,fastgpt-aiproxy-pg,fastgpt-minio,fastgpt-mongo,fastgpt-redis,fastgpt-pg,fastgpt-mcp-server,opensandbox-server,fastgpt-volume-manager,host.docker.internal,*.orb.internal,*.orb.local
+  no_proxy: localhost,127.0.0.1,::1,fastgpt,fastgpt-plugin,fastgpt-code-sandbox,fastgpt-aiproxy,fastgpt-aiproxy-pg,fastgpt-minio,fastgpt-mongo,fastgpt-redis,fastgpt-pg,fastgpt-mcp-server,opensandbox-server,fastgpt-volume-manager,host.docker.internal,*.orb.internal,*.orb.local
 
 services:
   # Vector DB
@@ -180,17 +185,27 @@ services:
     networks:
       - fastgpt
     restart: always
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
-      <<: [*x-log-config]
+      <<: [*x-log-config, *x-no-proxy-config]
       LOG_OTEL_SERVICE_NAME: fastgpt-code-sandbox
       SANDBOX_TOKEN: *x-code-sandbox-token
       # ===== Resource Limits =====
+      # Maximum API JSON body size (MB), including variables
+      SANDBOX_API_MAX_BODY_MB: 8
       # Execution timeout per request (ms)
       SANDBOX_MAX_TIMEOUT: 60000
       # Maximum allowed memory per user code execution (MB)
       # Note: System automatically adds 50MB for runtime overhead
       # Actual process limit = SANDBOX_MAX_MEMORY_MB + 50MB
       SANDBOX_MAX_MEMORY_MB: 256
+      SANDBOX_MAX_OUTPUT_MB: 10
 
       # ===== Process Pool =====
       # Number of pre-warmed worker processes (JS + Python)
@@ -198,7 +213,7 @@ services:
 
       # ===== Network Request Limits =====
       # Whether to check if the request is to a private network
-      CHECK_INTERNAL_IP: false
+      CHECK_INTERNAL_IP: true
       # Maximum number of HTTP requests per execution
       SANDBOX_REQUEST_MAX_COUNT: 30
       # Timeout for each outbound HTTP request (ms)
@@ -227,7 +242,8 @@ services:
       - fastgpt
     restart: always
     environment:
-      - FASTGPT_ENDPOINT=http://fastgpt:3000
+      <<: [*x-no-proxy-config]
+      FASTGPT_ENDPOINT: http://fastgpt:3000
   fastgpt-plugin:
     image: ${{fastgpt-plugin.image}}:${{fastgpt-plugin.tag}}
     container_name: fastgpt-plugin
@@ -237,7 +253,7 @@ services:
     networks:
       - fastgpt
     environment:
-      <<: [*x-share-db-config, *x-log-config]
+      <<: [*x-share-db-config, *x-log-config, *x-no-proxy-config]
       AUTH_TOKEN: *x-plugin-auth-token
       # 工具网络请求，最大请求和响应体
       SERVICE_REQUEST_MAX_CONTENT_LENGTH: 10
@@ -273,6 +289,7 @@ services:
       - source: opensandbox-config
         target: /etc/opensandbox/config.toml
     environment:
+      <<: [*x-no-proxy-config]
       SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:8090/health']
@@ -304,6 +321,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker 模式必须挂载（只读即可）
     environment:
+      <<: [*x-no-proxy-config]
       PORT: 3000
       VM_RUNTIME: docker
       VM_AUTH_TOKEN: *x-volume-manager-auth-token # 对应 AGENT_SANDBOX_VOLUME_MANAGER_TOKEN

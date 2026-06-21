@@ -103,13 +103,14 @@ const createMockParseFileFn = ({ maxFiles = 20 }: { maxFiles?: number } = {}) =>
         return rawTextBuffer
           ? {
               name: rawTextBuffer.filename,
+              url,
               content: rawTextBuffer.text
             }
           : undefined;
       })
     );
 
-    return files.filter(Boolean) as { name: string; content: string }[];
+    return files.filter(Boolean) as { name: string; url: string; content: string }[];
   });
 
 const rewriteMessagesWithFileContent = async ({
@@ -534,6 +535,7 @@ describe('formatUserQueryWithFiles', () => {
         file: {
           type: ChatFileTypeEnum.file,
           name: 'bad.pdf',
+          // 不以 / http ws 开头，会被 normalizeReadableFileUrl 过滤掉
           url: 'chat/bad.pdf'
         }
       }
@@ -574,6 +576,7 @@ describe('formatUserQueryWithFiles', () => {
       {
         id: 'file-1',
         name: 'a.pdf',
+        url: '/a.pdf',
         sandboxPath: 'user_files/a.pdf',
         content: 'Alpha'
       }
@@ -597,6 +600,7 @@ describe('formatUserQueryWithFiles', () => {
     expect(content).toContain('总结这个文件');
     expect(content).toContain('<id>file-1</id>');
     expect(content).toContain('<name>a.pdf</name>');
+    expect(content).toContain('<url>/a.pdf</url>');
     expect(content).toContain('<sandboxPath>user_files/a.pdf</sandboxPath>');
     expect(content).toContain('<content>Alpha</content>');
   });

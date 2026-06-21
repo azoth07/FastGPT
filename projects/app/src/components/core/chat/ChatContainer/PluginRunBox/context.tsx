@@ -1,11 +1,7 @@
 import React, { type ReactNode, useCallback, useMemo, useRef } from 'react';
 import { createContext, useContextSelector } from 'use-context-selector';
 import { type PluginRunBoxProps } from './type';
-import {
-  type AIChatItemValueItemType,
-  type RuntimeUserPromptType
-} from '@fastgpt/global/core/chat/type';
-import { type FieldValues } from 'react-hook-form';
+import { type AIChatItemValueItemType } from '@fastgpt/global/core/chat/type';
 import { PluginRunBoxTabEnum } from './constants';
 import { useToast } from '@fastgpt/web/hooks/useToast';
 import { getNanoid } from '@fastgpt/global/common/string/tools';
@@ -18,9 +14,10 @@ import { chats2GPTMessages } from '@fastgpt/global/core/chat/adapt';
 import { clientGetWorkflowToolRunUserQuery } from '@fastgpt/global/core/workflow/utils';
 import { ChatItemContext } from '@/web/core/chat/context/chatItemContext';
 import { ChatRecordContext } from '@/web/core/chat/context/chatRecordContext';
-import { type AppFileSelectConfigType } from '@fastgpt/global/core/app/type/config.schema';
-import { defaultAppSelectFileConfig } from '@fastgpt/global/core/app/constants';
-import { mergeChatResponseData } from '@fastgpt/global/core/chat/utils';
+import {
+  appendNodeResponseByParent,
+  mergeNodeResponseDataByIdAndParent
+} from '@fastgpt/global/core/chat/utils/mergeNode';
 import { getErrText } from '@fastgpt/global/common/error/utils';
 import { WorkflowRuntimeContextProvider } from '@/components/core/chat/ChatContainer/context/workflowRuntimeContext';
 
@@ -28,18 +25,16 @@ type PluginRunContextType = PluginRunBoxProps & {
   isChatting: boolean;
   onSubmit: (e: ChatBoxInputFormType) => Promise<any>;
   instruction: string;
-  fileSelectConfig: AppFileSelectConfigType;
 };
 
 export const PluginRunContext = createContext<
   Omit<PluginRunContextType, 'appId' | 'chatId' | 'outLinkAuthData'>
 >({
   isChatting: false,
-  onSubmit: function (e: FieldValues): Promise<any> {
+  onSubmit: function (): Promise<any> {
     throw new Error('Function not implemented.');
   },
-  instruction: '',
-  fileSelectConfig: defaultAppSelectFileConfig
+  instruction: ''
 });
 
 const PluginRunContextProvider = ({
@@ -56,10 +51,7 @@ const PluginRunContextProvider = ({
   const setChatRecords = useContextSelector(ChatRecordContext, (v) => v.setChatRecords);
   const chatRecords = useContextSelector(ChatRecordContext, (v) => v.chatRecords);
 
-  const { instruction = '', fileSelectConfig = defaultAppSelectFileConfig } = useMemo(
-    () => chatConfig || {},
-    [chatConfig]
-  );
+  const instruction = chatConfig?.instruction || '';
 
   const { toast } = useToast();
   const chatController = useRef(new AbortController());
@@ -82,9 +74,7 @@ const PluginRunContextProvider = ({
           if (event === SseResponseEventEnum.flowNodeResponse && nodeResponse) {
             return {
               ...item,
-              responseData: item.responseData
-                ? [...item.responseData, nodeResponse]
-                : [nodeResponse]
+              responseData: appendNodeResponseByParent(item.responseData, nodeResponse)
             };
           } else if (event === SseResponseEventEnum.flowNodeStatus && status) {
             return {
@@ -168,7 +158,7 @@ const PluginRunContextProvider = ({
   );
 
   const onSubmit = useCallback(
-    async ({ variables, files }: ChatBoxInputFormType) => {
+    async ({ variables }: ChatBoxInputFormType) => {
       if (!onStartChat) return;
       if (isChatting) {
         toast({
@@ -189,8 +179,7 @@ const PluginRunContextProvider = ({
         {
           ...clientGetWorkflowToolRunUserQuery({
             pluginInputs,
-            variables,
-            files: files as RuntimeUserPromptType['files']
+            variables
           }),
           id: humanChatItemId,
           dataId: humanChatItemId,
@@ -230,10 +219,7 @@ const PluginRunContextProvider = ({
           responseChatItemId,
           controller: chatController.current,
           generatingMessage,
-          variables: {
-            files,
-            ...variables
-          }
+          variables
         });
 
         setChatRecords((state) =>
@@ -241,7 +227,7 @@ const PluginRunContextProvider = ({
             if (index !== state.length - 1) return item;
 
             // Check node response error
-            const responseData = mergeChatResponseData(item.responseData || []);
+            const responseData = mergeNodeResponseDataByIdAndParent(item.responseData || []);
             if (responseData[responseData.length - 1]?.error) {
               toast({
                 title: t(getErrText(responseData[responseData.length - 1].error)),
@@ -286,15 +272,13 @@ const PluginRunContextProvider = ({
     ...props,
     isChatting,
     onSubmit,
-    instruction,
-    fileSelectConfig
+    instruction
   };
   return (
     <WorkflowRuntimeContextProvider
       appId={props.appId}
       chatId={props.chatId}
       outLinkAuthData={props.outLinkAuthData || {}}
-      runtimeFileSelectConfig={props.runtimeFileSelectConfig}
     >
       <PluginRunContext.Provider value={contextValue}>{children}</PluginRunContext.Provider>
     </WorkflowRuntimeContextProvider>

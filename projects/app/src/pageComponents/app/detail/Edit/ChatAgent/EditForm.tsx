@@ -10,7 +10,6 @@ import {
   Switch
 } from '@chakra-ui/react';
 import type { AppFormEditFormType } from '@fastgpt/global/core/app/formEdit/type';
-import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
 
 import dynamic from 'next/dynamic';
@@ -23,24 +22,25 @@ import { TTSTypeEnum } from '@/web/core/app/constants';
 import FormLabel from '@fastgpt/web/components/common/MyBox/FormLabel';
 import { getWebLLMModel } from '@/web/common/system/utils';
 import ToolSelect from '../FormComponent/ToolSelector/ToolSelect';
-import SkillSelect from '../FormComponent/ToolSelector/SkillSelect';
 import { cardStyles } from '../../constants';
 import { SmallAddIcon } from '@chakra-ui/icons';
-import MyIconButton, { MyDeleteIconButton } from '@fastgpt/web/components/common/Icon/button';
+import MyIconButton from '@fastgpt/web/components/common/Icon/button';
+import MyTooltip from '@fastgpt/web/components/common/MyTooltip';
 import { useSkillManager } from './hooks/useSkillManager';
-import { SANDBOX_ICON } from '@fastgpt/global/core/ai/sandbox/constants';
+import { AGENT_SANDBOX_TOOLSET_ID, SANDBOX_ICON } from '@fastgpt/global/core/ai/sandbox/tools';
 import QuestionTip from '@fastgpt/web/components/common/MyTooltip/QuestionTip';
 import SandboxTipTag from '../../components/SandboxTipTag';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
-import SandboxNotSupportTip from '../../components/SandboxNotSupportTip';
 import { useUserStore } from '@/web/support/user/useUserStore';
+import MyTag from '@fastgpt/web/components/common/Tag/index';
+import { useAgentSkillSelect } from './hooks/useAgentSkillSelect';
+import { RechargeModal } from '@/components/support/wallet/NotSufficientModal';
+import DatasetCard from '@/components/core/app/DatasetCard';
 
 const DatasetSelectModal = dynamic(() => import('@/components/core/app/DatasetSelectModal'));
 const DatasetParamsModal = dynamic(() => import('@/components/core/app/DatasetParamsModal'));
-const TTSSelect = dynamic(() => import('@/components/core/app/TTSSelect'));
-const QGConfig = dynamic(() => import('@/components/core/app/QGConfig'));
+const SkillSelectModal = dynamic(() => import('../FormComponent/ToolSelector/SkillSelectModal'));
 const WhisperConfig = dynamic(() => import('@/components/core/app/WhisperConfig'));
-const InputGuideConfig = dynamic(() => import('@/components/core/app/InputGuideConfig'));
 const WelcomeTextConfig = dynamic(() => import('@/components/core/app/WelcomeTextConfig'));
 const FileSelectConfig = dynamic(() => import('@/components/core/app/FileSelect'));
 
@@ -58,7 +58,6 @@ const EditForm = ({
   appForm: AppFormEditFormType;
   setAppForm: React.Dispatch<React.SetStateAction<AppFormEditFormType>>;
 }) => {
-  const router = useRouter();
   const { t } = useTranslation();
   const { feConfigs } = useSystemStore();
   const { teamPlanStatus } = useUserStore();
@@ -72,12 +71,12 @@ const EditForm = ({
     onDeleteTool: (id) => {
       setAppForm((state) => ({
         ...state,
-        selectedTools: state.selectedTools?.filter((item) => item.id !== id) || []
+        selectedTools: state.selectedTools?.filter((item) => item.pluginId !== id) || []
       }));
     },
     onUpdateOrAddTool: (tool) => {
       setAppForm((state) => {
-        const index = state.selectedTools.findIndex((item) => item.id === tool.id);
+        const index = state.selectedTools.findIndex((item) => item.pluginId === tool.pluginId);
 
         if (index === -1) {
           return {
@@ -88,7 +87,8 @@ const EditForm = ({
           return {
             ...state,
             selectedTools:
-              state.selectedTools?.map((item) => (item.id === tool.id ? tool : item)) || []
+              state.selectedTools?.map((item) => (item.pluginId === tool.pluginId ? tool : item)) ||
+              []
           };
         }
       });
@@ -116,28 +116,70 @@ const EditForm = ({
   } = useDisclosure();
 
   const selectedModel = getWebLLMModel(appForm.aiSettings.model);
-  const tokenLimit = useMemo(() => {
-    return selectedModel?.quoteMaxToken || 3000;
-  }, [selectedModel?.quoteMaxToken]);
+  const {
+    selectedAgentSkills,
+    isAgentSkillSandboxUnavailable,
+    isOpenSkillSelect,
+    onCloseSkillSelect,
+    openSkillSelect,
+    onAddAgentSkill,
+    onRemoveAgentSkill,
+    onChangeAgentSandbox,
+    ConfirmModal,
+    isOpenRecharge,
+    onCloseRecharge
+  } = useAgentSkillSelect({
+    appForm,
+    showSandbox,
+    enableSandbox,
+    setAppForm
+  });
+  const promptSkillOption = useMemo(
+    () => ({
+      ...skillOption,
+      onSelect: async (id: string) => {
+        const option = await skillOption.onSelect?.(id);
+        if (!option?.onClick) return option;
 
-  // Force close image select when model not support vision
+        return {
+          ...option,
+          onClick: async (toolId: string) => {
+            const result = await option.onClick?.(toolId);
+
+            // AgentV2 提示词 @虚拟机 时，同步打开下方虚拟机开关。
+            if (result?.id === AGENT_SANDBOX_TOOLSET_ID && !appForm.aiSettings.useAgentSandbox) {
+              onChangeAgentSandbox(true);
+            }
+
+            return result;
+          }
+        };
+      }
+    }),
+    [appForm.aiSettings.useAgentSandbox, onChangeAgentSandbox, skillOption]
+  );
+  const tokenLimit = useMemo(() => {
+    return selectedModel.quoteMaxToken || 3000;
+  }, [selectedModel.quoteMaxToken]);
+
+  // 简易 Agent 不暴露多模态开关，文件选择能力直接跟随模型能力。
   useEffect(() => {
-    if (!selectedModel.vision) {
-      setAppForm((state) => ({
-        ...state,
-        chatConfig: {
-          ...state.chatConfig,
-          ...(state.chatConfig.fileSelectConfig
-            ? {
-                fileSelectConfig: {
-                  ...state.chatConfig.fileSelectConfig,
-                  canSelectImg: false
-                }
+    setAppForm((state) => ({
+      ...state,
+      chatConfig: {
+        ...state.chatConfig,
+        ...(state.chatConfig.fileSelectConfig
+          ? {
+              fileSelectConfig: {
+                ...state.chatConfig.fileSelectConfig,
+                canSelectImg: !!selectedModel.vision,
+                canSelectAudio: !!selectedModel.audio,
+                canSelectVideo: !!selectedModel.video
               }
-            : {})
-        }
-      }));
-    }
+            }
+          : {})
+      }
+    }));
   }, [selectedModel, setAppForm]);
 
   return (
@@ -157,11 +199,12 @@ const EditForm = ({
               <SettingLLMModel
                 bg="myGray.50"
                 defaultData={{
-                  model: appForm.aiSettings.model
+                  model: appForm.aiSettings.model,
                   // temperature: appForm.aiSettings.temperature,
                   // maxToken: appForm.aiSettings.maxToken,
                   // maxHistories: appForm.aiSettings.maxHistories,
-                  // aiChatReasoning: appForm.aiSettings.aiChatReasoning ?? true,
+                  aiChatReasoning: appForm.aiSettings.aiChatReasoning ?? true,
+                  aiChatReasoningEffort: appForm.aiSettings.aiChatReasoningEffort
                   // aiChatTopP: appForm.aiSettings.aiChatTopP,
                   // aiChatStopSign: appForm.aiSettings.aiChatStopSign,
                   // aiChatResponseFormat: appForm.aiSettings.aiChatResponseFormat,
@@ -172,7 +215,7 @@ const EditForm = ({
                 showTopP={false}
                 showStopSign={false}
                 showResponseFormat={false}
-                showReasoning={false}
+                showMultimodalConfig={false}
                 onChange={({ maxHistories = 6, ...data }) => {
                   setAppForm((state) => ({
                     ...state,
@@ -198,7 +241,7 @@ const EditForm = ({
                 bg={'myGray.50'}
                 title={t('common:core.ai.Prompt')}
                 isRichText={true}
-                skillOption={skillOption}
+                skillOption={promptSkillOption}
                 selectedSkills={selectedSkills}
                 onClickSkill={onClickSkill}
                 onRemoveSkill={onRemoveSkill}
@@ -226,55 +269,138 @@ const EditForm = ({
               <QuestionTip ml={1} label={t('app:use_computer_desc')} />
             </Flex>
 
-            {showSandbox ? (
-              enableSandbox ? (
-                <>
-                  <Box mr={2}>
-                    <SandboxTipTag />
-                  </Box>
-                  <Switch
-                    isChecked={appForm.aiSettings.useAgentSandbox ?? false}
-                    onChange={(e) => {
-                      setAppForm((state) => ({
-                        ...state,
-                        aiSettings: {
-                          ...state.aiSettings,
-                          useAgentSandbox: e.target.checked
-                        }
-                      }));
-                    }}
-                  />
-                </>
+            <Box mr={2}>
+              {showSandbox && enableSandbox ? (
+                <SandboxTipTag />
               ) : (
-                <SandboxNotSupportTip type="freeDisable" />
-              )
-            ) : (
-              <SandboxNotSupportTip type="systemDisable" />
-            )}
+                <MyTag>
+                  {showSandbox
+                    ? t('app:sandbox_free_not_support')
+                    : t('app:sandbox_not_support_tip')}
+                </MyTag>
+              )}
+            </Box>
+            <Switch
+              isChecked={appForm.aiSettings.useAgentSandbox ?? false}
+              onChange={(e) => onChangeAgentSandbox(e.target.checked)}
+            />
           </Flex>
         </Box>
 
         {/* skill choice */}
-        {feConfigs?.show_skill && (
-          <Box {...BoxStyles}>
-            <SkillSelect
-              selectedSkills={appForm.selectedAgentSkills || []}
-              onAddSkill={(skill) => {
-                setAppForm((state) => ({
-                  ...state,
-                  selectedAgentSkills: [skill, ...(state.selectedAgentSkills || [])]
-                }));
-              }}
-              onRemoveSkill={(skillId) => {
-                setAppForm((state) => ({
-                  ...state,
-                  selectedAgentSkills:
-                    state.selectedAgentSkills?.filter((item) => item.skillId !== skillId) || []
-                }));
-              }}
+        <Box {...BoxStyles}>
+          <Flex alignItems={'center'}>
+            <Flex alignItems={'center'} flex={1}>
+              <MyIcon name={'common/skill'} w={'20px'} color={'#487FFF'} />
+              <FormLabel ml={2}>{t('skill:associated_skills')}</FormLabel>
+            </Flex>
+            {isAgentSkillSandboxUnavailable && (
+              <MyTag
+                mr={2}
+                colorSchema={'red'}
+                type={'borderFill'}
+                cursor={'pointer'}
+                onClick={openSkillSelect}
+              >
+                {t('skill:sandbox_unavailable_tag')}
+              </MyTag>
+            )}
+            <Button
+              variant={'transparentBase'}
+              leftIcon={<SmallAddIcon />}
+              iconSpacing={1}
+              mr={'-5px'}
+              size={'sm'}
+              fontSize={'sm'}
+              onClick={openSkillSelect}
+            >
+              {t('common:Choose')}
+            </Button>
+          </Flex>
+          <Grid
+            mt={selectedAgentSkills.length > 0 ? 2 : 0}
+            gridTemplateColumns={'repeat(2, minmax(0, 1fr))'}
+            gridGap={[2, 4]}
+          >
+            {selectedAgentSkills.map((item) => {
+              const isDeleted = !!item.isDeleted;
+
+              return (
+                <MyTooltip
+                  key={item.skillId}
+                  label={isDeleted ? t('skill:skill_deleted_click_remove_tip') : item.description}
+                >
+                  <Flex
+                    overflow={'hidden'}
+                    alignItems={'center'}
+                    p={2.5}
+                    bg={'white'}
+                    boxShadow={'0 4px 8px -2px rgba(16,24,40,.1),0 2px 4px -2px rgba(16,24,40,.06)'}
+                    borderRadius={'md'}
+                    border={'base'}
+                    borderColor={isDeleted ? 'red.600' : undefined}
+                    userSelect={'none'}
+                    _hover={{
+                      borderColor: isDeleted ? 'red.600' : 'primary.300',
+                      '.delete': {
+                        display: 'flex'
+                      },
+                      '.hoverStyle': {
+                        display: 'flex'
+                      },
+                      '.unHoverStyle': {
+                        display: 'none'
+                      }
+                    }}
+                  >
+                    {item.avatar ? (
+                      <Avatar src={item.avatar} w={'1.5rem'} h={'1.5rem'} borderRadius={'sm'} />
+                    ) : (
+                      <MyIcon name={'core/skill/default'} w={'1.5rem'} h={'1.5rem'} />
+                    )}
+                    <Box
+                      flex={'1 0 0'}
+                      ml={2}
+                      className={'textEllipsis'}
+                      fontSize={'sm'}
+                      color={'myGray.900'}
+                    >
+                      {item.name}
+                    </Box>
+                    {isDeleted && (
+                      <MyTag colorSchema="red" type="fill" className="unHoverStyle">
+                        <MyIcon name={'common/error'} w={'14px'} mr={1} />
+                        <Box color={'red.600'} maxW={'120px'} className="textEllipsis">
+                          {t('skill:skill_deleted')}
+                        </Box>
+                      </MyTag>
+                    )}
+                    <Box className="hoverStyle" display={['flex', 'none']} ml={0.5}>
+                      <MyIconButton
+                        icon="delete"
+                        hoverBg="red.50"
+                        hoverColor="red.600"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRemoveAgentSkill(item.skillId);
+                        }}
+                      />
+                    </Box>
+                  </Flex>
+                </MyTooltip>
+              );
+            })}
+          </Grid>
+
+          {isOpenSkillSelect && (
+            <SkillSelectModal
+              selectedSkills={selectedAgentSkills}
+              onAddSkill={onAddAgentSkill}
+              onRemoveSkill={onRemoveAgentSkill}
+              onClose={onCloseSkillSelect}
             />
-          </Box>
-        )}
+          )}
+        </Box>
 
         {/* tool choice */}
         <Box {...BoxStyles}>
@@ -292,7 +418,8 @@ const EditForm = ({
               setAppForm((state) => ({
                 ...state,
                 selectedTools:
-                  state.selectedTools?.map((item) => (item.id === e.id ? e : item)) || []
+                  state.selectedTools?.map((item) => (item.pluginId === e.pluginId ? e : item)) ||
+                  []
               }));
             }}
             onRemoveTool={(id) => {
@@ -311,6 +438,28 @@ const EditForm = ({
               <MyIcon name={'core/app/simpleMode/dataset'} w={'20px'} />
               <FormLabel ml={2}>{t('app:dataset')}</FormLabel>
             </Flex>
+            {feConfigs?.isPlus && (
+              <Flex alignItems={'center'} mr={2}>
+                <Box fontSize={'sm'} color={'myGray.600'} whiteSpace={'nowrap'}>
+                  {t('workflow:auth_tmb_id')}
+                </Box>
+                <QuestionTip ml={1} label={t('workflow:auth_tmb_id_tip')} />
+                <Switch
+                  ml={2}
+                  size={'sm'}
+                  isChecked={!!appForm.dataset.authTmbId}
+                  onChange={(e) => {
+                    setAppForm((state) => ({
+                      ...state,
+                      dataset: {
+                        ...state.dataset,
+                        authTmbId: e.target.checked
+                      }
+                    }));
+                  }}
+                />
+              </Flex>
+            )}
             <Button
               variant={'transparentBase'}
               leftIcon={<MyIcon name={'edit'} w={'14px'} />}
@@ -346,63 +495,21 @@ const EditForm = ({
             </Box>
           )}
           <Grid gridTemplateColumns={'repeat(2, minmax(0, 1fr))'} gridGap={[2, 4]}>
-            {selectDatasets.map((item) => (
-              <Flex
-                key={item.datasetId}
-                overflow={'hidden'}
-                alignItems={'center'}
-                p={2}
-                bg={'white'}
-                boxShadow={'0 4px 8px -2px rgba(16,24,40,.1),0 2px 4px -2px rgba(16,24,40,.06)'}
-                borderRadius={'md'}
-                border={'base'}
-                _hover={{
-                  '& .controler': {
-                    display: 'flex'
-                  }
-                }}
-              >
-                <Avatar src={item.avatar} w={'1.5rem'} borderRadius={'sm'} />
-                <Box
-                  ml={2}
-                  flex={'1 0 0'}
-                  w={0}
-                  className={'textEllipsis'}
-                  fontSize={'sm'}
-                  color={'myGray.900'}
-                >
-                  {item.name}
-                </Box>
-
-                {/* Icon */}
-                <Box className="controler" display={['flex', 'none']} alignItems={'center'}>
-                  <MyIconButton
-                    icon={'common/viewLight'}
-                    onClick={() =>
-                      router.push({
-                        pathname: '/dataset/detail',
-                        query: {
-                          datasetId: item.datasetId
-                        }
-                      })
+            {selectDatasets.map((dataset) => (
+              <DatasetCard
+                key={dataset.datasetId}
+                dataset={dataset}
+                onDelete={(datasetId) => {
+                  setAppForm((state) => ({
+                    ...state,
+                    dataset: {
+                      ...state.dataset,
+                      datasets:
+                        state.dataset.datasets?.filter((pre) => pre.datasetId !== datasetId) || []
                     }
-                  />
-                  <MyDeleteIconButton
-                    onClick={() => {
-                      setAppForm((state) => ({
-                        ...state,
-                        dataset: {
-                          ...state.dataset,
-                          datasets:
-                            state.dataset.datasets?.filter(
-                              (pre) => pre.datasetId !== item.datasetId
-                            ) || []
-                        }
-                      }));
-                    }}
-                  />
-                </Box>
-              </Flex>
+                  }));
+                }}
+              />
             ))}
           </Grid>
         </Box>
@@ -530,7 +637,8 @@ const EditForm = ({
             datasetId: item.datasetId,
             name: item.name,
             avatar: item.avatar,
-            vectorModel: item.vectorModel
+            vectorModel: item.vectorModel,
+            isDeleted: item.isDeleted
           }))}
           onClose={onCloseKbSelect}
           onChange={(e) => {
@@ -560,6 +668,8 @@ const EditForm = ({
           }}
         />
       )}
+      <ConfirmModal />
+      {isOpenRecharge && <RechargeModal onClose={onCloseRecharge} onPaySuccess={onCloseRecharge} />}
       <SkillModal />
     </>
   );

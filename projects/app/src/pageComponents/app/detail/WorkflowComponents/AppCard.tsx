@@ -12,6 +12,7 @@ import MyPopover from '@fastgpt/web/components/common/MyPopover';
 import MyBox from '@fastgpt/web/components/common/MyBox';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
 import { WorkflowUtilsContext } from './context/workflowUtilsContext';
+import MyTooltip from '@fastgpt/web/components/common/MyTooltip';
 
 const ImportSettings = dynamic(() => import('./Flow/ImportSettings'));
 const ExportConfigPopover = dynamic(
@@ -30,8 +31,8 @@ const AppCard = ({ showSaveStatus, isSaved }: { showSaveStatus: boolean; isSaved
 
   const { isOpen: isOpenImport, onOpen: onOpenImport, onClose: onCloseImport } = useDisclosure();
 
-  const InfoMenu = useCallback(
-    ({ children }: { children: React.ReactNode }) => {
+  const renderInfoMenu = useCallback(
+    (children: React.ReactNode) => {
       return (
         <MyPopover
           placement={'bottom-end'}
@@ -41,7 +42,7 @@ const AppCard = ({ showSaveStatus, isSaved }: { showSaveStatus: boolean; isSaved
           trigger={'hover'}
           Trigger={children}
         >
-          {({ onClose }) => (
+          {() => (
             <Box p={1.5}>
               <MyBox
                 display={'flex'}
@@ -93,8 +94,10 @@ const AppCard = ({ showSaveStatus, isSaved }: { showSaveStatus: boolean; isSaved
                 cursor={'pointer'}
               >
                 <ExportConfigPopover
+                  appType={appDetail.type}
                   chatConfig={appDetail.chatConfig}
                   appName={appDetail.name}
+                  appIntro={appDetail.intro}
                   getWorkflowData={flowData2StoreData}
                 />
               </MyBox>
@@ -145,9 +148,11 @@ const AppCard = ({ showSaveStatus, isSaved }: { showSaveStatus: boolean; isSaved
     },
     [
       appDetail.chatConfig,
+      appDetail.intro,
       appDetail.name,
       appDetail.permission.hasWritePer,
       appDetail.permission.isOwner,
+      appDetail.type,
       feConfigs?.show_team_chat,
       flowData2StoreData,
       onDelApp,
@@ -161,11 +166,15 @@ const AppCard = ({ showSaveStatus, isSaved }: { showSaveStatus: boolean; isSaved
   const Render = useMemo(() => {
     return (
       <HStack flex={1} justifyContent={'space-between'}>
-        <HStack>
-          <Avatar src={appDetail.avatar} w={'1.75rem'} borderRadius={'md'} />
-          <Box>
-            <HStack spacing={1}>
-              <Box color={'myGray.900'}>{appDetail.name}</Box>
+        <HStack minW={0}>
+          <Avatar src={appDetail.avatar} w={'1.75rem'} borderRadius={'md'} flexShrink={0} />
+          <Box minW={0}>
+            <HStack spacing={1} minW={0}>
+              <MyTooltip label={appDetail.name} showOnlyWhenOverflow>
+                <Box color={'myGray.900'} maxW={['45vw', '280px']} className="textEllipsis">
+                  {appDetail.name}
+                </Box>
+              </MyTooltip>
             </HStack>
             {showSaveStatus && (
               <Flex alignItems={'center'} fontSize={'mini'} lineHeight={1}>
@@ -189,12 +198,15 @@ const AppCard = ({ showSaveStatus, isSaved }: { showSaveStatus: boolean; isSaved
           </Box>
         </HStack>
 
-        <InfoMenu>
+        {renderInfoMenu(
           <IconButton
             aria-label="Expand"
             icon={<MyIcon name={'common/select'} w={'18px'} color={'myGray.500'} />}
-            w={'34px'}
-            h={'34px'}
+            w={'32px'}
+            h={'32px'}
+            minW={'32px'}
+            minH={'32px'}
+            flexShrink={0}
             bg={'white'}
             border={'1px solid'}
             borderColor={'myGray.250'}
@@ -204,18 +216,18 @@ const AppCard = ({ showSaveStatus, isSaved }: { showSaveStatus: boolean; isSaved
               bg: 'myGray.50'
             }}
           />
-        </InfoMenu>
+        )}
 
         {isOpenImport && <ImportSettings onClose={onCloseImport} />}
       </HStack>
     );
   }, [
-    InfoMenu,
     appDetail.avatar,
     appDetail.name,
     isOpenImport,
     isSaved,
     onCloseImport,
+    renderInfoMenu,
     showSaveStatus,
     t
   ]);

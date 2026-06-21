@@ -1,6 +1,6 @@
 import MyIcon from '@fastgpt/web/components/common/Icon';
 import MyTooltip from '@fastgpt/web/components/common/MyTooltip';
-import { Box, Button, Flex, ModalBody, useDisclosure, Image, HStack } from '@chakra-ui/react';
+import { Box, Button, Flex, ModalBody, useDisclosure, HStack } from '@chakra-ui/react';
 import React, { useCallback, useMemo } from 'react';
 import { useTranslation } from 'next-i18next';
 import { TTSTypeEnum } from '@/web/core/app/constants';
@@ -18,6 +18,17 @@ import { AppContext } from '@/pageComponents/app/detail/context';
 import Avatar from '@fastgpt/web/components/common/Avatar';
 import MultipleRowSelect from '@fastgpt/web/components/common/MySelect/MultipleRowSelect';
 
+type TTSSelectorItemType = {
+  alias: string;
+  avatar?: string;
+  label: string | React.ReactNode;
+  value: string;
+  children: {
+    label: string;
+    value: string;
+  }[];
+};
+
 const TTSSelect = ({
   value = defaultTTSConfig,
   onChange
@@ -32,16 +43,31 @@ const TTSSelect = ({
   const appId = useContextSelector(AppContext, (v) => v.appId);
 
   const selectorList = useMemo(
-    () => [
-      { label: t('app:tts_close'), value: TTSTypeEnum.none, children: [] },
-      { label: t('app:tts_browser'), value: TTSTypeEnum.web, children: [] },
+    (): TTSSelectorItemType[] => [
+      {
+        alias: t('app:tts_close'),
+        label: t('app:tts_close'),
+        value: TTSTypeEnum.none,
+        children: []
+      },
+      {
+        alias: t('app:tts_browser'),
+        label: t('app:tts_browser'),
+        value: TTSTypeEnum.web,
+        children: []
+      },
       ...ttsModelList.map((model) => {
         const providerData = getModelProvider(model.provider, i18n.language);
+        const modelName = t(model.name as any);
         return {
+          alias: modelName,
+          avatar: providerData.avatar,
           label: (
-            <HStack>
-              <Avatar borderRadius={'0'} w={'1.25rem'} src={providerData.avatar} />
-              <Box>{t(model.name as any)}</Box>
+            <HStack minW={0} maxW={'100%'}>
+              <Avatar borderRadius={'0'} w={'1.25rem'} flexShrink={0} src={providerData.avatar} />
+              <Box minW={0} className={'textEllipsis'}>
+                {modelName}
+              </Box>
             </HStack>
           ),
           value: model.model,
@@ -53,7 +79,7 @@ const TTSSelect = ({
         };
       })
     ],
-    [ttsModelList, t]
+    [getModelProvider, i18n.language, t, ttsModelList]
   );
 
   const formatValue = useMemo(() => {
@@ -69,13 +95,20 @@ const TTSSelect = ({
   const formLabel = useMemo(() => {
     const provider = selectorList.find((item) => item.value === formatValue[0]) || selectorList[0];
     const voice = provider.children.find((item) => item.value === formatValue[1]);
+
     return (
-      <Box>
+      <Box w={'100%'} minW={0}>
         {voice ? (
-          <Flex maxW={['200px', '250px']} overflow={'hidden'} alignItems={'center'}>
-            <Box>{provider.label}</Box>
-            <Box>/</Box>
-            <Box>{voice.label}</Box>
+          <Flex maxW={['180px', '250px']} minW={0} overflow={'hidden'} alignItems={'center'}>
+            <Box minW={0} flex={'1 1 auto'} overflow={'hidden'}>
+              {provider.label}
+            </Box>
+            <Box px={1} flexShrink={0}>
+              /
+            </Box>
+            <Box minW={0} flex={'1 1 auto'} className={'textEllipsis'}>
+              {voice.label}
+            </Box>
           </Flex>
         ) : (
           provider.label
@@ -103,7 +136,7 @@ const TTSSelect = ({
         });
       }
     },
-    [ttsModelList, onChange, value]
+    [onChange, value]
   );
 
   const onCloseTTSModal = useCallback(() => {
@@ -112,17 +145,19 @@ const TTSSelect = ({
   }, [cancelAudio, onClose]);
 
   return (
-    <Flex alignItems={'center'}>
+    <Flex alignItems={'center'} w={'100%'} minW={0}>
       <MyIcon name={'core/app/simpleMode/tts'} mr={2} w={'20px'} />
       <FormLabel>{t('common:core.app.TTS')}</FormLabel>
       <ChatFunctionTip type={'tts'} />
-      <Box flex={1} />
+      <Box flex={'1 1 0'} minW={3} />
       <MyTooltip label={t('common:core.app.Select TTS')}>
         <Button
           variant={'transparentBase'}
           iconSpacing={1}
           size={'sm'}
           mr={'-5px'}
+          minW={0}
+          maxW={['180px', '260px']}
           onClick={onOpen}
           color={'myGray.600'}
         >

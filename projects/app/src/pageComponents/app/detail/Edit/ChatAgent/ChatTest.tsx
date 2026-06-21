@@ -1,6 +1,6 @@
 import { Box, Flex, IconButton } from '@chakra-ui/react';
 import { useTranslation } from 'next-i18next';
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import MyTooltip from '@fastgpt/web/components/common/MyTooltip';
 import MyIcon from '@fastgpt/web/components/common/Icon';
 
@@ -15,7 +15,6 @@ import { useChatStore } from '@/web/core/chat/context/useChatStore';
 import MyBox from '@fastgpt/web/components/common/MyBox';
 import { cardStyles } from '../../constants';
 import ChatQuoteList from '@/pageComponents/chat/ChatQuoteList';
-import VariablePopover from '@/components/core/chat/ChatContainer/components/VariablePopover';
 import { ChatTypeEnum } from '@/components/core/chat/ChatContainer/ChatBox/constants';
 import type { Form2WorkflowFnType } from '../FormComponent/type';
 import FillRowTabs from '@fastgpt/web/components/common/Tabs/FillRowTabs';
@@ -23,8 +22,13 @@ import HelperBot from '@/components/core/chat/HelperBot';
 import type { HelperBotRefType } from '@/components/core/chat/HelperBot/context';
 import { HelperBotTypeEnum } from '@fastgpt/global/core/chat/helperBot/type';
 import { loadGeneratedTools } from './utils';
+import { checkAgentSkillSandboxUnavailable } from './utils';
 import { systemSubInfo } from '@fastgpt/global/core/workflow/node/agent/constants';
 import { useSandboxEditor, useSandboxStatus } from '@/pageComponents/chat/SandboxEditor/hook';
+import { useSystemStore } from '@/web/common/system/useSystemStore';
+import { useUserStore } from '@/web/support/user/useUserStore';
+import { useToast } from '@fastgpt/web/hooks/useToast';
+import ChatVariableButton from '@/pageComponents/chat/ChatWindow/ChatVariableButton';
 
 type Props = {
   appForm: AppFormEditFormType;
@@ -34,7 +38,17 @@ type Props = {
 };
 const ChatTest = ({ appForm, setAppForm, setRenderEdit, form2WorkflowFn }: Props) => {
   const { t } = useTranslation();
+  const { toast } = useToast();
   const { chatId } = useChatStore();
+  const { feConfigs } = useSystemStore();
+  const { teamPlanStatus } = useUserStore();
+  const enableSandbox = !teamPlanStatus?.standard || !!teamPlanStatus?.standard?.enableSandbox;
+  const showSandbox = feConfigs.show_agent_sandbox;
+  const isAgentSkillSandboxUnavailable = checkAgentSkillSandboxUnavailable({
+    appForm,
+    showSandbox,
+    enableSandbox
+  });
 
   const [activeTab, setActiveTab] = useSafeState<'helper' | 'chat_debug'>('chat_debug');
   const HelperBotRef = useRef<HelperBotRefType>(null);
@@ -42,8 +56,6 @@ const ChatTest = ({ appForm, setAppForm, setRenderEdit, form2WorkflowFn }: Props
   const { appDetail } = useContextSelector(AppContext, (v) => v);
   const datasetCiteData = useContextSelector(ChatItemContext, (v) => v.datasetCiteData);
   const setCiteModalData = useContextSelector(ChatItemContext, (v) => v.setCiteModalData);
-  // agentForm2AppWorkflow dependent allDatasets
-  const isVariableVisible = useContextSelector(ChatItemContext, (v) => v.isVariableVisible);
 
   const [workflowData, setWorkflowData] = useSafeState({
     nodes: appDetail.modules || [],
@@ -69,11 +81,31 @@ const ChatTest = ({ appForm, setAppForm, setRenderEdit, form2WorkflowFn }: Props
     setRenderEdit(!datasetCiteData);
   }, [datasetCiteData, setRenderEdit]);
 
+  useEffect(() => {
+    setActiveTab('chat_debug');
+    setCiteModalData(undefined);
+    setRenderEdit(true);
+  }, [appDetail._id, chatId, setActiveTab, setCiteModalData, setRenderEdit]);
+
   const { ChatContainer, restartChat } = useChatTest({
     ...workflowData,
     chatConfig: appForm.chatConfig,
-    isReady: true
+    isReady: !isAgentSkillSandboxUnavailable
   });
+  const onRestartChat = useCallback(() => {
+    if (isAgentSkillSandboxUnavailable) {
+      toast({
+        status: 'warning',
+        title: t('skill:sandbox_skill_unavailable_toast')
+      });
+      return;
+    }
+    if (activeTab === 'helper') {
+      HelperBotRef.current?.restartChat();
+    } else {
+      restartChat();
+    }
+  }, [activeTab, isAgentSkillSandboxUnavailable, restartChat, t, toast]);
 
   // 构建 TopAgent metadata,从 appForm 中提取配置
   const topAgentMetadata = useMemo(
@@ -102,11 +134,12 @@ const ChatTest = ({ appForm, setAppForm, setRenderEdit, form2WorkflowFn }: Props
         position={'relative'}
         flexDirection={'column'}
         h={'full'}
-        py={4}
+        pt={4}
+        pb={0}
         {...cardStyles}
         boxShadow={'3'}
       >
-        <Flex px={[2, 5]} pb={2}>
+        <Flex px={[2, 5]} pb={2} alignItems={'center'}>
           <FillRowTabs<'helper' | 'chat_debug'>
             py={1}
             list={[
@@ -125,30 +158,25 @@ const ChatTest = ({ appForm, setAppForm, setRenderEdit, form2WorkflowFn }: Props
             }}
           />
 
-          {!isVariableVisible && activeTab === 'chat_debug' && (
-            <VariablePopover chatType={ChatTypeEnum.test} />
-          )}
-
           <Box flex={1} />
-          <SandboxEntryIcon size={'smSquare'} mr={2} onOpen={onOpenSandboxModal} />
-          <MyTooltip label={t('common:core.chat.Restart')}>
-            <IconButton
-              className="chat"
-              size={'smSquare'}
-              icon={<MyIcon name={'common/clearLight'} w={'14px'} />}
-              variant={'whiteDanger'}
-              borderRadius={'md'}
-              aria-label={'delete'}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (activeTab === 'helper') {
-                  HelperBotRef.current?.restartChat();
-                } else {
-                  restartChat();
-                }
-              }}
-            />
-          </MyTooltip>
+          <Flex alignItems={'center'} gap={2}>
+            <SandboxEntryIcon size={'smSquare'} onOpen={onOpenSandboxModal} />
+            {activeTab === 'chat_debug' && <ChatVariableButton chatType={ChatTypeEnum.test} />}
+            <MyTooltip label={t('common:core.chat.Restart')}>
+              <IconButton
+                className="chat"
+                size={'smSquare'}
+                icon={<MyIcon name={'common/clearLight'} w={'14px'} />}
+                variant={'whiteDanger'}
+                borderRadius={'md'}
+                aria-label={'delete'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRestartChat();
+                }}
+              />
+            </MyTooltip>
+          </Flex>
         </Flex>
         <Box flex={1}>
           {activeTab === 'helper' && (

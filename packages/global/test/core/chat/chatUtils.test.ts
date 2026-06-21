@@ -7,18 +7,19 @@ import {
 import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
 import { PublishChannelEnum } from '@fastgpt/global/support/outLink/constant';
 import type { ChatItemMiniType, ChatHistoryItemResType } from '@fastgpt/global/core/chat/type';
+import { SANDBOX_SHELL_TOOL_NAME } from '@fastgpt/global/core/ai/sandbox/tools';
 import {
   concatHistories,
-  getChatTitleFromChatMessage,
   getHistoryPreview,
+  filterNodeResponseTreeData,
   filterPublicNodeResponseData,
   removeEmptyUserInput,
   getPluginOutputsFromChatResponses,
   getChatSourceByPublishChannel,
   getFlatAppResponses,
   checkInteractiveResponseStatus,
-  mergeChatResponseData,
-  removeAIResponseCite
+  removeAIResponseCite,
+  hasContextCheckpoint
 } from '@fastgpt/global/core/chat/utils';
 import type { AIChatItemValueItemType } from '@fastgpt/global/core/chat/type';
 
@@ -50,40 +51,35 @@ describe('concatHistories', () => {
   });
 });
 
-describe('getChatTitleFromChatMessage', () => {
-  it('should extract title from text content', () => {
-    const message: ChatItemMiniType = {
-      obj: ChatRoleEnum.Human,
-      value: [{ text: { content: 'This is a long message that should be truncated' } }]
+describe('hasContextCheckpoint', () => {
+  it('should return true only when an AI history contains contextCheckpoint', () => {
+    const history: ChatItemMiniType = {
+      obj: ChatRoleEnum.AI,
+      value: [
+        { text: { content: 'regular assistant text' } },
+        { contextCheckpoint: '<context_checkpoint>summary</context_checkpoint>' }
+      ]
     };
 
-    const result = getChatTitleFromChatMessage(message);
-
-    expect(result).toBe('This is a long messa');
-    expect(result.length).toBe(20);
+    expect(hasContextCheckpoint(history)).toBe(true);
   });
 
-  it('should return default value when message is undefined', () => {
-    const result = getChatTitleFromChatMessage(undefined);
-
-    expect(result).toBe('新对话');
-  });
-
-  it('should return default value when no text content', () => {
-    const message: ChatItemMiniType = {
+  it('should return false for non-AI histories even when contextCheckpoint field exists', () => {
+    const history = {
       obj: ChatRoleEnum.Human,
-      value: []
+      value: [{ contextCheckpoint: '<context_checkpoint>summary</context_checkpoint>' }]
+    } as any as ChatItemMiniType;
+
+    expect(hasContextCheckpoint(history)).toBe(false);
+  });
+
+  it('should return false when AI history has no contextCheckpoint', () => {
+    const history: ChatItemMiniType = {
+      obj: ChatRoleEnum.AI,
+      value: [{ text: { content: 'regular assistant text' } }]
     };
 
-    const result = getChatTitleFromChatMessage(message);
-
-    expect(result).toBe('新对话');
-  });
-
-  it('should use custom default value', () => {
-    const result = getChatTitleFromChatMessage(undefined, 'Custom Default');
-
-    expect(result).toBe('Custom Default');
+    expect(hasContextCheckpoint(history)).toBe(false);
   });
 });
 
@@ -141,7 +137,10 @@ describe('filterPublicNodeResponseData', () => {
     const result = filterPublicNodeResponseData({ nodeRespones: nodeResponses });
 
     expect(result).toHaveLength(1);
-    expect(result[0].moduleType).toBe(FlowNodeTypeEnum.datasetSearchNode);
+    expect(result[0]).toEqual({
+      moduleType: FlowNodeTypeEnum.datasetSearchNode,
+      runningTime: 0.5
+    });
   });
 
   it('should return empty array for undefined input', () => {
@@ -179,6 +178,175 @@ describe('filterPublicNodeResponseData', () => {
     });
 
     expect(result[0].quoteList).toBeDefined();
+  });
+
+  it('should keep tool node type and toolId without exposing tool details', () => {
+    const nodeResponses: ChatHistoryItemResType[] = [
+      {
+        id: '1',
+        nodeId: 'node1',
+        moduleName: 'Sandbox',
+        moduleType: FlowNodeTypeEnum.tool,
+        runningTime: 0.8,
+        toolId: SANDBOX_SHELL_TOOL_NAME,
+        toolInput: {
+          command: 'ls'
+        },
+        toolRes: 'file.txt'
+      }
+    ];
+
+    const result = filterPublicNodeResponseData({ nodeRespones: nodeResponses });
+
+    expect(result).toEqual([
+      {
+        moduleType: FlowNodeTypeEnum.tool,
+        runningTime: 0.8,
+        toolId: SANDBOX_SHELL_TOOL_NAME
+      }
+    ]);
+  });
+
+  it('should recursively filter childrenResponses', () => {
+    const nodeResponses: ChatHistoryItemResType[] = [
+      {
+        id: 'agent',
+        nodeId: 'agent-node',
+        moduleName: 'Agent',
+        moduleType: FlowNodeTypeEnum.agent,
+        childTotalPoints: 2,
+        childResponseCount: 1,
+        childrenResponses: [
+          {
+            id: 'dataset',
+            parentId: 'agent',
+            nodeId: 'dataset-node',
+            moduleName: 'Dataset Search',
+            moduleType: FlowNodeTypeEnum.datasetSearchNode,
+            quoteList: [
+              {
+                id: 'quote-1',
+                q: 'private question',
+                a: 'private answer',
+                datasetId: 'dataset-1',
+                collectionId: 'collection-1',
+                sourceName: 'source',
+                chunkIndex: 0,
+                score: []
+              }
+            ]
+          },
+          {
+            id: 'hidden',
+            nodeId: 'hidden-node',
+            moduleName: 'Hidden',
+            moduleType: FlowNodeTypeEnum.chatNode,
+            textOutput: 'hidden'
+          }
+        ]
+      }
+    ];
+
+    const result = filterPublicNodeResponseData({
+      nodeRespones: nodeResponses,
+      responseDetail: true
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].childrenResponses).toEqual([
+      {
+        moduleType: FlowNodeTypeEnum.datasetSearchNode,
+        quoteList: [
+          {
+            id: 'quote-1',
+            q: 'private question',
+            a: 'private answer',
+            datasetId: 'dataset-1',
+            collectionId: 'collection-1',
+            sourceName: 'source',
+            chunkIndex: 0,
+            score: []
+          }
+        ]
+      }
+    ]);
+    expect(result[0]).toEqual({
+      moduleType: FlowNodeTypeEnum.agent,
+      childrenResponses: result[0].childrenResponses
+    });
+  });
+});
+
+describe('filterNodeResponseTreeData', () => {
+  it('keeps tree identity fields needed by SSE responseData merge', () => {
+    const nodeResponses: ChatHistoryItemResType[] = [
+      {
+        id: 'agent',
+        nodeId: 'agent-node',
+        moduleName: 'Agent',
+        moduleType: FlowNodeTypeEnum.agent,
+        totalPoints: 2,
+        childResponseCount: 1,
+        childrenResponses: [
+          {
+            id: 'dataset',
+            parentId: 'agent',
+            nodeId: 'dataset-node',
+            moduleName: 'Dataset Search',
+            moduleType: FlowNodeTypeEnum.datasetSearchNode,
+            quoteList: [
+              {
+                id: 'quote-1',
+                q: 'private question',
+                a: 'private answer',
+                datasetId: 'dataset-1',
+                collectionId: 'collection-1',
+                sourceName: 'source',
+                chunkIndex: 0,
+                score: []
+              }
+            ]
+          }
+        ]
+      }
+    ];
+
+    const result = filterNodeResponseTreeData({
+      nodeResponses,
+      responseDetail: true
+    });
+
+    expect(result).toEqual([
+      {
+        id: 'agent',
+        nodeId: 'agent-node',
+        moduleName: 'Agent',
+        moduleType: FlowNodeTypeEnum.agent,
+        totalPoints: 2,
+        childResponseCount: 1,
+        childrenResponses: [
+          {
+            id: 'dataset',
+            parentId: 'agent',
+            nodeId: 'dataset-node',
+            moduleName: 'Dataset Search',
+            moduleType: FlowNodeTypeEnum.datasetSearchNode,
+            quoteList: [
+              {
+                id: 'quote-1',
+                q: 'private question',
+                a: 'private answer',
+                datasetId: 'dataset-1',
+                collectionId: 'collection-1',
+                sourceName: 'source',
+                chunkIndex: 0,
+                score: []
+              }
+            ]
+          }
+        ]
+      }
+    ]);
   });
 });
 
@@ -346,46 +514,57 @@ describe('getFlatAppResponses', () => {
     expect(result).toHaveLength(3);
   });
 
-  it('should recurse into loopRunDetail and parallelDetail', () => {
+  it('should flatten deprecated parallelDetail and loopRunDetail responses', () => {
     const responses: ChatHistoryItemResType[] = [
       {
-        id: 'loopRunParent',
-        nodeId: 'loopRunParent',
-        moduleName: 'LoopRun',
-        moduleType: FlowNodeTypeEnum.loopRun,
-        loopRunDetail: [
-          {
-            id: 'iter1',
-            nodeId: 'iter1',
-            moduleName: 'Iter 1',
-            moduleType: FlowNodeTypeEnum.loopRun,
-            childrenResponses: [
-              {
-                id: 'ds1',
-                nodeId: 'ds1',
-                moduleName: 'Dataset Search',
-                moduleType: FlowNodeTypeEnum.datasetSearchNode
-              }
-            ]
-          }
-        ]
-      },
-      {
-        id: 'parallelParent',
-        nodeId: 'parallelParent',
+        id: 'parallel',
+        nodeId: 'parallel-node',
         moduleName: 'Parallel',
         moduleType: FlowNodeTypeEnum.parallelRun,
         parallelDetail: [
           {
-            id: 'task1',
-            nodeId: 'task1',
-            moduleName: 'Task 1',
-            moduleType: FlowNodeTypeEnum.parallelRun,
+            id: 'task',
+            nodeId: 'task-node',
+            moduleName: 'Task',
+            moduleType: FlowNodeTypeEnum.chatNode,
+            loopRunDetail: [
+              {
+                id: 'loop-run',
+                nodeId: 'loop-run-node',
+                moduleName: 'Loop Run',
+                moduleType: FlowNodeTypeEnum.loopRun
+              }
+            ]
+          }
+        ]
+      }
+    ];
+
+    expect(getFlatAppResponses(responses).map((item) => item.id)).toEqual([
+      'parallel',
+      'task',
+      'loop-run'
+    ]);
+  });
+
+  it('should recurse into childrenResponses', () => {
+    const responses: ChatHistoryItemResType[] = [
+      {
+        id: 'root',
+        nodeId: 'root-node',
+        moduleName: 'Root',
+        moduleType: FlowNodeTypeEnum.agent,
+        childrenResponses: [
+          {
+            id: 'child',
+            nodeId: 'child-node',
+            moduleName: 'Child',
+            moduleType: FlowNodeTypeEnum.tool,
             childrenResponses: [
               {
-                id: 'ds2',
-                nodeId: 'ds2',
-                moduleName: 'Dataset Search',
+                id: 'grandchild',
+                nodeId: 'grandchild-node',
+                moduleName: 'Grandchild',
                 moduleType: FlowNodeTypeEnum.datasetSearchNode
               }
             ]
@@ -394,12 +573,11 @@ describe('getFlatAppResponses', () => {
       }
     ];
 
-    const result = getFlatAppResponses(responses);
-    const ids = result.map((item) => item.id);
-
-    expect(ids).toContain('ds1');
-    expect(ids).toContain('ds2');
-    expect(result).toHaveLength(6);
+    expect(getFlatAppResponses(responses).map((item) => item.id)).toEqual([
+      'root',
+      'child',
+      'grandchild'
+    ]);
   });
 });
 
@@ -411,142 +589,6 @@ describe('checkInteractiveResponseStatus', () => {
     });
 
     expect(result).toBe('query');
-  });
-
-  it('should return query for agentPlanAskUserForm with invalid JSON', () => {
-    const result = checkInteractiveResponseStatus({
-      interactive: { type: 'agentPlanAskUserForm' },
-      input: 'not json'
-    });
-
-    expect(result).toBe('query');
-  });
-
-  it('should return submit for agentPlanAskUserForm with valid JSON', () => {
-    const result = checkInteractiveResponseStatus({
-      interactive: { type: 'agentPlanAskUserForm' },
-      input: '{"field": "value"}'
-    });
-
-    expect(result).toBe('submit');
-  });
-
-  it('should return query for agentPlanCheck with non-confirm input', () => {
-    const result = checkInteractiveResponseStatus({
-      interactive: { type: 'agentPlanCheck' },
-      input: 'some other input'
-    });
-
-    expect(result).toBe('query');
-  });
-
-  it('should return submit for agentPlanCheck with confirm input', () => {
-    const result = checkInteractiveResponseStatus({
-      interactive: { type: 'agentPlanCheck' },
-      input: 'CONFIRM'
-    });
-
-    expect(result).toBe('submit');
-  });
-});
-
-describe('mergeChatResponseData', () => {
-  it('should merge items with same mergeSignId', () => {
-    const responseDataList: ChatHistoryItemResType[] = [
-      {
-        id: '1',
-        nodeId: 'node1',
-        moduleName: 'Tool',
-        moduleType: FlowNodeTypeEnum.toolCall,
-        mergeSignId: 'merge-1',
-        runningTime: 1,
-        totalPoints: 10
-      },
-      {
-        id: '2',
-        nodeId: 'node1',
-        moduleName: 'Tool',
-        moduleType: FlowNodeTypeEnum.toolCall,
-        mergeSignId: 'merge-1',
-        runningTime: 2,
-        totalPoints: 20
-      }
-    ];
-
-    const result = mergeChatResponseData(responseDataList);
-
-    expect(result).toHaveLength(1);
-    expect(result[0].runningTime).toBe(3);
-    expect(result[0].totalPoints).toBe(30);
-  });
-
-  it('should not merge items without mergeSignId', () => {
-    const responseDataList: ChatHistoryItemResType[] = [
-      {
-        id: '1',
-        nodeId: 'node1',
-        moduleName: 'Tool 1',
-        moduleType: FlowNodeTypeEnum.toolCall,
-        runningTime: 1
-      },
-      {
-        id: '2',
-        nodeId: 'node2',
-        moduleName: 'Tool 2',
-        moduleType: FlowNodeTypeEnum.toolCall,
-        runningTime: 2
-      }
-    ];
-
-    const result = mergeChatResponseData(responseDataList);
-
-    expect(result).toHaveLength(2);
-  });
-
-  it('should handle empty array', () => {
-    const result = mergeChatResponseData([]);
-
-    expect(result).toHaveLength(0);
-  });
-
-  it('should merge nested details recursively', () => {
-    const responseDataList: ChatHistoryItemResType[] = [
-      {
-        id: '1',
-        nodeId: 'node1',
-        moduleName: 'Tool',
-        moduleType: FlowNodeTypeEnum.toolCall,
-        mergeSignId: 'merge-1',
-        toolDetail: [
-          {
-            id: 'detail-1',
-            nodeId: 'detail-node',
-            moduleName: 'Detail',
-            moduleType: FlowNodeTypeEnum.chatNode
-          }
-        ]
-      },
-      {
-        id: '2',
-        nodeId: 'node1',
-        moduleName: 'Tool',
-        moduleType: FlowNodeTypeEnum.toolCall,
-        mergeSignId: 'merge-1',
-        toolDetail: [
-          {
-            id: 'detail-2',
-            nodeId: 'detail-node-2',
-            moduleName: 'Detail 2',
-            moduleType: FlowNodeTypeEnum.chatNode
-          }
-        ]
-      }
-    ];
-
-    const result = mergeChatResponseData(responseDataList);
-
-    expect(result).toHaveLength(1);
-    expect(result[0].toolDetail).toHaveLength(2);
   });
 });
 
@@ -592,20 +634,22 @@ describe('removeAIResponseCite', () => {
   it('should handle value items without text or reasoning', () => {
     const value: AIChatItemValueItemType[] = [
       {
-        tool: {
-          id: 'tool1',
-          toolName: 'Test Tool',
-          toolAvatar: '',
-          params: '{}',
-          response: 'response',
-          functionName: 'test'
-        }
+        tools: [
+          {
+            id: 'tool1',
+            toolName: 'Test Tool',
+            toolAvatar: '',
+            params: '{}',
+            response: 'response',
+            functionName: 'test'
+          }
+        ]
       }
     ];
 
     const result = removeAIResponseCite(value, false);
 
-    expect(result[0].tool).toBeDefined();
+    expect(result[0].tools).toBeDefined();
   });
 
   it('should remove multiple cites from content', () => {

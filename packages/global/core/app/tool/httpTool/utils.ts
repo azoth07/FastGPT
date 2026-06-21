@@ -7,7 +7,7 @@ import { jsonSchema2NodeInput, jsonSchema2NodeOutput } from '../../jsonschema';
 import { type StoreSecretValueType } from '../../../../common/secret/type';
 import { type JsonSchemaPropertiesItemType } from '../../jsonschema';
 import { NodeOutputKeyEnum, WorkflowIOValueTypeEnum } from '../../../workflow/constants';
-import { i18nT } from '../../../../../web/i18n/utils';
+import { i18nT } from '../../../../common/i18n/utils';
 import type { NodeToolConfigType } from '../../../workflow/type/node';
 
 export const getHTTPToolSetRuntimeNode = ({
@@ -74,7 +74,7 @@ export const getHTTPToolRuntimeNode = ({
     jsonSchema: tool.requestSchema,
     inputs: jsonSchema2NodeInput({ jsonSchema: tool.inputSchema, schemaType: 'http' }),
     outputs: [
-      ...jsonSchema2NodeOutput(tool.outputSchema),
+      ...jsonSchema2NodeOutput({ jsonSchema: tool.outputSchema }),
       {
         id: NodeOutputKeyEnum.rawResponse,
         key: NodeOutputKeyEnum.rawResponse,

@@ -53,7 +53,7 @@ export function splitCombineToolId(id: string): {
 
   // mcp-appId, mcp-appId/toolname
   if (source === AppToolSourceEnum.mcp) {
-    const [parentId, toolName] = toolId.split('/');
+    const [parentId] = toolId.split('/');
     return {
       source: AppToolSourceEnum.mcp,
       pluginId: toolId,
@@ -61,7 +61,7 @@ export function splitCombineToolId(id: string): {
     };
   }
   if (source === AppToolSourceEnum.http) {
-    const [parentId, toolName] = toolId.split('/');
+    const [parentId] = toolId.split('/');
     return {
       source: AppToolSourceEnum.http,
       pluginId: toolId,
@@ -84,4 +84,40 @@ export const getToolRawId = (id: string) => {
 
   // 兼容 toolset
   return toolId.split('/')[0];
+};
+
+/**
+ * 拆分 MCP/HTTP 子工具 pluginId，保留 toolName 内部的 `/`。
+ * pluginId 格式为 appId/toolName；toolName 可能本身以 `/` 开头，例如 appId//test。
+ */
+export const splitToolsetToolPluginId = (pluginId: string) => {
+  const [parentId, ...toolNameParts] = pluginId.split('/');
+  return {
+    parentId,
+    toolName: toolNameParts.join('/')
+  };
+};
+
+/**
+ * 从完整组合工具 ID 中解析 MCP/HTTP 子工具信息。
+ */
+export const parseToolsetToolId = (id: string) => {
+  const { pluginId } = splitCombineToolId(id);
+  return splitToolsetToolPluginId(pluginId);
+};
+
+/**
+ * 生成工具名查找候选。优先使用完整 toolName；旧版 appId/toolsetName/toolName
+ * 持久化数据在完整名查不到时回退到最后一段。
+ */
+export const getToolNameCandidates = (toolName?: string) => {
+  if (!toolName) return [];
+
+  const candidates = [toolName];
+  const lastSegment = toolName.split('/').at(-1);
+  if (lastSegment && lastSegment !== toolName) {
+    candidates.push(lastSegment);
+  }
+
+  return candidates;
 };

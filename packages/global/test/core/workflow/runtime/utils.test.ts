@@ -8,9 +8,8 @@ import {
   getWorkflowEntryNodeIds,
   storeNodes2RuntimeNodes,
   filterWorkflowEdges,
-  getReferenceVariableValue,
+  getReferenceVariableValue as baseGetReferenceVariableValue,
   formatVariableValByType,
-  replaceEditorVariable,
   textAdaptGptResponse,
   rewriteNodeOutputByHistories
 } from '@fastgpt/global/core/workflow/runtime/utils';
@@ -21,8 +20,8 @@ import {
   WorkflowIOValueTypeEnum
 } from '@fastgpt/global/core/workflow/constants';
 import {
-  FlowNodeTypeEnum,
-  FlowNodeOutputTypeEnum
+  FlowNodeOutputTypeEnum,
+  FlowNodeTypeEnum
 } from '@fastgpt/global/core/workflow/node/constant';
 import { ChatRoleEnum } from '@fastgpt/global/core/chat/constants';
 import type { WorkflowInteractiveResponseType } from '@fastgpt/global/core/workflow/template/system/interactive/type';
@@ -33,6 +32,17 @@ import type {
 } from '@fastgpt/global/core/workflow/type/edge';
 import type { StoreNodeItemType } from '@fastgpt/global/core/workflow/type/node';
 import type { ChatItemMiniType } from '@fastgpt/global/core/chat/type';
+
+const getReferenceVariableValue = ({
+  variables = {},
+  ...props
+}: Omit<Parameters<typeof baseGetReferenceVariableValue>[0], 'variables'> & {
+  variables?: Record<string, unknown>;
+}) =>
+  baseGetReferenceVariableValue({
+    ...props,
+    variables
+  });
 
 describe('extractDeepestInteractive', () => {
   it('should return the same interactive when no childrenResponse', () => {
@@ -791,42 +801,6 @@ describe('getLastInteractiveValue', () => {
     expect(getLastInteractiveValue(histories)).toBeUndefined();
   });
 
-  it('should return interactive for agentPlanCheck without confirmation', () => {
-    const interactive = {
-      type: 'agentPlanCheck',
-      entryNodeIds: ['node1'],
-      memoryEdges: [],
-      nodeOutputs: [],
-      params: {}
-    } as WorkflowInteractiveResponseType;
-
-    const histories: ChatItemMiniType[] = [
-      {
-        obj: ChatRoleEnum.AI,
-        value: [{ text: { content: 'response' }, interactive }]
-      }
-    ];
-    expect(getLastInteractiveValue(histories)).toBe(interactive);
-  });
-
-  it('should return undefined for agentPlanCheck with confirmation', () => {
-    const interactive = {
-      type: 'agentPlanCheck',
-      entryNodeIds: ['node1'],
-      memoryEdges: [],
-      nodeOutputs: [],
-      params: { confirmed: true }
-    } as WorkflowInteractiveResponseType;
-
-    const histories: ChatItemMiniType[] = [
-      {
-        obj: ChatRoleEnum.AI,
-        value: [{ text: { content: 'response' }, interactive }]
-      }
-    ];
-    expect(getLastInteractiveValue(histories)).toBeUndefined();
-  });
-
   it('should return interactive for agentPlanAskQuery', () => {
     const interactive = {
       type: 'agentPlanAskQuery',
@@ -845,15 +819,15 @@ describe('getLastInteractiveValue', () => {
     expect(getLastInteractiveValue(histories)).toBe(interactive);
   });
 
-  it('should return interactive for agentPlanAskUserSelect without selection', () => {
+  it('should return undefined for answered agentPlanAskQuery', () => {
     const interactive = {
-      type: 'agentPlanAskUserSelect',
+      type: 'agentPlanAskQuery',
       entryNodeIds: ['node1'],
       memoryEdges: [],
       nodeOutputs: [],
       params: {
-        description: 'Choose',
-        userSelectOptions: []
+        content: 'What do you want?',
+        answer: 'Use the current repository.'
       }
     } as WorkflowInteractiveResponseType;
 
@@ -863,28 +837,8 @@ describe('getLastInteractiveValue', () => {
         value: [{ text: { content: 'response' }, interactive }]
       }
     ];
-    expect(getLastInteractiveValue(histories)).toBe(interactive);
-  });
 
-  it('should return interactive for agentPlanAskUserForm without submission', () => {
-    const interactive = {
-      type: 'agentPlanAskUserForm',
-      entryNodeIds: ['node1'],
-      memoryEdges: [],
-      nodeOutputs: [],
-      params: {
-        description: 'Fill form',
-        inputForm: []
-      }
-    } as WorkflowInteractiveResponseType;
-
-    const histories: ChatItemMiniType[] = [
-      {
-        obj: ChatRoleEnum.AI,
-        value: [{ text: { content: 'response' }, interactive }]
-      }
-    ];
-    expect(getLastInteractiveValue(histories)).toBe(interactive);
+    expect(getLastInteractiveValue(histories)).toBeUndefined();
   });
 });
 
@@ -1310,6 +1264,22 @@ describe('getReferenceVariableValue', () => {
     expect(result).toBe('plain string');
   });
 
+  it('should keep two-column table data as a two-dimensional array', () => {
+    const tableData = [
+      ['指标', '金额（元）'],
+      ['资产总额（期末余额）', '22,701,764,055.63'],
+      ['负债总额（期末余额）', '4,809,415,705.17']
+    ];
+
+    const result = getReferenceVariableValue({
+      value: tableData,
+      nodesMap: {},
+      variables: {}
+    });
+
+    expect(result).toEqual(tableData);
+  });
+
   it('should handle array with single reference', () => {
     const nodesMap: Record<string, RuntimeNodeItemType> = {
       node1: {
@@ -1526,273 +1496,6 @@ describe('formatVariableValByType', () => {
     const obj = { a: 1 };
     expect(formatVariableValByType(obj, WorkflowIOValueTypeEnum.object)).toBe(obj);
     expect(formatVariableValByType(obj, WorkflowIOValueTypeEnum.datasetQuote)).toBe(obj);
-  });
-});
-
-describe('replaceEditorVariable', () => {
-  it('should return non-string values as is', () => {
-    expect(replaceEditorVariable({ text: 123, nodesMap: {}, variables: {} })).toBe(123);
-    expect(replaceEditorVariable({ text: null, nodesMap: {}, variables: {} })).toBe(null);
-  });
-
-  it('should return empty string as is', () => {
-    expect(replaceEditorVariable({ text: '', nodesMap: {}, variables: {} })).toBe('');
-  });
-
-  it('should replace global variables', () => {
-    const result = replaceEditorVariable({
-      text: 'Hello {{name}}',
-      nodesMap: {},
-      variables: { name: 'World' }
-    });
-    expect(result).toBe('Hello World');
-  });
-
-  it('should replace node output variables', () => {
-    const nodesMap: Record<string, RuntimeNodeItemType> = {
-      node1: {
-        nodeId: 'node1',
-        name: 'test',
-        flowNodeType: FlowNodeTypeEnum.chatNode,
-        inputs: [],
-        outputs: [
-          {
-            id: 'out1',
-            key: 'output1',
-            type: FlowNodeOutputTypeEnum.static,
-            value: 'outputValue',
-            valueType: WorkflowIOValueTypeEnum.string
-          }
-        ]
-      }
-    };
-    const result = replaceEditorVariable({
-      text: 'Result: {{$node1.out1$}}',
-      nodesMap,
-      variables: {}
-    });
-    expect(result).toBe('Result: outputValue');
-  });
-
-  it('should replace VARIABLE_NODE_ID variables', () => {
-    const result = replaceEditorVariable({
-      text: `Value: {{$${VARIABLE_NODE_ID}.myVar$}}`,
-      nodesMap: {},
-      variables: { myVar: 'varValue' }
-    });
-    expect(result).toBe('Value: varValue');
-  });
-
-  it('should handle nested variable replacement', () => {
-    const nodesMap: Record<string, RuntimeNodeItemType> = {
-      node1: {
-        nodeId: 'node1',
-        name: 'test',
-        flowNodeType: FlowNodeTypeEnum.chatNode,
-        inputs: [],
-        outputs: [
-          {
-            id: 'out1',
-            key: 'output1',
-            type: FlowNodeOutputTypeEnum.static,
-            value: '{{$node2.out2$}}',
-            valueType: WorkflowIOValueTypeEnum.string
-          }
-        ]
-      },
-      node2: {
-        nodeId: 'node2',
-        name: 'test2',
-        flowNodeType: FlowNodeTypeEnum.chatNode,
-        inputs: [],
-        outputs: [
-          {
-            id: 'out2',
-            key: 'output2',
-            type: FlowNodeOutputTypeEnum.static,
-            value: 'finalValue',
-            valueType: WorkflowIOValueTypeEnum.string
-          }
-        ]
-      }
-    };
-    const result = replaceEditorVariable({
-      text: 'Result: {{$node1.out1$}}',
-      nodesMap,
-      variables: {}
-    });
-    expect(result).toBe('Result: finalValue');
-  });
-
-  it('should handle circular reference protection', () => {
-    const nodesMap: Record<string, RuntimeNodeItemType> = {
-      node1: {
-        nodeId: 'node1',
-        name: 'test',
-        flowNodeType: FlowNodeTypeEnum.chatNode,
-        inputs: [],
-        outputs: [
-          {
-            id: 'out1',
-            key: 'output1',
-            type: FlowNodeOutputTypeEnum.static,
-            value: '{{$node1.out1$}}',
-            valueType: WorkflowIOValueTypeEnum.string
-          }
-        ]
-      }
-    };
-    const result = replaceEditorVariable({
-      text: 'Result: {{$node1.out1$}}',
-      nodesMap,
-      variables: {}
-    });
-    expect(result).toBe('Result: {{$node1.out1$}}');
-  });
-
-  it('should handle max depth protection', () => {
-    const result = replaceEditorVariable({
-      text: 'test',
-      nodesMap: {},
-      variables: {},
-      depth: 15
-    });
-    expect(result).toBe('test');
-  });
-
-  it('should handle node input as variable source', () => {
-    const nodesMap: Record<string, RuntimeNodeItemType> = {
-      node1: {
-        nodeId: 'node1',
-        name: 'test',
-        flowNodeType: FlowNodeTypeEnum.chatNode,
-        inputs: [{ key: 'myInput', label: '', renderTypeList: [], value: 'inputValue' }],
-        outputs: []
-      }
-    };
-    const result = replaceEditorVariable({
-      text: 'Input: {{$node1.myInput$}}',
-      nodesMap,
-      variables: {}
-    });
-    expect(result).toBe('Input: inputValue');
-  });
-
-  it('should convert object values to string', () => {
-    const nodesMap: Record<string, RuntimeNodeItemType> = {
-      node1: {
-        nodeId: 'node1',
-        name: 'test',
-        flowNodeType: FlowNodeTypeEnum.chatNode,
-        inputs: [],
-        outputs: [
-          {
-            id: 'out1',
-            key: 'output1',
-            type: FlowNodeOutputTypeEnum.static,
-            value: { a: 1 },
-            valueType: WorkflowIOValueTypeEnum.object
-          }
-        ]
-      }
-    };
-    const result = replaceEditorVariable({
-      text: 'Object: {{$node1.out1$}}',
-      nodesMap,
-      variables: {}
-    });
-    expect(result).toBe('Object: {"a":1}');
-  });
-
-  it('should keep original pattern when node not found', () => {
-    const result = replaceEditorVariable({
-      text: '{{$nonexistent.out$}}',
-      nodesMap: {},
-      variables: {}
-    });
-    // When node is not found, the pattern is not replaced
-    expect(result).toBe('');
-  });
-
-  it('should skip duplicate variable pattern in the same text', () => {
-    const nodesMap: Record<string, RuntimeNodeItemType> = {
-      node1: {
-        nodeId: 'node1',
-        name: 'test',
-        flowNodeType: FlowNodeTypeEnum.chatNode,
-        inputs: [],
-        outputs: [
-          {
-            id: 'out1',
-            key: 'output1',
-            type: FlowNodeOutputTypeEnum.static,
-            value: 'val',
-            valueType: WorkflowIOValueTypeEnum.string
-          }
-        ]
-      }
-    };
-    // Same pattern appears twice — second occurrence reuses first replacement
-    const result = replaceEditorVariable({
-      text: '{{$node1.out1$}} and {{$node1.out1$}}',
-      nodesMap,
-      variables: {}
-    });
-    expect(result).toBe('val and val');
-  });
-
-  it('should support Map as nodesMap', () => {
-    const nodesMap = new Map<string, RuntimeNodeItemType>([
-      [
-        'node1',
-        {
-          nodeId: 'node1',
-          name: 'test',
-          flowNodeType: FlowNodeTypeEnum.chatNode,
-          inputs: [],
-          outputs: [
-            {
-              id: 'out1',
-              key: 'output1',
-              type: FlowNodeOutputTypeEnum.static,
-              value: 'mapValue',
-              valueType: WorkflowIOValueTypeEnum.string
-            }
-          ]
-        }
-      ]
-    ]);
-    const result = replaceEditorVariable({
-      text: 'Result: {{$node1.out1$}}',
-      nodesMap,
-      variables: {}
-    });
-    expect(result).toBe('Result: mapValue');
-  });
-
-  it('should handle $ special characters in variable values literally', () => {
-    // $& in replacement string would be interpreted as "matched substring" by JS replace()
-    // Using () => replacement prevents this behavior
-    const result1 = replaceEditorVariable({
-      text: `Value: {{$${VARIABLE_NODE_ID}.myVar$}}`,
-      nodesMap: {},
-      variables: { myVar: '$& some text' }
-    });
-    expect(result1).toBe('Value: $& some text');
-
-    const result2 = replaceEditorVariable({
-      text: `Price: {{$${VARIABLE_NODE_ID}.price$}}`,
-      nodesMap: {},
-      variables: { price: '$100' }
-    });
-    expect(result2).toBe('Price: $100');
-
-    const result3 = replaceEditorVariable({
-      text: `Code: {{$${VARIABLE_NODE_ID}.code$}}`,
-      nodesMap: {},
-      variables: { code: '$$' }
-    });
-    expect(result3).toBe('Code: $$');
   });
 });
 

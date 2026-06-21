@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { clientInitData } from '@/web/common/system/staticData';
 import { useRouter } from 'next/router';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
@@ -10,14 +10,15 @@ import { useUserStore } from '../support/user/useUserStore';
 import {
   setBdVId,
   setFastGPTSem,
+  initFastGPTSemSourceDomain,
   setInviterId,
   setMsclkid,
-  setSourceDomain,
   setUtmParams,
   setUtmWorkflow
 } from '../support/marketing/utils';
 import { type ShortUrlParams } from '@fastgpt/global/support/marketing/type';
 import { setCouponCode } from '@/web/support/marketing/utils';
+import { appClientEnv } from '@/web/common/system/env';
 
 type MarketingQueryParams = {
   hiId?: string;
@@ -25,6 +26,7 @@ type MarketingQueryParams = {
   msclkid?: string;
   k?: string;
   search?: string;
+  fastgpt_source?: string;
   sourceDomain?: string;
   utm_source?: string;
   utm_medium?: string;
@@ -38,6 +40,7 @@ const MARKETING_PARAMS: (keyof MarketingQueryParams)[] = [
   'bd_vid',
   'msclkid',
   'k',
+  'fastgpt_source',
   'sourceDomain',
   'utm_source',
   'utm_medium',
@@ -54,6 +57,7 @@ export const useInitApp = () => {
     msclkid,
     k,
     search,
+    fastgpt_source,
     sourceDomain,
     utm_source,
     utm_medium,
@@ -65,7 +69,7 @@ export const useInitApp = () => {
   const { loadGitStar, setInitd, feConfigs } = useSystemStore();
   const { userInfo } = useUserStore();
   const [scripts, setScripts] = useState<FastGPTFeConfigsType['scripts']>([]);
-  const [title, setTitle] = useState(process.env.SYSTEM_NAME || 'AI');
+  const [title, setTitle] = useState(appClientEnv.systemName);
 
   const getPathWithoutMarketingParams = () => {
     const filteredQuery = { ...router.query };
@@ -141,7 +145,7 @@ export const useInitApp = () => {
     setBdVId(bd_vid);
     setMsclkid(msclkid);
     setUtmWorkflow(utm_workflow);
-    setSourceDomain(sourceDomain);
+    initFastGPTSemSourceDomain(sourceDomain);
 
     const utmParams: ShortUrlParams = {
       ...(utm_source && { shortUrlSource: utm_source }),
@@ -151,7 +155,12 @@ export const useInitApp = () => {
     if (utm_workflow) {
       setUtmParams(utmParams);
     }
-    setFastGPTSem({ keyword: k, search, ...utmParams });
+    setFastGPTSem({
+      keyword: k,
+      search,
+      source: fastgpt_source,
+      ...utmParams
+    });
 
     if (couponCode) {
       setCouponCode(couponCode);

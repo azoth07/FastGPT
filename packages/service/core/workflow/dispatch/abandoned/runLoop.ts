@@ -7,14 +7,11 @@ import {
 } from '@fastgpt/global/core/workflow/runtime/type';
 import { runWorkflow } from '..';
 import { DispatchNodeResponseKeyEnum } from '@fastgpt/global/core/workflow/runtime/constants';
-import {
-  type AIChatItemValueItemType,
-  type ChatHistoryItemResType
-} from '@fastgpt/global/core/chat/type';
+import { type AIChatItemValueItemType } from '@fastgpt/global/core/chat/type';
 import { cloneDeep } from 'lodash';
 import { type WorkflowInteractiveResponseType } from '@fastgpt/global/core/workflow/template/system/interactive/type';
 import { storeEdges2RuntimeEdges } from '@fastgpt/global/core/workflow/runtime/utils';
-import { env } from '../../../../env';
+import { serviceEnv } from '../../../../env';
 import { getNestedEndOutputValue } from '../loop/service';
 import { collectResponseFeedbacks, injectNestedStartInputs, pushSubWorkflowUsage } from '../utils';
 
@@ -42,7 +39,7 @@ export const dispatchLoop = async (props: Props): Promise<Response> => {
   }
 
   // Max loop times
-  const maxLength = env.WORKFLOW_MAX_LOOP_TIMES;
+  const maxLength = serviceEnv.WORKFLOW_MAX_LOOP_TIMES;
   if (loopInputArray.length > maxLength) {
     return Promise.reject(`Input array length cannot be greater than ${maxLength}`);
   }
@@ -52,11 +49,9 @@ export const dispatchLoop = async (props: Props): Promise<Response> => {
   let lastIndex = interactiveData?.currentIndex;
 
   const outputValueArr = interactiveData ? interactiveData.loopResult : [];
-  const loopResponseDetail: ChatHistoryItemResType[] = [];
-  let assistantResponses: AIChatItemValueItemType[] = [];
+  const assistantResponses: AIChatItemValueItemType[] = [];
   const customFeedbacks: string[] = [];
   let totalPoints = 0;
-  let newVariables: Record<string, any> = props.variables;
   let interactiveResponse: WorkflowInteractiveResponseType | undefined = undefined;
   let index = 0;
 
@@ -89,7 +84,6 @@ export const dispatchLoop = async (props: Props): Promise<Response> => {
     const response = await runWorkflow({
       ...props,
       lastInteractive: interactiveData?.childrenResponse,
-      variables: newVariables,
       runtimeNodes,
       runtimeEdges: cloneDeep(
         storeEdges2RuntimeEdges(runtimeEdges, interactiveData?.childrenResponse)
@@ -100,7 +94,6 @@ export const dispatchLoop = async (props: Props): Promise<Response> => {
     if (!response.workflowInteractiveResponse) {
       outputValueArr.push(getNestedEndOutputValue(response));
     }
-    loopResponseDetail.push(...response.flowResponses);
     assistantResponses.push(...response.assistantResponses);
 
     totalPoints += pushSubWorkflowUsage({
@@ -111,12 +104,6 @@ export const dispatchLoop = async (props: Props): Promise<Response> => {
     });
 
     collectResponseFeedbacks(response, customFeedbacks);
-
-    // Concat new variables
-    newVariables = {
-      ...newVariables,
-      ...response.newVariables
-    };
 
     // handle interactive response
     if (response.workflowInteractiveResponse) {
@@ -147,11 +134,8 @@ export const dispatchLoop = async (props: Props): Promise<Response> => {
     [DispatchNodeResponseKeyEnum.nodeResponse]: {
       totalPoints,
       loopInput: loopInputArray,
-      loopResult: outputValueArr,
-      loopDetail: loopResponseDetail,
-      mergeSignId: props.node.nodeId
+      loopResult: outputValueArr
     },
-    [DispatchNodeResponseKeyEnum.newVariables]: newVariables,
     [DispatchNodeResponseKeyEnum.customFeedbacks]:
       customFeedbacks.length > 0 ? customFeedbacks : undefined
   };

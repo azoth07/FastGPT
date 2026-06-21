@@ -1,5 +1,6 @@
 import { defaultQAModels, defaultVectorModels } from '@fastgpt/global/core/ai/constants';
 import {
+  CollectionTrainingStatusEnum,
   DatasetCollectionDataProcessModeEnum,
   DatasetCollectionTypeEnum,
   DatasetTypeEnum,
@@ -7,7 +8,7 @@ import {
 } from '@fastgpt/global/core/dataset/constants';
 import type { DatasetCollectionItemType, DatasetItemType } from '@fastgpt/global/core/dataset/type';
 import { DatasetPermission } from '@fastgpt/global/support/permission/dataset/controller';
-import { i18nT } from '@fastgpt/web/i18n/utils';
+import { i18nT } from '@fastgpt/global/common/i18n/utils';
 
 export const defaultDatasetDetail: DatasetItemType = {
   _id: '',
@@ -60,7 +61,12 @@ export const defaultCollectionDetail: DatasetCollectionItemType = {
   chunkSize: 0,
   indexSize: 512,
   permission: new DatasetPermission(),
-  indexAmount: 0
+  indexAmount: 0,
+  trainingAmount: 0,
+  activeTrainingAmount: 0,
+  finalErrorAmount: 0,
+  hasError: false,
+  slowestTrainingStatus: CollectionTrainingStatusEnum.ready
 };
 
 export const TrainingProcess = {

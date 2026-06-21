@@ -15,14 +15,14 @@ import {
   getFastGPTSem,
   getInviterId,
   getMsclkid,
-  getSourceDomain,
   removeFastGPTSem
 } from '@/web/support/marketing/utils';
 import { postAcceptInvitationLink } from '@/web/support/user/team/api';
 import { retryFn } from '@fastgpt/global/common/system/utils';
-import type { LangEnum } from '@fastgpt/global/common/i18n/type';
 import { validateRedirectUrl } from '@/web/common/utils/uri';
 import type { LoginSuccessResponseType } from '@fastgpt/global/openapi/support/user/account/login/api';
+import { useLoginRedirectAfterLogin } from '@/web/support/user/loginRedirect';
+import type { LangEnum } from '@fastgpt/global/common/i18n/type';
 
 let isOauthLogging = false;
 
@@ -33,16 +33,17 @@ const provider = () => {
   const router = useRouter();
   const { state, error, ...props } = router.query as Record<string, string>;
   const { toast } = useToast();
+  const resolveLoginRedirect = useLoginRedirectAfterLogin();
 
   const lastRoute = loginStore?.lastRoute
     ? validateRedirectUrl(loginStore.lastRoute)
     : '/dashboard/agent';
+  const lastTmbId = loginStore?.lastTmbId || '';
   const errorRedirectPage = lastRoute.startsWith('/chat') ? lastRoute : '/login';
 
   const loginSuccess = useCallback(
     async (res: LoginSuccessResponseType) => {
       const decodeLastRoute = validateRedirectUrl(lastRoute);
-      setUserInfo(res.user);
 
       const navigateTo = await (async () => {
         if (res.user.team.status !== 'active') {
@@ -61,9 +62,21 @@ const provider = () => {
         return decodeLastRoute;
       })();
 
-      navigateTo && router.replace(navigateTo);
+      const targetRoute = navigateTo
+        ? await resolveLoginRedirect({
+            user: res.user,
+            fallbackRoute: navigateTo,
+            lastTmbId
+          })
+        : undefined;
+
+      setUserInfo(res.user);
+
+      if (targetRoute) {
+        router.replace(targetRoute);
+      }
     },
-    [setUserInfo, router, lastRoute, t, toast]
+    [lastRoute, lastTmbId, resolveLoginRedirect, router, setUserInfo, t, toast]
   );
 
   const authProps = useCallback(
@@ -77,7 +90,6 @@ const provider = () => {
           bd_vid: getBdVId(),
           msclkid: getMsclkid(),
           fastgpt_sem: getFastGPTSem(),
-          sourceDomain: getSourceDomain(),
           language: i18n.language as LangEnum
         });
 
@@ -92,7 +104,7 @@ const provider = () => {
         }
 
         removeFastGPTSem();
-        loginSuccess(res);
+        await loginSuccess(res);
       } catch (error) {
         toast({
           status: 'warning',
@@ -159,7 +171,7 @@ export default provider;
 export async function getServerSideProps(context: any) {
   return {
     props: {
-      ...(await serviceSideProps(context))
+      ...(await serviceSideProps(context, ['login']))
     }
   };
 }

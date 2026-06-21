@@ -19,6 +19,8 @@ import { serverGetWorkflowToolRunUserQuery } from '../../../../../../app/tool/wo
 import { getWorkflowToolInputsFromStoreNodes } from '@fastgpt/global/core/app/tool/workflowTool/utils';
 import type { RunWorkflowProps } from '../../../../../../../core/workflow/dispatch';
 import { anyValueDecrypt } from '../../../../../../../common/secret/utils';
+import { WorkflowVariableState } from '../../../../utils/variables';
+import { getRuntimeNodeResponseSummary } from '../../../../utils';
 
 type Props = Pick<
   RunWorkflowProps,
@@ -28,6 +30,9 @@ type Props = Pick<
   | 'mode'
   | 'timezone'
   | 'externalProvider'
+  | 'uid'
+  | 'chatId'
+  | 'responseChatItemId'
   | 'runningAppInfo'
   | 'runningUserInfo'
   | 'retainDatasetCite'
@@ -35,7 +40,9 @@ type Props = Pick<
   | 'workflowDispatchDeep'
   | 'responseAllData'
   | 'responseDetail'
-  | 'variables'
+  | 'nodeResponseWriter'
+  | 'nodeResponseParentId'
+  | 'variableState'
 > & {
   app: {
     name: string;
@@ -51,7 +58,7 @@ export const dispatchApp = async (props: Props): Promise<DispatchSubAppResponse>
     runningAppInfo,
     runningUserInfo,
     app,
-    variables,
+    variableState,
     customAppVariables,
     userChatInput,
     ...data
@@ -70,27 +77,33 @@ export const dispatchApp = async (props: Props): Promise<DispatchSubAppResponse>
 
   // Rewrite children app variables
   const { externalProvider } = await getUserChatInfo(appData.tmbId);
-  const childrenRunVariables = {
-    userId: variables.userId,
-    appId: String(appData._id),
-    chatId: variables.chatId,
-    responseChatItemId: variables.responseChatItemId,
-    histories: [],
-    cTime: variables.cTime,
-    ...customAppVariables,
-    ...(externalProvider ? externalProvider.externalWorkflowVariables : {})
+  const childRunningAppInfo = {
+    id: String(appData._id),
+    teamId: String(appData.teamId),
+    tmbId: String(appData.tmbId),
+    name: appData.name,
+    isChildApp: true
   };
+  const childrenVariableState = await WorkflowVariableState.create({
+    timezone: data.timezone,
+    runningAppInfo: childRunningAppInfo,
+    chatId: data.chatId,
+    responseChatItemId: data.responseChatItemId,
+    histories: [],
+    uid: data.uid,
+    variablesConfig: chatConfig.variables,
+    inputVariables: customAppVariables,
+    externalVariables: externalProvider?.externalWorkflowVariables,
+    sourceVariableState: variableState
+  });
 
   const runtimeNodes = rewriteNodeOutputByHistories(
     storeNodes2RuntimeNodes(nodes, getWorkflowEntryNodeIds(nodes))
   );
   const runtimeEdges = storeEdges2RuntimeEdges(edges);
 
-  const { assistantResponses, flowUsages } = await runWorkflow({
+  const { assistantResponses, flowUsages, runtimeNodeResponseSummary } = await runWorkflow({
     ...data,
-    uid: variables.userId,
-    chatId: variables.chatId,
-    responseChatItemId: variables.responseChatItemId,
     runningAppInfo: {
       id: String(appData._id),
       name: appData.name,
@@ -103,7 +116,7 @@ export const dispatchApp = async (props: Props): Promise<DispatchSubAppResponse>
     runtimeEdges,
     chatConfig,
     histories: [],
-    variables: childrenRunVariables,
+    variableState: childrenVariableState,
     query: [
       {
         text: {
@@ -116,6 +129,9 @@ export const dispatchApp = async (props: Props): Promise<DispatchSubAppResponse>
   });
 
   const { text } = chatValue2RuntimePrompt(assistantResponses);
+  const runtimeSummary = getRuntimeNodeResponseSummary({
+    runtimeNodeResponseSummary
+  });
 
   return {
     response: text,
@@ -128,7 +144,8 @@ export const dispatchApp = async (props: Props): Promise<DispatchSubAppResponse>
         userChatInput,
         ...customAppVariables
       },
-      toolRes: text
+      toolRes: text,
+      childResponseCount: runtimeSummary.childResponseCount
     }
   };
 };
@@ -138,11 +155,13 @@ export const dispatchPlugin = async (props: Props): Promise<DispatchSubAppRespon
     runningAppInfo,
     runningUserInfo,
     app,
-    variables,
+    variableState,
     customAppVariables,
     userChatInput,
     ...data
   } = props;
+  // plugin 子应用不接收普通 userChatInput；这里解构只为了避免透传给 runWorkflow。
+  void userChatInput;
 
   // Auth the app by tmbId(Not the user, but the workflow user)
   const { app: appData } = await authAppByTmbId({
@@ -157,16 +176,25 @@ export const dispatchPlugin = async (props: Props): Promise<DispatchSubAppRespon
 
   // Rewrite children app variables
   const { externalProvider } = await getUserChatInfo(appData.tmbId);
-  const childrenRunVariables: Record<string, any> = {
-    userId: variables.userId,
-    appId: String(appData._id),
-    chatId: variables.chatId,
-    responseChatItemId: variables.responseChatItemId,
-    histories: [],
-    cTime: variables.cTime,
-    ...customAppVariables,
-    ...(externalProvider ? externalProvider.externalWorkflowVariables : {})
+  const childRunningAppInfo = {
+    id: String(appData._id),
+    teamId: String(appData.teamId || runningAppInfo.teamId),
+    tmbId: String(appData.tmbId || runningAppInfo.tmbId),
+    name: appData.name,
+    isChildApp: true
   };
+  const childrenVariableState = await WorkflowVariableState.create({
+    timezone: data.timezone,
+    runningAppInfo: childRunningAppInfo,
+    chatId: data.chatId,
+    responseChatItemId: data.responseChatItemId,
+    histories: [],
+    uid: data.uid,
+    variablesConfig: [],
+    inputVariables: {},
+    externalVariables: externalProvider?.externalWorkflowVariables,
+    sourceVariableState: variableState
+  });
   const runtimeNodes = storeNodes2RuntimeNodes(nodes, getWorkflowEntryNodeIds(nodes)).map(
     (node) => {
       // Update plugin input value
@@ -175,15 +203,15 @@ export const dispatchPlugin = async (props: Props): Promise<DispatchSubAppRespon
           ...node,
           showStatus: false,
           inputs: node.inputs.map((input) => {
-            let val = childrenRunVariables[input.key] ?? input.value;
+            let val = customAppVariables[input.key] ?? input.value;
             if (input.renderTypeList.includes(FlowNodeInputTypeEnum.password)) {
               val = anyValueDecrypt(val);
             } else if (
               input.renderTypeList.includes(FlowNodeInputTypeEnum.fileSelect) &&
               Array.isArray(val) &&
-              childrenRunVariables[input.key]
+              customAppVariables[input.key]
             ) {
-              childrenRunVariables[input.key] = val.map((item) =>
+              customAppVariables[input.key] = val.map((item) =>
                 typeof item === 'string' ? item : item.url
               );
             }
@@ -211,11 +239,8 @@ export const dispatchPlugin = async (props: Props): Promise<DispatchSubAppRespon
         return acc;
       }, {}) ?? {};
 
-  const { flowResponses, flowUsages, runTimes } = await runWorkflow({
+  const { flowUsages, runtimeNodeResponseSummary } = await runWorkflow({
     ...data,
-    uid: variables.userId,
-    chatId: variables.chatId,
-    responseChatItemId: variables.responseChatItemId,
     runningAppInfo: {
       id: String(appData._id),
       // 如果系统插件有 teamId 和 tmbId，则使用系统插件的 teamId 和 tmbId（管理员指定了插件作为系统插件）
@@ -229,22 +254,25 @@ export const dispatchPlugin = async (props: Props): Promise<DispatchSubAppRespon
     runtimeEdges,
     chatConfig,
     histories: [],
-    variables: childrenRunVariables,
+    variableState: childrenVariableState,
     query: serverGetWorkflowToolRunUserQuery({
       pluginInputs: getWorkflowToolInputsFromStoreNodes(nodes),
-      variables: childrenRunVariables
+      variables: customAppVariables
     }).value,
     stream: false,
     workflowStreamResponse: undefined
   });
 
-  const output = flowResponses.find((item) => item.moduleType === FlowNodeTypeEnum.pluginOutput);
-  const response = output?.pluginOutput
+  const runtimeSummary = getRuntimeNodeResponseSummary({
+    runtimeNodeResponseSummary
+  });
+  const pluginOutput = runtimeSummary.pluginOutput;
+  const response = pluginOutput
     ? JSON.stringify(
-        Object.keys(output.pluginOutput)
+        Object.keys(pluginOutput)
           .filter((key) => outputFilterMap[key])
           .reduce<Record<string, any>>((acc, key) => {
-            acc[key] = output.pluginOutput![key];
+            acc[key] = pluginOutput[key];
             return acc;
           }, {})
       )
@@ -258,7 +286,8 @@ export const dispatchPlugin = async (props: Props): Promise<DispatchSubAppRespon
       moduleName: app.name,
       moduleLogo: app.avatar,
       toolInput: customAppVariables,
-      toolRes: output?.pluginOutput || {}
+      toolRes: pluginOutput || {},
+      childResponseCount: runtimeSummary.childResponseCount
     }
   };
 };

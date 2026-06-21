@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { filterSensitiveFormData, getAppQGuideCustomURL } from '@/web/core/app/utils';
-import { form2AppWorkflow } from '@/pageComponents/app/detail/Edit/SimpleApp/utils';
-import { appWorkflow2AgentForm } from '@/pageComponents/app/detail/Edit/ChatAgent/utils';
+import {
+  appWorkflow2Form,
+  form2AppWorkflow
+} from '@/pageComponents/app/detail/Edit/SimpleApp/utils';
+import {
+  agentForm2AppWorkflow,
+  appWorkflow2AgentForm
+} from '@/pageComponents/app/detail/Edit/ChatAgent/utils';
 import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
-import { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
+import { NodeInputKeyEnum, NodeOutputKeyEnum } from '@fastgpt/global/core/workflow/constants';
 import { getDefaultAppForm } from '@fastgpt/global/core/app/utils';
 import type { AppFormEditFormType } from '@fastgpt/global/core/app/formEdit/type';
 
@@ -91,6 +97,55 @@ describe('form2AppWorkflow', () => {
 
     expect(result.nodes).toHaveLength(4);
     expect(result.edges).toHaveLength(2);
+
+    const datasetNode = result.nodes.find(
+      (node) => node.flowNodeType === FlowNodeTypeEnum.datasetSearchNode
+    );
+    const aiNode = result.nodes.find((node) => node.flowNodeType === FlowNodeTypeEnum.chatNode);
+
+    expect(
+      aiNode?.inputs.find((input) => input.key === NodeInputKeyEnum.aiChatDatasetQuote)?.value
+    ).toEqual([datasetNode?.nodeId, NodeOutputKeyEnum.datasetQuoteQA]);
+    expect(
+      result.edges.some(
+        (edge) => edge.source === datasetNode?.nodeId && edge.target === aiNode?.nodeId
+      )
+    ).toBe(true);
+  });
+
+  it('should roundtrip dataset auth setting through dataset search node', () => {
+    const form = getDefaultAppForm();
+    form.aiSettings = {
+      [NodeInputKeyEnum.aiModel]: 'gpt-3.5',
+      [NodeInputKeyEnum.aiSystemPrompt]: 'You are a helpful assistant',
+      maxHistories: 5,
+      [NodeInputKeyEnum.aiChatIsResponseText]: true
+    };
+    form.dataset.datasets = [
+      {
+        datasetId: 'dataset1',
+        avatar: '',
+        name: 'Test Dataset',
+        vectorModel: { model: 'text-embedding-ada-002' } as any
+      }
+    ];
+    form.dataset.authTmbId = true;
+
+    const workflow = form2AppWorkflow(form, mockT);
+    const datasetNode = workflow.nodes.find(
+      (node) => node.flowNodeType === FlowNodeTypeEnum.datasetSearchNode
+    );
+
+    expect(
+      datasetNode?.inputs.find((input) => input.key === NodeInputKeyEnum.authTmbId)?.value
+    ).toBe(true);
+
+    const restored = appWorkflow2Form({
+      nodes: workflow.nodes,
+      chatConfig: workflow.chatConfig
+    });
+
+    expect(restored.dataset.authTmbId).toBe(true);
   });
 });
 
@@ -216,6 +271,8 @@ describe('getAppQGuideCustomURL', () => {
 });
 
 describe('appWorkflow2AgentForm', () => {
+  const mockT = (str: string) => str;
+
   it('should normalize dataset rerank fields from partial datasetParams', () => {
     const result = appWorkflow2AgentForm({
       nodes: [
@@ -238,5 +295,77 @@ describe('appWorkflow2AgentForm', () => {
     expect(result.dataset.usingReRank).toBe(false);
     expect(result.dataset.rerankModel).toBe('');
     expect(result.dataset.rerankWeight).toBe(0.5);
+  });
+
+  it('should roundtrip agent reasoning settings through workflow inputs', () => {
+    const form: AppFormEditFormType = {
+      aiSettings: {
+        [NodeInputKeyEnum.aiModel]: 'qwen-3.6-flash',
+        [NodeInputKeyEnum.aiSystemPrompt]: 'You are a helpful agent.',
+        maxHistories: 6,
+        [NodeInputKeyEnum.aiChatIsResponseText]: true,
+        [NodeInputKeyEnum.aiChatReasoning]: false,
+        [NodeInputKeyEnum.aiChatReasoningEffort]: 'high'
+      },
+      dataset: {
+        datasets: [],
+        similarity: 0.8,
+        limit: 1500,
+        searchMode: 'embedding',
+        embeddingWeight: 0.7,
+        usingReRank: false,
+        rerankModel: '',
+        rerankWeight: 0.5,
+        datasetSearchUsingExtensionQuery: false,
+        datasetSearchExtensionModel: '',
+        datasetSearchExtensionBg: ''
+      },
+      selectedTools: [],
+      chatConfig: {}
+    };
+
+    const workflow = agentForm2AppWorkflow(form, mockT);
+    const agentNode = workflow.nodes.find((node) => node.flowNodeType === FlowNodeTypeEnum.agent);
+
+    expect(
+      agentNode?.inputs.find((input) => input.key === NodeInputKeyEnum.aiChatReasoning)?.value
+    ).toBe(false);
+    expect(
+      agentNode?.inputs.find((input) => input.key === NodeInputKeyEnum.aiChatReasoningEffort)?.value
+    ).toBe('high');
+
+    const restored = appWorkflow2AgentForm({
+      nodes: workflow.nodes,
+      chatConfig: workflow.chatConfig
+    });
+
+    expect(restored.aiSettings.aiChatReasoning).toBe(false);
+    expect(restored.aiSettings.aiChatReasoningEffort).toBe('high');
+  });
+
+  it('should persist dataset auth setting in agent dataset params', () => {
+    const form = getDefaultAppForm();
+    form.aiSettings = {
+      [NodeInputKeyEnum.aiModel]: 'qwen-3.6-flash',
+      [NodeInputKeyEnum.aiSystemPrompt]: 'You are a helpful agent.',
+      maxHistories: 6,
+      [NodeInputKeyEnum.aiChatIsResponseText]: true
+    };
+    form.dataset.authTmbId = true;
+
+    const workflow = agentForm2AppWorkflow(form, mockT);
+    const agentNode = workflow.nodes.find((node) => node.flowNodeType === FlowNodeTypeEnum.agent);
+
+    expect(
+      agentNode?.inputs.find((input) => input.key === NodeInputKeyEnum.datasetParams)?.value
+        ?.authTmbId
+    ).toBe(true);
+
+    const restored = appWorkflow2AgentForm({
+      nodes: workflow.nodes,
+      chatConfig: workflow.chatConfig
+    });
+
+    expect(restored.dataset.authTmbId).toBe(true);
   });
 });

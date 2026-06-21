@@ -6,19 +6,26 @@ import { createLLMResponse } from '../../../../../../ai/llm/request';
 import { countPromptTokens } from '../../../../../../../common/string/tiktoken/index';
 import { calculateCompressionThresholds } from '../../../../../../ai/llm/compress/constants';
 import { formatModelChars2Points } from '../../../../../../../support/wallet/usage/utils';
-import { i18nT } from '../../../../../../../../web/i18n/utils';
+import { i18nT } from '@fastgpt/global/common/i18n/utils';
 import { DatasetSearchModeEnum } from '@fastgpt/global/core/dataset/constants';
 import { MongoDataset } from '../../../../../../dataset/schema';
 import {
   defaultSearchDatasetData,
   type DefaultSearchDatasetDataProps
-} from '../../../../../../dataset/search/controller';
+} from '../../../../../../dataset/search';
 import { getErrText } from '@fastgpt/global/common/error/utils';
 import { getLogger, LogCategories } from '../../../../../../../common/logger';
 import type { DispatchSubAppResponse } from '../../type';
 import type { AppFormEditFormType } from '@fastgpt/global/core/app/formEdit/type';
 import { DatasetSearchToolSchema } from './utils';
 import { parseJsonArgs } from '../../../../../../ai/utils';
+import type { OpenaiAccountType } from '@fastgpt/global/support/user/team/type';
+import type { ChatHistoryItemResType } from '@fastgpt/global/core/chat/type';
+import {
+  createChunkSelectionChildNodeResponse,
+  createQueryExtensionChildNodeResponse
+} from '../../../../dataset/nodeResponse';
+import { filterDatasetsByTmbId } from '../../../../../../dataset/utils';
 const logger = getLogger(LogCategories.MODULE.AI.AGENT);
 
 type DatasetSearchParams = {
@@ -26,6 +33,7 @@ type DatasetSearchParams = {
   tmbId: string;
   args: string;
   llmModel: string;
+  userKey?: OpenaiAccountType;
   datasetParams?: AppFormEditFormType['dataset'];
 };
 
@@ -56,15 +64,19 @@ const formatDatasetSearchResponse = (searchResults: SearchDataResponseItemType[]
 const selectRelevantChunksByLLM = async ({
   query,
   chunks,
-  model
+  model,
+  userKey
 }: {
   query: string;
   chunks: SearchDataResponseItemType[];
   model: string;
+  userKey?: OpenaiAccountType;
 }): Promise<
   | {
       ids: string[];
       usage: ChatNodeUsageType;
+      requestId: string;
+      seconds: number;
     }
   | undefined
 > => {
@@ -105,11 +117,12 @@ ${chunkSummaries}
 示例：[chunk_id_1,chunk_id_2,chunk_id_3]`;
 
   try {
+    const llmStartTime = Date.now();
     const response = await createLLMResponse({
+      userKey,
       body: {
         model,
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0,
         stream: false
       }
     });
@@ -129,14 +142,15 @@ ${chunkSummaries}
     });
 
     const usage: ChatNodeUsageType = {
-      totalPoints,
+      totalPoints: response.usage.usedUserOpenAIKey ? 0 : totalPoints,
       moduleName: i18nT('account_usage:dataset_chunk_selection'),
       model: modelName,
       inputTokens: response.usage.inputTokens,
       outputTokens: response.usage.outputTokens
     };
+    const seconds = +((Date.now() - llmStartTime) / 1000).toFixed(2);
 
-    return { ids, usage };
+    return { ids, usage, requestId: response.requestId, seconds };
   } catch (error) {
     getLogger(LogCategories.MODULE.AI.AGENT).error('[Agent Dataset Search] AI selection failed', {
       error
@@ -150,7 +164,8 @@ export const dispatchAgentDatasetSearch = async ({
   datasetParams,
   teamId,
   tmbId,
-  llmModel
+  llmModel,
+  userKey
 }: DatasetSearchParams): Promise<DispatchSubAppResponse> => {
   if (!datasetParams || datasetParams.datasets.length === 0) {
     return {
@@ -165,15 +180,32 @@ export const dispatchAgentDatasetSearch = async ({
     };
   }
 
-  const query = toolParams.data.query;
+  const queries = toolParams.data.query;
+  if (queries.length === 0) {
+    return {
+      response: 'Query is empty'
+    };
+  }
+  const query = queries.join('\n');
 
   logger.debug('[Agent Dataset Search] Starting', {
-    query,
+    queries,
     datasetParams
   });
 
   try {
-    const datasetIds = await Promise.resolve(datasetParams.datasets.map((item) => item.datasetId));
+    const datasetIds = datasetParams.authTmbId
+      ? await filterDatasetsByTmbId({
+          datasetIds: datasetParams.datasets.map((item) => item.datasetId),
+          tmbId
+        })
+      : datasetParams.datasets.map((item) => item.datasetId);
+
+    if (datasetIds.length === 0) {
+      return {
+        response: 'No authorized dataset selected'
+      };
+    }
 
     // Get vector model
     const vectorModel = getEmbeddingModel(
@@ -185,8 +217,7 @@ export const dispatchAgentDatasetSearch = async ({
     const searchData: DefaultSearchDatasetDataProps = {
       histories: [],
       teamId,
-      reRankQuery: query,
-      queries: [query],
+      textQueries: queries,
       model: vectorModel.model,
       similarity: datasetParams.similarity ?? 0.4,
       limit: datasetParams.limit || 5000,
@@ -198,7 +229,8 @@ export const dispatchAgentDatasetSearch = async ({
       rerankWeight: datasetParams.rerankWeight ?? 0.5,
       datasetSearchUsingExtensionQuery: datasetParams.datasetSearchUsingExtensionQuery ?? false,
       datasetSearchExtensionModel: datasetParams.datasetSearchExtensionModel,
-      datasetSearchExtensionBg: datasetParams.datasetSearchExtensionBg
+      datasetSearchExtensionBg: datasetParams.datasetSearchExtensionBg,
+      userKey
     };
     const {
       searchRes,
@@ -211,41 +243,34 @@ export const dispatchAgentDatasetSearch = async ({
 
     // count bill results
     const usages: ChatNodeUsageType[] = [];
+    const childrenResponses: ChatHistoryItemResType[] = [];
     let searchResults = searchRes;
-
-    // LLM Pick Chunks (compress search results if too long)
-    const pickResults = await selectRelevantChunksByLLM({
-      query,
-      chunks: searchRes,
-      model: llmModel
-    });
-    if (pickResults) {
-      if (pickResults.ids.length > 0) {
-        searchResults = searchResults.filter((item) => pickResults.ids.includes(item.id));
-      }
-      // 将 AI 分块选择的 usage 添加到总 usage 中
-      if (pickResults.usage) {
-        usages.push(pickResults.usage);
-      }
-    }
-    const formattedResponse = formatDatasetSearchResponse(searchResults);
 
     // 合并其他的 usages
     {
       // 1. Query extension
       if (queryExtensionResult) {
-        const { totalPoints: llmPoints, modelName: llmModelName } = formatModelChars2Points({
+        const { totalPoints, modelName: llmModelName } = formatModelChars2Points({
           model: queryExtensionResult.llmModel,
           inputTokens: queryExtensionResult.inputTokens,
           outputTokens: queryExtensionResult.outputTokens
         });
-        usages.push({
-          totalPoints: llmPoints,
+        const queryExtensionUsage: ChatNodeUsageType = {
+          totalPoints: queryExtensionResult.usedUserOpenAIKey ? 0 : totalPoints,
           moduleName: i18nT('common:core.module.template.Query extension'),
           model: llmModelName,
           inputTokens: queryExtensionResult.inputTokens,
           outputTokens: queryExtensionResult.outputTokens
-        });
+        };
+        usages.push(queryExtensionUsage);
+        childrenResponses.push(
+          createQueryExtensionChildNodeResponse({
+            requestIds: [queryExtensionResult.requestId],
+            usage: queryExtensionUsage,
+            seconds: queryExtensionResult.seconds,
+            query: queryExtensionResult.query
+          })
+        );
 
         const { totalPoints: embeddingPoints, modelName: embeddingModelName } =
           formatModelChars2Points({
@@ -260,6 +285,9 @@ export const dispatchAgentDatasetSearch = async ({
           outputTokens: 0
         });
       }
+    }
+
+    {
       // 2. Search vector
       const { totalPoints: embeddingTotalPoints, modelName: embeddingModelName } =
         formatModelChars2Points({
@@ -288,10 +316,36 @@ export const dispatchAgentDatasetSearch = async ({
       }
     }
 
+    // LLM Pick Chunks (compress search results if too long)
+    const pickResults = await selectRelevantChunksByLLM({
+      query,
+      chunks: searchRes,
+      model: llmModel,
+      userKey
+    });
+    if (pickResults) {
+      if (pickResults.ids.length > 0) {
+        searchResults = searchResults.filter((item) => pickResults.ids.includes(item.id));
+      }
+      // 将 AI 分块选择记录为知识库搜索子调用，requestId 跟随 child nodeResponse 展示。
+      if (pickResults.usage) {
+        usages.push(pickResults.usage);
+        childrenResponses.push(
+          createChunkSelectionChildNodeResponse({
+            requestIds: [pickResults.requestId],
+            usage: pickResults.usage,
+            seconds: pickResults.seconds,
+            selectedChunkIds: pickResults.ids
+          })
+        );
+      }
+    }
+    const formattedResponse = formatDatasetSearchResponse(searchResults);
+
     const nodeResponse: DispatchSubAppResponse['nodeResponse'] = {
       moduleType: FlowNodeTypeEnum.datasetSearchNode,
       moduleName: i18nT('chat:dataset_search'),
-      query,
+      datasetQueries: queries,
       embeddingModel: vectorModel.name,
       embeddingTokens,
       similarity: usingSimilarityFilter ? searchData.similarity : undefined,
@@ -308,14 +362,7 @@ export const dispatchAgentDatasetSearch = async ({
         reRankInputTokens
       }),
       searchUsingReRank,
-      queryExtensionResult: queryExtensionResult
-        ? {
-            model: queryExtensionResult.llmModel,
-            inputTokens: queryExtensionResult.inputTokens,
-            outputTokens: queryExtensionResult.outputTokens,
-            query: queryExtensionResult.query
-          }
-        : undefined,
+      ...(childrenResponses.length > 0 ? { childrenResponses } : {}),
       // Results
       quoteList: searchResults
     };

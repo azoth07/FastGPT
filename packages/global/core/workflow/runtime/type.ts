@@ -24,13 +24,15 @@ import type {
   InteractiveNodeResponseType,
   WorkflowInteractiveResponseType
 } from '../template/system/interactive/type';
-import { SearchDataResponseItemSchema } from '../../dataset/type';
+import { SearchDataResponseQuoteListItemSchema } from '../../dataset/type';
 import type { localeType } from '../../../common/i18n/type';
-import { type UserChatItemValueItemType } from '../../chat/type';
+import { type ChatFileStoreValue, type UserChatItemValueItemType } from '../../chat/type';
 import { DatasetSearchModeEnum } from '../../dataset/constants';
 import { ChatRoleEnum } from '../../chat/constants';
 import z from 'zod';
 import type { JSONSchemaInputType } from '../../app/jsonschema';
+
+const AgentPlanNodeStatusSchema = z.enum(['set_plan', 'update_plan', 'ask_question']);
 
 /*
   1. 输入线分类：普通线(实际上就是从 start 直接过来的分支）和递归线（可以追溯到自身的分支）
@@ -46,6 +48,16 @@ export type NodeEdgeGroupsMap = Map<string, NodeEdgeGroups>;
 export type ExternalProviderType = {
   openaiAccount?: OpenaiAccountType;
   externalWorkflowVariables?: Record<string, string>;
+};
+
+export type WorkflowVariableStateLike = {
+  get: (key: string) => unknown;
+  set: (key: string, value: unknown) => Promise<unknown>;
+  getStoreValue: (key: string) => unknown;
+  getFileStoreValueByRuntimeUrl: (url: string) => ChatFileStoreValue | undefined;
+  toRuntimeRecord: () => Record<string, unknown>;
+  toStoreRecord: () => Record<string, unknown>;
+  clone: () => WorkflowVariableStateLike;
 };
 
 /* workflow props */
@@ -64,6 +76,8 @@ export type ChatDispatchProps = {
     tmbId: string; // App tmbId
     name: string;
     isChildApp?: boolean;
+    /** 显式指定本轮工作流使用的 sandbox 资源，避免由 appId/userId/chatId 重新生成。 */
+    sandboxId?: string;
   };
   runningUserInfo: {
     username: string;
@@ -76,9 +90,10 @@ export type ChatDispatchProps = {
   uid: string; // Who run this workflow
 
   chatId: string;
-  responseChatItemId?: string;
+  /** 当前 AI 回复 chat item 的 dataId；workflow 运行期必须有值，外部入口缺省时由 dispatchWorkFlow 补齐。 */
+  responseChatItemId: string;
   histories: ChatItemMiniType[];
-  variables: Record<string, any>; // global variable
+  variableState: WorkflowVariableStateLike; // global variable state
   query: UserChatItemValueItemType[]; // trigger query
   chatConfig: AppSchemaType['chatConfig'];
   lastInteractive?: WorkflowInteractiveResponseType; // last interactive response
@@ -94,6 +109,7 @@ export type ChatDispatchProps = {
 
   responseAllData?: boolean;
   responseDetail?: boolean;
+  nodeResponseParentId?: string; // 传递给 child，用于设置 nodeResponse 的 parentId
 
   // TODO: 移除
   usageId?: string;
@@ -157,18 +173,23 @@ export const DispatchNodeResponseSchema = z
     textOutput: z.string().optional().meta({ description: '文本输出' }),
 
     llmRequestIds: z.array(z.string()).optional().meta({ description: 'LLM 请求追踪 ID 列表' }),
+    agentPlanStatus: AgentPlanNodeStatusSchema.optional().meta({
+      description: 'Agent 计划节点状态'
+    }),
 
     error: z
       .union([z.record(z.string(), z.any()), z.string()])
       .optional()
       .meta({ description: '错误信息' }),
     errorText: z.string().optional().meta({ description: '错误文本' }), // Just show
+    errorCaptured: z.boolean().optional().meta({ description: '错误已被 catch 分支捕获' }),
 
     customInputs: z.record(z.string(), z.any()).optional().meta({ description: '自定义输入' }),
     customOutputs: z.record(z.string(), z.any()).optional().meta({ description: '自定义输出' }),
     nodeInputs: z.record(z.string(), z.any()).optional().meta({ description: '节点输入' }),
     nodeOutputs: z.record(z.string(), z.any()).optional().meta({ description: '节点输出' }),
-    mergeSignId: z.string().optional().meta({ description: '合并签名 ID' }),
+    mergeSignId: z.string().optional().meta({ description: '旧版合并签名 ID', deprecated: true }),
+    parentId: z.string().optional().meta({ description: '父节点响应实例 ID' }),
 
     // bill
     tokens: z.number().optional().meta({ description: '总 token' }),
@@ -178,12 +199,13 @@ export const DispatchNodeResponseSchema = z
     contextTotalLen: z.number().optional().meta({ description: '上下文总长度' }),
     totalPoints: z.number().optional().meta({ description: '总积分' }),
     childTotalPoints: z.number().optional().meta({ description: '子节点总积分' }),
+    childResponseCount: z.number().optional().meta({ description: '子节点响应数量' }),
 
     // LLM chat
     temperature: z.number().optional().meta({ description: '温度' }),
     maxToken: z.number().optional().meta({ description: '最大 token' }),
     quoteList: z
-      .array(SearchDataResponseItemSchema)
+      .array(SearchDataResponseQuoteListItemSchema)
       .optional()
       .meta({ description: '知识库引用列表' }),
     reasoningText: z.string().optional().meta({ description: '思考文本' }),
@@ -205,19 +227,12 @@ export const DispatchNodeResponseSchema = z
     limit: z.number().optional().meta({ description: '限制' }),
     searchMode: z.enum(DatasetSearchModeEnum).optional().meta({ description: '搜索模式' }),
     embeddingWeight: z.number().optional().meta({ description: '嵌入权重' }),
+    datasetQueries: z.array(z.string()).optional().meta({ description: '检索词' }),
+
     rerankModel: z.string().optional().meta({ description: '重排模型' }),
     rerankWeight: z.number().optional().meta({ description: '重排权重' }),
     reRankInputTokens: z.number().optional().meta({ description: '重排输入 token' }),
     searchUsingReRank: z.boolean().optional().meta({ description: '使用重排' }),
-    queryExtensionResult: z
-      .object({
-        model: z.string().meta({ description: '模型' }),
-        inputTokens: z.number().meta({ description: '输入 token' }),
-        outputTokens: z.number().meta({ description: '输出 token' }),
-        query: z.string().meta({ description: '查询内容' })
-      })
-      .optional()
-      .meta({ description: '查询扩展结果' }),
     deepSearchResult: z
       .object({
         model: z.string().meta({ description: '模型' }),
@@ -248,6 +263,7 @@ export const DispatchNodeResponseSchema = z
       .meta({ description: '请求体' }),
     headers: z.record(z.string(), z.any()).optional().meta({ description: '请求头' }),
     httpResult: z.record(z.string(), z.any()).optional().meta({ description: '请求结果' }),
+    httpErrorResult: z.record(z.string(), z.any()).optional().meta({ description: '请求失败结果' }),
 
     // Tool
     toolInput: z.record(z.string(), z.any()).optional().meta({ description: '工具输入' }),
@@ -313,7 +329,7 @@ export const DispatchNodeResponseSchema = z
     parallelDetail: z
       .array(z.any())
       .optional()
-      .meta({ description: '成功任务子工作流完整响应列表' }),
+      .meta({ description: '成功任务子工作流完整响应列表', deprecated: true }),
 
     // loopRun
     loopRunInput: z
@@ -325,8 +341,7 @@ export const DispatchNodeResponseSchema = z
     loopRunDetail: z
       .array(z.any())
       .optional()
-      .meta({ description: 'loopRun 各轮子工作流节点响应聚合' }),
-
+      .meta({ description: 'loopRun 各轮子工作流节点响应聚合', deprecated: true }),
     childrenResponses: z.array(z.any()).optional().meta({ description: '子节点响应' }),
 
     // Tools
@@ -341,32 +356,43 @@ export const DispatchNodeResponseSchema = z
 type Tmp_DispatchNodeResponseType = z.infer<typeof DispatchNodeResponseSchema>;
 export type DispatchNodeResponseType = Omit<
   Tmp_DispatchNodeResponseType,
-  'childrenResponses' | 'loopDetail' | 'pluginDetail' | 'toolDetail'
+  | 'childrenResponses'
+  | 'loopDetail'
+  | 'loopRunDetail'
+  | 'parallelDetail'
+  | 'pluginDetail'
+  | 'toolDetail'
 > & {
   childrenResponses?: DispatchNodeResponseType[];
   loopDetail?: DispatchNodeResponseType[];
+  loopRunDetail?: DispatchNodeResponseType[];
+  parallelDetail?: DispatchNodeResponseType[];
   pluginDetail?: DispatchNodeResponseType[];
   toolDetail?: DispatchNodeResponseType[];
 };
 
-export type DispatchNodeResultType<T = {}, ERR = { [NodeOutputKeyEnum.errorText]?: string }> = {
+export type DispatchNodeResultType<
+  T = Record<string, never>,
+  ERR = {
+    [NodeOutputKeyEnum.errorText]?: string;
+  }
+> = {
   [DispatchNodeResponseKeyEnum.answerText]?: string;
   [DispatchNodeResponseKeyEnum.reasoningText]?: string;
   [DispatchNodeResponseKeyEnum.skipHandleId]?: string[]; // skip some edge handle id
   [DispatchNodeResponseKeyEnum.nodeResponse]?: DispatchNodeResponseType; // The node response detail
   [DispatchNodeResponseKeyEnum.nodeResponses]?: ChatHistoryItemResType[]; // Node responses
   [DispatchNodeResponseKeyEnum.childrenResponses]?: DispatchNodeResultType[]; // Children node response
-  [DispatchNodeResponseKeyEnum.toolResponses]?: ToolRunResponseItemType; // Tool response
+  [DispatchNodeResponseKeyEnum.toolResponse]?: ToolRunResponseItemType; // Tool response
   [DispatchNodeResponseKeyEnum.assistantResponses]?: AIChatItemValueItemType[]; // Assistant response(Store to db)
   [DispatchNodeResponseKeyEnum.rewriteHistories]?: ChatItemMiniType[];
   [DispatchNodeResponseKeyEnum.runTimes]?: number;
-  [DispatchNodeResponseKeyEnum.newVariables]?: Record<string, any>;
   [DispatchNodeResponseKeyEnum.memories]?: Record<string, any>;
   [DispatchNodeResponseKeyEnum.interactive]?: InteractiveNodeResponseType;
   [DispatchNodeResponseKeyEnum.customFeedbacks]?: string[];
 
   data?: T;
-  error?: ERR;
+  error?: ERR & { [NodeOutputKeyEnum.errorText]?: string };
 
   /** @deprecated */
   [DispatchNodeResponseKeyEnum.nodeDispatchUsages]?: ChatNodeUsageType[]; // Node total usage
@@ -380,6 +406,9 @@ export type AIChatNodeProps = {
   [NodeInputKeyEnum.aiChatMaxToken]?: number;
   [NodeInputKeyEnum.aiChatIsResponseText]: boolean;
   [NodeInputKeyEnum.aiChatVision]?: boolean;
+  [NodeInputKeyEnum.aiChatAudio]?: boolean;
+  [NodeInputKeyEnum.aiChatVideo]?: boolean;
+  [NodeInputKeyEnum.aiChatExtractFiles]?: boolean;
   [NodeInputKeyEnum.aiChatReasoning]?: boolean;
   [NodeInputKeyEnum.aiChatReasoningEffort]?: ReasoningEffort;
   [NodeInputKeyEnum.aiChatTopP]?: number;

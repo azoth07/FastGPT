@@ -52,7 +52,7 @@ const SelectUsingWayModal = dynamic(() => import('./SelectUsingWayModal'));
 
 const Share = ({ appId }: { appId: string; type: PublishChannelEnum }) => {
   const { t } = useTranslation();
-  const { Loading, setIsLoading } = useLoading();
+  const { setIsLoading } = useLoading();
   const { feConfigs } = useSystemStore();
   const { copyData } = useCopyData();
   const [editLinkData, setEditLinkData] = useState<OutLinkEditType>();
@@ -72,18 +72,39 @@ const Share = ({ appId }: { appId: string; type: PublishChannelEnum }) => {
   );
 
   return (
-    <MyBox h={'100%'} isLoading={isFetching} position={'relative'}>
-      <Flex justifyContent={'space-between'}>
+    <MyBox h={'100%'} isLoading={isFetching} position={'relative'} pt={3} px={5} minH={'50vh'}>
+      <Flex justifyContent={'space-between'} flexDirection="row">
         <HStack>
-          <Box color={'myGray.900'} fontSize={'lg'}>
-            {t('common:core.app.Share link')}
+          <Box>
+            <Flex alignItems={'center'}>
+              <Box color={'myGray.900'} fontWeight={'bold'} fontSize={['md', 'lg']}>
+                {t('common:core.app.Share link')}
+              </Box>
+              {feConfigs?.docUrl && (
+                <Link
+                  href={getDocPath('/openapi/share')}
+                  target={'_blank'}
+                  ml={2}
+                  color={'primary.500'}
+                  fontSize={'sm'}
+                >
+                  <Flex alignItems={'center'}>
+                    <MyIcon name="book" w={'17px'} h={'17px'} mr="1" />
+                    {t('common:read_doc')}
+                  </Flex>
+                </Link>
+              )}
+            </Flex>
+            <Box fontSize={'mini'} color={'myGray.600'}>
+              {t('common:core.app.Share link desc detail')}
+            </Box>
           </Box>
-          <QuestionTip label={t('common:core.app.Share link desc detail')} />
         </HStack>
         <Button
-          variant={'whitePrimary'}
+          variant={'primary'}
           colorScheme={'blue'}
           size={['sm', 'md']}
+          leftIcon={<MyIcon name={'common/addLight'} w="1.25rem" color="white" />}
           {...(shareChatList.length >= 10
             ? {
                 isDisabled: true,
@@ -278,11 +299,10 @@ function EditLinkModal({
     setValue,
     watch,
     handleSubmit: submitShareChat
-  } = useForm({
+  } = useForm<OutLinkEditType>({
     defaultValues: defaultData
   });
 
-  const showRunningStatus = watch('showRunningStatus');
   const showSkillReferences = watch('showSkillReferences');
   const showCite = watch('showCite');
   const showFullText = watch('showFullText');
@@ -479,24 +499,22 @@ function EditLinkModal({
               isChecked={canDownloadSource}
             />
           </Flex>
-          {feConfigs?.show_skill && (
-            <Flex alignItems={'center'} mt={4} justify={'space-between'} height={'36px'}>
-              <Flex alignItems={'center'}>
-                <FormLabel>{t('publish:show_skill_reference')}</FormLabel>
-                <QuestionTip ml={1} label={t('publish:show_skill_reference_tips')}></QuestionTip>
-              </Flex>
-              <Switch
-                {...register('showSkillReferences', {
-                  onChange(e) {
-                    if (e.target.checked) {
-                      setValue('showRunningStatus', true);
-                    }
-                  }
-                })}
-                isChecked={showSkillReferences}
-              />
+          {/* <Flex alignItems={'center'} mt={4} justify={'space-between'} height={'36px'}>
+            <Flex alignItems={'center'}>
+              <FormLabel>{t('publish:show_skill_reference')}</FormLabel>
+              <QuestionTip ml={1} label={t('publish:show_skill_reference_tips')}></QuestionTip>
             </Flex>
-          )}
+            <Switch
+              {...register('showSkillReferences', {
+                onChange(e) {
+                  if (e.target.checked) {
+                    setValue('showRunningStatus', true);
+                  }
+                }
+              })}
+              isChecked={showSkillReferences}
+            />
+          </Flex> */}
         </Box>
       </ModalBody>
 
@@ -506,7 +524,9 @@ function EditLinkModal({
         </Button>
         <Button
           isLoading={creating || updating}
-          onClick={submitShareChat((data) => (isEdit ? onclickUpdate(data) : onclickCreate(data)))}
+          onClick={submitShareChat((data) =>
+            isEdit && data._id ? onclickUpdate({ ...data, _id: data._id }) : onclickCreate(data)
+          )}
         >
           {t('common:Confirm')}
         </Button>

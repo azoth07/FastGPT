@@ -75,9 +75,12 @@ docker run -p 3000:3000 \
 ```json
 {
   "code": "async function main(variables) {\n  return { result: variables.a + variables.b }\n}",
-  "variables": { "a": 1, "b": 2 }
+  "variables": { "a": 1, "b": 2 },
+  "queueId": "team-xxx"
 }
 ```
+
+`queueId` 可选；仅当配置 `SANDBOX_QUEUE_ID_CONCURRENCY` 时，同一 `queueId` 会按该并发数排队执行。
 
 ### `POST /sandbox/python`
 
@@ -86,7 +89,8 @@ docker run -p 3000:3000 \
 ```json
 {
   "code": "def main(variables):\n    return {'result': variables['a'] + variables['b']}",
-  "variables": { "a": 1, "b": 2 }
+  "variables": { "a": 1, "b": 2 },
+  "queueId": "team-xxx"
 }
 ```
 
@@ -140,18 +144,22 @@ docker run -p 3000:3000 \
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `SANDBOX_POOL_SIZE` | 每种语言的 worker 进程数 | `20` |
+| `SANDBOX_QUEUE_ID_CONCURRENCY` | 同一 `queueId` 同时可进入执行流程的请求数，空值表示不按 `queueId` 排队 | 空 |
 
 ### 资源限制
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
+| `SANDBOX_API_MAX_BODY_MB` | API JSON 请求体总大小上限（包含 variables） | `8` |
 | `SANDBOX_MAX_TIMEOUT` | 超时上限（ms），请求不可超过此值 | `60000` |
 | `SANDBOX_MAX_MEMORY_MB` | 内存上限（MB） | `256` |
+| `SANDBOX_MAX_OUTPUT_MB` | 单次执行输出 JSON 大小上限（包含返回值和日志） | `10` |
 
 ### 网络请求限制
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
+| `CHECK_INTERNAL_IP` | 是否阻止访问内网、回环、链路本地等地址 | `true` |
 | `SANDBOX_REQUEST_MAX_COUNT` | 单次执行最大 HTTP 请求数 | `30` |
 | `SANDBOX_REQUEST_TIMEOUT` | 单次 HTTP 请求超时（ms） | `60000` |
 | `SANDBOX_REQUEST_MAX_RESPONSE_MB` | 最大响应体大小（MB） | `10` |
@@ -162,8 +170,7 @@ docker run -p 3000:3000 \
 ```
 src/
 ├── index.ts                   # 入口：Hono 服务 + 进程池初始化
-├── env.ts                     # 环境变量校验（zod）
-├── config.ts                  # 配置导出
+├── env.ts                     # 环境变量加载与校验
 ├── types.ts                   # 类型定义
 ├── pool/
 │   ├── process-pool.ts        # JS 进程池管理
@@ -215,6 +222,7 @@ SANDBOX_JS_ALLOWED_MODULES=lodash,dayjs,moment,uuid,crypto-js,qs,url,querystring
 - 只添加纯计算类的包，不要添加有网络/文件系统/子进程能力的包
 - 包会被打入 Docker 镜像，注意体积
 - 网络请求统一走 `SystemHelper.httpRequest()`，不要放行 `axios`、`node-fetch` 等网络库
+- 如果显式放行 `child_process`、`worker_threads`、`cluster`，worker 会在每次任务后回收，以清理潜在后台执行残留
 
 ## 添加 Python 包
 
@@ -234,7 +242,7 @@ your-new-package
 
 2. **加入白名单**（环境变量 `SANDBOX_PYTHON_ALLOWED_MODULES`）：
 
-在逗号分隔列表中添加包名。如果新包依赖了黑名单中的模块（如 `os`），标准库路径的间接导入会自动放行，无需额外配置。
+在逗号分隔列表中添加包名。用户代码能否直接 import 某个模块完全由 `SANDBOX_PYTHON_ALLOWED_MODULES` 控制；第三方包和标准库内部依赖会按调用栈放行，避免误伤包自身初始化。
 
 3. **重新构建 Docker 镜像**。
 
@@ -242,7 +250,8 @@ your-new-package
 
 - Python 的模块黑名单通过 `__import__` 拦截实现，只拦截用户代码的直接 import
 - 标准库和第三方包的内部间接 import 不受影响
-- 危险模块（`os`、`sys`、`subprocess`、`socket` 等）始终被拦截
+- 默认白名单不包含 `os`、`sys`、`subprocess`、`socket` 等高危模块；如果显式加入环境变量白名单，用户代码会按配置获得对应能力
+- 如果显式放行 `subprocess`、`multiprocessing`、`threading`、`concurrent`，worker 会在每次任务后回收，以清理潜在后台执行残留
 
 ## 安全机制
 
@@ -256,7 +265,7 @@ your-new-package
 
 ### Python
 
-- `__import__` 黑名单拦截：用户代码无法 import 危险模块（`os`、`sys`、`subprocess` 等）
+- `__import__` 白名单控制：默认不允许用户代码 import `os`、`sys`、`subprocess` 等高危模块；显式加入 `SANDBOX_PYTHON_ALLOWED_MODULES` 后按配置放行
 - `exec()`/`eval()` 内的 import 同样被拦截（基于调用栈帧检测）
 - `builtins.__import__` 通过代理对象保护，用户无法覆盖
 - `signal.SIGALRM` 超时保护
@@ -311,4 +320,3 @@ bash test/benchmark/bench-sandbox-python.sh
 | 边界测试 | 1 | 58 | 空输入、超时、大数据、类型边界 |
 | 兼容性测试 | 2 | 39 | 旧版 JS/Python 代码格式兼容 |
 | 示例测试 | 1 | 31 | 常用场景和第三方包 |
-

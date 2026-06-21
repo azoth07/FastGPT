@@ -41,6 +41,9 @@ import { getEmbeddingModel, getLLMModel } from '@fastgpt/service/core/ai/model';
 import { computedCollectionChunkSettings } from '@fastgpt/global/core/dataset/training/utils';
 import { getResourceOwnedClbs } from '@fastgpt/service/support/permission/controller';
 import { getS3AvatarSource } from '@fastgpt/service/common/s3/sources/avatar';
+import { isInternalAddress, PRIVATE_URL_TEXT } from '@fastgpt/service/common/system/utils';
+import { checkMoveFolderDepth } from '@fastgpt/service/common/parentFolder/depth';
+import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
 
 // 更新知识库接口
 // 包括如下功能：
@@ -54,35 +57,47 @@ import { getS3AvatarSource } from '@fastgpt/service/common/s3/sources/avatar';
 //  (2) 目标目录的管理权限
 //  (3) 如果从根目录移动或移动到根目录，需要有团队的应用创建权限
 async function handler(req: ApiRequestProps<UpdateDatasetBody>) {
-  let {
-    id,
-    parentId,
-    name,
-    avatar,
-    intro,
-    agentModel,
-    vlmModel,
-    websiteConfig,
-    externalReadUrl,
-    apiDatasetServer,
-    autoSync,
-    chunkSettings
-  } = UpdateDatasetBodySchema.parse(req.body);
+  const {
+    body: {
+      id,
+      parentId,
+      name,
+      avatar,
+      intro,
+      agentModel,
+      vlmModel,
+      websiteConfig,
+      externalReadUrl,
+      apiDatasetServer,
+      autoSync,
+      chunkSettings: rawChunkSettings
+    }
+  } = parseApiInput({
+    req,
+    bodySchema: UpdateDatasetBodySchema
+  });
+
+  if (websiteConfig?.url) {
+    if (await isInternalAddress(websiteConfig.url)) {
+      return Promise.reject(PRIVATE_URL_TEXT);
+    }
+  }
 
   const isMove = parentId !== undefined;
 
   const { dataset, permission, tmbId, teamId } = await authDataset({
     req,
     authToken: true,
+    authApiKey: true,
     datasetId: id,
     per: ReadPermissionVal
   });
 
   let targetName = '';
 
-  chunkSettings = chunkSettings
+  const chunkSettings = rawChunkSettings
     ? computedCollectionChunkSettings({
-        ...chunkSettings,
+        ...rawChunkSettings,
         llmModel: getLLMModel(dataset.agentModel),
         vectorModel: getEmbeddingModel(dataset.vectorModel)
       })
@@ -94,6 +109,7 @@ async function handler(req: ApiRequestProps<UpdateDatasetBody>) {
       const { dataset: targetDataset } = await authDataset({
         req,
         authToken: true,
+        authApiKey: true,
         datasetId: parentId,
         per: ManagePermissionVal
       });
@@ -106,6 +122,7 @@ async function handler(req: ApiRequestProps<UpdateDatasetBody>) {
       await authDataset({
         req,
         authToken: true,
+        authApiKey: true,
         datasetId: dataset.parentId,
         per: ManagePermissionVal
       });
@@ -121,6 +138,16 @@ async function handler(req: ApiRequestProps<UpdateDatasetBody>) {
   } else {
     // is not move
     if (!permission.hasWritePer) return Promise.reject(DatasetErrEnum.unAuthDataset);
+  }
+
+  if (isMove) {
+    await checkMoveFolderDepth({
+      resourceId: id,
+      targetParentId: parentId,
+      teamId: dataset.teamId,
+      model: MongoDataset,
+      isFolderType: (type) => type === DatasetTypeEnum.folder
+    });
   }
 
   const isFolder = dataset.type === DatasetTypeEnum.folder;

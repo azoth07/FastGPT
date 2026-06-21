@@ -1,25 +1,51 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { Box, Flex, IconButton } from '@chakra-ui/react';
-import { useTranslation } from 'next-i18next';
-import MyIcon from '@fastgpt/web/components/common/Icon';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Flex } from '@chakra-ui/react';
 import { useContextSelector } from 'use-context-selector';
 import { SkillDetailContext } from '../context';
-import AIModelSelector from '@/components/Select/AIModelSelector';
 import { useSystemStore } from '@/web/common/system/useSystemStore';
-import ChatItemContextProvider from '@/web/core/chat/context/chatItemContext';
+import ChatItemContextProvider, { ChatItemContext } from '@/web/core/chat/context/chatItemContext';
 import ChatRecordContextProvider from '@/web/core/chat/context/chatRecordContext';
-import { useSkillChatTest } from './useSkillChatTest';
-import { getNanoid } from '@fastgpt/global/common/string/tools';
-import { getSkillDebugRecords } from '@/web/core/skill/api';
+import {
+  delSkillDebugChatItem,
+  getSkillDebugRecords,
+  postStopSkillDebugChat,
+  streamSkillDebugChat
+} from '@/web/core/skill/api';
 import type { LinkedPaginationProps } from '@fastgpt/global/openapi/api';
 import type { GetPaginationRecordsBodyType } from '@fastgpt/global/openapi/core/chat/record/api';
+import ChatAIModelSelector from '@/pageComponents/chat/ChatWindow/ChatAIModelSelector';
+import ChatBox from '@/components/core/chat/ChatContainer/ChatBox';
+import { ChatTypeEnum } from '@/components/core/chat/ChatContainer/ChatBox/constants';
+import { useTranslation } from 'next-i18next';
+import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
+import type { AppFileSelectConfigType } from '@fastgpt/global/core/app/type/config.schema';
+import type { StartChatFnProps } from '@/components/core/chat/ChatContainer/type';
+import { useMemoizedFn } from 'ahooks';
 
-const SkillPreview = ({ chatId, restartChat }: { chatId: string; restartChat: () => void }) => {
-  const { t } = useTranslation();
-  const { skillId, sandboxState } = useContextSelector(SkillDetailContext, (v) => v);
+const fileSelectConfig: AppFileSelectConfigType = {
+  maxFiles: 10,
+  canSelectFile: false,
+  canSelectImg: false,
+  customPdfParse: false,
+  canSelectVideo: false,
+  canSelectAudio: false,
+  canSelectCustomFileExtension: false,
+  customFileExtensionList: []
+};
 
-  const { llmModelList } = useSystemStore();
-  const [selectedModel, setSelectedModel] = useState(llmModelList[0]?.model || '');
+const SkillPreview = () => {
+  const { t } = useTranslation(['skill', 'common']);
+  const { skillId, sandboxState, chatId } = useContextSelector(SkillDetailContext, (v) => ({
+    skillId: v.skillId,
+    sandboxState: v.sandboxState,
+    chatId: v.chatId
+  }));
+
+  const { llmModelList, defaultModels } = useSystemStore();
+  const setChatBoxData = useContextSelector(ChatItemContext, (v) => v.setChatBoxData);
+  const defaultModel = defaultModels.llm?.model || llmModelList[0]?.model || '';
+  const [selectedModel, setSelectedModel] = useState('');
+  const userSelectedModelRef = useRef(false);
 
   const modelSelectList = useMemo(
     () => llmModelList.map((item) => ({ label: item.name, value: item.model })),
@@ -28,63 +54,127 @@ const SkillPreview = ({ chatId, restartChat }: { chatId: string; restartChat: ()
 
   const isReady = sandboxState === 'ready';
 
-  const { ChatContainer } = useSkillChatTest({
-    skillId,
-    model: selectedModel,
-    chatId,
-    isReady
+  useEffect(() => {
+    setChatBoxData((prev) => {
+      const isSameChat = prev.appId === skillId && prev.chatId === chatId;
+
+      return {
+        ...prev,
+        appId: skillId,
+        chatId,
+        title: isSameChat ? prev.title : undefined,
+        chatGenerateStatus: isSameChat ? prev.chatGenerateStatus : undefined,
+        hasBeenRead: isSameChat ? prev.hasBeenRead : undefined,
+        app: {
+          chatConfig: { fileSelectConfig },
+          name: 'Skill Preview',
+          avatar: '',
+          type: AppTypeEnum.simple,
+          pluginInputs: []
+        }
+      };
+    });
+  }, [skillId, chatId, setChatBoxData]);
+
+  useEffect(() => {
+    if (!userSelectedModelRef.current && defaultModel && selectedModel !== defaultModel) {
+      setSelectedModel(defaultModel);
+    }
+  }, [defaultModel, selectedModel]);
+
+  const ModelSelectorInput = useMemo(() => {
+    return (
+      <ChatAIModelSelector
+        h={'36px'}
+        boxShadow={'none'}
+        size={'sm'}
+        bg={'myGray.50'}
+        rounded={'10px'}
+        value={selectedModel}
+        list={modelSelectList}
+        onChange={(val) => {
+          userSelectedModelRef.current = true;
+          setSelectedModel(val);
+        }}
+      />
+    );
+  }, [selectedModel, modelSelectList]);
+
+  const onStartChat = useMemoizedFn(
+    async ({ messages, responseChatItemId, controller, generatingMessage }: StartChatFnProps) => {
+      const histories = messages.slice(-1);
+
+      const { responseText } = await streamSkillDebugChat({
+        data: {
+          skillId,
+          chatId,
+          messages: histories,
+          model: selectedModel,
+          responseChatItemId
+        },
+        onMessage: generatingMessage,
+        abortCtrl: controller
+      });
+
+      return { responseText };
+    }
+  );
+
+  // 使用 skill 专属的删除接口，避免走 /api/core/chat/item/delete 时用 skillId 查 App 报错
+  const onDeleteChatItem = useMemoizedFn((contentId: string) =>
+    delSkillDebugChatItem({ skillId, chatId, contentId })
+  );
+  const onStopChat = useMemoizedFn(async () => {
+    const result = await postStopSkillDebugChat({ skillId, chatId });
+    return {
+      chatGenerateStatus: result.chatGenerateStatus,
+      completed: result.completed
+    };
   });
 
   return (
-    <Flex h={'100%'} direction={'column'} py={'16px'} px={'24px'}>
-      {/* Header */}
-      <Flex alignItems={'center'} justifyContent={'space-between'} mb={4} flexShrink={0}>
-        <Box fontSize={'18px'} fontWeight={500} color={'#111824'} lineHeight={'28px'}>
-          {t('skill:detail_tab_preview')}
-        </Box>
-        <Flex alignItems={'center'} gap={'8px'}>
-          <AIModelSelector
-            w={'200px'}
-            size={'sm'}
-            value={selectedModel}
-            list={modelSelectList}
-            onChange={(val) => setSelectedModel(val)}
-          />
-          <IconButton
-            w={'32px'}
-            h={'32px'}
-            minW={'32px'}
-            icon={<MyIcon name={'common/clearLight'} w={'14px'} />}
-            variant={'whiteDanger'}
-            borderRadius={'md'}
-            aria-label={'clear'}
-            onClick={(e) => {
-              e.stopPropagation();
-              restartChat();
-            }}
-          />
-        </Flex>
-      </Flex>
-
-      {/* Chat area */}
-      <Box flex={1} overflow={'hidden'}>
-        <ChatContainer />
-      </Box>
-    </Flex>
+    <Box h={'100%'} w={'100%'} overflow={'hidden'}>
+      <ChatBox
+        isReady={isReady}
+        appId={skillId}
+        chatId={chatId}
+        chatType={ChatTypeEnum.test}
+        enableMarkChatRead={false}
+        onStartChat={onStartChat}
+        onDeleteChatItem={onDeleteChatItem}
+        onStopChat={onStopChat}
+        InputLeftComponent={ModelSelectorInput}
+        disabledSendTip={isReady ? undefined : t('sandbox_lazy_init')}
+        dialogTips={t('common:core.chat.Type a message')}
+        pl={'16px'}
+        pr={0}
+        maxW={'100%'}
+        boxBodyProps={{ px: 0, pr: '8px', maxW: '100%', mx: 0 }}
+        inputBodyProps={{ maxW: '100%', mx: 0, px: 0, pl: 0, pr: '8px' }}
+        EmptyState={
+          <Flex
+            flex={1}
+            alignItems="center"
+            justifyContent="center"
+            color="myGray.500"
+            fontSize="sm"
+            textAlign="center"
+            lineHeight="20px"
+            whiteSpace="pre-wrap"
+          >
+            {t('empty_state_tip')}
+          </Flex>
+        }
+      />
+    </Box>
   );
 };
 
-const CHAT_ID_STORAGE_KEY = (skillId: string) => `skill_debug_chatId_${skillId}`;
-
 const Render = () => {
-  const { skillId } = useContextSelector(SkillDetailContext, (v) => v);
-  const [chatId, setChatId] = useState(() => {
-    const stored = localStorage.getItem(CHAT_ID_STORAGE_KEY(skillId));
-    if (stored) return stored;
-    const newId = getNanoid(24);
-    localStorage.setItem(CHAT_ID_STORAGE_KEY(skillId), newId);
-    return newId;
-  });
+  const { skillId, chatId } = useContextSelector(SkillDetailContext, (v) => ({
+    skillId: v.skillId,
+    chatId: v.chatId
+  }));
 
   const chatRecordProviderParams = useMemo(
     () => ({
@@ -93,12 +183,6 @@ const Render = () => {
     }),
     [skillId, chatId]
   );
-
-  const restartChat = useCallback(() => {
-    const newId = getNanoid(24);
-    localStorage.setItem(CHAT_ID_STORAGE_KEY(skillId), newId);
-    setChatId(newId);
-  }, [skillId]);
 
   const skillFetchFn = useCallback(
     (data: LinkedPaginationProps<GetPaginationRecordsBodyType>) =>
@@ -122,10 +206,12 @@ const Render = () => {
       showRunningStatus={true}
       showSkillReferences={true}
       showWholeResponse={false}
+      showPoints={true}
       showAvatar={false}
+      showSandboxAction={false}
     >
       <ChatRecordContextProvider params={chatRecordProviderParams} fetchFn={skillFetchFn}>
-        <SkillPreview chatId={chatId} restartChat={restartChat} />
+        <SkillPreview />
       </ChatRecordContextProvider>
     </ChatItemContextProvider>
   );

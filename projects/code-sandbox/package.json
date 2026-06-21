@@ -14,24 +14,24 @@
     "test:watch": "vitest"
   },
   "engines": {
-    "node": ">=20",
+    "node": ">=20.19.0",
     "pnpm": "10.x"
   },
   "dependencies": {
-    "@fastgpt-sdk/logger": "^0.1.2",
+    "@fastgpt-sdk/otel": "workspace:*",
     "@hono/node-server": "^1.13.7",
-    "ipaddr.js": "^2.3.0",
+    "@fastgpt/global": "workspace:*",
+    "@t3-oss/env-core": "catalog:",
     "acorn": "^8.15.0",
     "acorn-walk": "^8.3.4",
     "axios": "catalog:",
     "crypto-js": "^4.2.0",
     "dayjs": "catalog:",
     "dotenv": "^17.3.1",
-    "hono": "^4.7.6",
+    "hono": "^4.12.18",
     "lodash": "catalog:",
     "moment": "^2.30.1",
-    "qs": "^6.13.1",
-    "tiktoken": "1.0.17",
+    "qs": "^6.15.2",
     "uuid": "^9.0.1",
     "zod": "catalog:"
   },

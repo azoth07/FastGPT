@@ -9,10 +9,10 @@ import { TOKEN_ERROR_CODE } from '@fastgpt/global/common/error/errorCode';
 import { TeamErrEnum } from '@fastgpt/global/common/error/code/team';
 import { useSystemStore } from '../system/useSystemStore';
 import { getWebReqUrl, subRoute } from '@fastgpt/web/common/system/utils';
-import { i18nT } from '@fastgpt/web/i18n/utils';
+import { i18nT } from '@fastgpt/global/common/i18n/utils';
 import { getNanoid } from '@fastgpt/global/common/string/tools';
 import dayjs from 'dayjs';
-import { safeEncodeURIComponent } from '@/web/common/utils/uri';
+import { getAuthLoginRedirectPath } from '@/web/support/user/loginRedirect/url';
 
 interface ConfigType {
   headers?: { [key: string]: string };
@@ -21,12 +21,20 @@ interface ConfigType {
   cancelToken?: AbortController;
   maxQuantity?: number; // The maximum number of simultaneous requests, usually used to cancel old requests
   withCredentials?: boolean;
+  dataAsBody?: boolean;
 }
 interface ResponseDataType {
   code: number;
   message: string;
   data: any;
 }
+
+export const AUTH_ERROR_EVENT_NAME = 'fastgpt:auth-error';
+export type AuthErrorEventDetail = {
+  data: any;
+  skipClearToken?: boolean;
+  skipRedirect?: boolean;
+};
 
 const maxQuantityMap: Record<
   string,
@@ -132,11 +140,23 @@ function responseError(err: any) {
 
   // Token error
   if (data?.code in TOKEN_ERROR_CODE) {
-    if (!isOutlinkPage && pathname !== `${subRoute}/chat`) {
-      clearToken();
+    const authErrorEvent = new CustomEvent<AuthErrorEventDetail>(AUTH_ERROR_EVENT_NAME, {
+      detail: {
+        data
+      }
+    });
+
+    window.dispatchEvent?.(authErrorEvent);
+
+    if (!authErrorEvent.detail.skipRedirect && !isOutlinkPage && pathname !== `${subRoute}/chat`) {
+      if (!authErrorEvent.detail.skipClearToken) {
+        clearToken();
+      }
       window.location.replace(
         getWebReqUrl(
-          `/login?lastRoute=${safeEncodeURIComponent(location.pathname + location.search)}`
+          getAuthLoginRedirectPath({
+            lastRoute: location.pathname + location.search
+          })
         )
       );
     }
@@ -176,7 +196,7 @@ instance.interceptors.response.use(responseSuccess, (err) => Promise.reject(err)
 function request(
   url: string,
   data: any,
-  { cancelToken, maxQuantity, withCredentials, ...config }: ConfigType,
+  { cancelToken, maxQuantity, withCredentials, dataAsBody, ...config }: ConfigType,
   method: Method
 ): any {
   /* 去空 */
@@ -190,14 +210,15 @@ function request(
   }
 
   const { id: signId, abortSignal } = checkMaxQuantity({ url, maxQuantity });
+  const shouldSendBody = ['POST', 'PUT'].includes(method) || dataAsBody;
 
   return instance
     .request({
       baseURL: getWebReqUrl('/api'),
       url,
       method,
-      data: ['POST', 'PUT'].includes(method) ? data : undefined,
-      params: !['POST', 'PUT'].includes(method) ? data : undefined,
+      data: shouldSendBody ? data : undefined,
+      params: shouldSendBody ? undefined : data,
       signal: cancelToken?.signal ?? abortSignal,
       withCredentials,
       ...config // 用户自定义配置，可以覆盖前面的配置

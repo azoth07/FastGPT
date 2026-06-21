@@ -13,14 +13,16 @@ import {
   getFastGPTSem,
   getInviterId,
   getMsclkid,
-  getSourceDomain,
   removeFastGPTSem
 } from '@/web/support/marketing/utils';
 import { checkPasswordRule } from '@fastgpt/global/common/string/password';
 import type { LoginSuccessResponseType } from '@fastgpt/global/openapi/support/user/account/login/api';
+import type { LangEnum } from '@fastgpt/global/common/i18n/type';
+
+type LoginSuccessHandler = (res: LoginSuccessResponseType) => void | Promise<void>;
 
 interface Props {
-  loginSuccess: (e: LoginSuccessResponseType) => void;
+  loginSuccess: LoginSuccessHandler;
   setPageType: Dispatch<`${LoginPageTypeEnum}`>;
 }
 
@@ -33,7 +35,7 @@ interface RegisterType {
 
 const RegisterForm = ({ setPageType, loginSuccess }: Props) => {
   const { toast } = useToast();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const { feConfigs } = useSystemStore();
   const {
@@ -51,18 +53,17 @@ const RegisterForm = ({ setPageType, loginSuccess }: Props) => {
 
   const { runAsync: onclickRegister, loading: requesting } = useRequest(
     async ({ username, password, code }: RegisterType) => {
-      loginSuccess(
-        await postRegister({
-          username,
-          code,
-          password,
-          inviterId: getInviterId(),
-          bd_vid: getBdVId(),
-          msclkid: getMsclkid(),
-          fastgpt_sem: getFastGPTSem(),
-          sourceDomain: getSourceDomain()
-        })
-      );
+      const loginResponse = await postRegister({
+        username,
+        code,
+        password,
+        inviterId: getInviterId(),
+        bd_vid: getBdVId(),
+        msclkid: getMsclkid(),
+        fastgpt_sem: getFastGPTSem(),
+        language: i18n.language as LangEnum
+      });
+      await loginSuccess(loginResponse);
       removeFastGPTSem();
 
       toast({
@@ -71,7 +72,7 @@ const RegisterForm = ({ setPageType, loginSuccess }: Props) => {
       });
     },
     {
-      refreshDeps: [loginSuccess, t, toast]
+      refreshDeps: [i18n.language, loginSuccess, t, toast]
     }
   );
   const onSubmitErr = (err: Record<string, any>) => {

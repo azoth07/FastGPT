@@ -14,9 +14,12 @@ import { type RequireOnlyOne } from '@fastgpt/global/common/type/utils';
 import { type StoreNodeItemType } from '@fastgpt/global/core/workflow/type/node';
 import { type StoreEdgeItemType } from '@fastgpt/global/core/workflow/type/edge';
 import QuestionTip from '@fastgpt/web/components/common/MyTooltip/QuestionTip';
+import type { AppTypeEnum } from '@fastgpt/global/core/app/constants';
 
 type ExportConfigPopoverProps = {
+  appType: AppTypeEnum;
   appName: string;
+  appIntro?: string | null;
   chatConfig?: AppChatConfigType;
   filterSensitiveInfo?: boolean;
   onFilterSensitiveInfoChange?: (value: boolean) => void;
@@ -34,7 +37,9 @@ const ExportConfigPopover = ({
   appForm,
   getWorkflowData,
   chatConfig,
+  appType,
   appName,
+  appIntro,
   filterSensitiveInfo: filterSensitiveInfoProp,
   onFilterSensitiveInfoChange
 }: ExportConfigPopoverProps) => {
@@ -60,21 +65,31 @@ const ExportConfigPopover = ({
       let config = '';
 
       if (appForm) {
+        const appConfig = filterSensitiveInfo ? filterSensitiveFormData(appForm) : appForm;
         config = JSON.stringify(
-          filterSensitiveInfo ? filterSensitiveFormData(appForm) : appForm,
+          {
+            ...appConfig,
+            type: appType,
+            name: appName,
+            intro: appIntro ?? ''
+          },
           null,
           2
         );
       } else if (getWorkflowData) {
         const workflowData = getWorkflowData();
         if (!workflowData) return;
+        const nodes = filterSensitiveInfo
+          ? filterSensitiveNodesData(workflowData.nodes)
+          : workflowData.nodes;
         config = JSON.stringify(
           {
-            nodes: filterSensitiveInfo
-              ? filterSensitiveNodesData(workflowData.nodes)
-              : workflowData.nodes,
+            nodes,
             edges: workflowData.edges,
-            chatConfig
+            chatConfig,
+            type: appType,
+            name: appName,
+            intro: appIntro ?? ''
           },
           null,
           2
@@ -100,26 +115,54 @@ const ExportConfigPopover = ({
         });
       }
     },
-    [appForm, appName, chatConfig, copyData, getWorkflowData, t, filterSensitiveInfo]
+    [
+      appForm,
+      appIntro,
+      appName,
+      appType,
+      chatConfig,
+      copyData,
+      getWorkflowData,
+      t,
+      filterSensitiveInfo
+    ]
   );
 
   return (
     <MyPopover
       placement={'right-start'}
-      offset={[0, 20]}
-      hasArrow
+      offset={[0, 0]}
+      hasArrow={true}
       trigger={'hover'}
+      flip={false}
+      zIndex={2000}
+      data-my-menu-ignore-outside-click
       w={'8.8rem'}
       Trigger={
-        <MyBox display={'flex'} cursor={'pointer'} onClick={(e) => e.stopPropagation()}>
-          <MyIcon name={'export'} w={'16px'} mr={2} />
-          <Box fontSize={'sm'}>{t('app:export_configs')}</Box>
+        <MyBox
+          display={'flex'}
+          alignItems={'center'}
+          w={'100%'}
+          cursor={'pointer'}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <MyIcon name={'export'} w={'16px'} mr={2} flexShrink={0} />
+          <Box flex={1} minW={0} fontSize={'sm'}>
+            {t('app:export_configs')}
+          </Box>
         </MyBox>
       }
     >
-      {({ onClose }) => (
-        <Box p={1} onClick={(e) => e.stopPropagation()}>
+      {() => (
+        <Box
+          p={1}
+          w={'100%'}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
           <Flex
+            w={'100%'}
             py={'0.38rem'}
             px={1}
             color={'myGray.600'}
@@ -131,10 +174,13 @@ const ExportConfigPopover = ({
             borderRadius={'xs'}
             onClick={() => onExportWorkflow('copy')}
           >
-            <MyIcon name={'copy'} w={'1rem'} mr={2} />
-            <Box fontSize={'mini'}>{t('common:copy_to_clipboard')}</Box>
+            <MyIcon name={'copy'} w={'1rem'} mr={2} flexShrink={0} />
+            <Box flex={1} minW={0} fontSize={'mini'}>
+              {t('common:copy_to_clipboard')}
+            </Box>
           </Flex>
           <Flex
+            w={'100%'}
             py={'0.38rem'}
             px={1}
             color={'myGray.600'}
@@ -146,13 +192,16 @@ const ExportConfigPopover = ({
             borderRadius={'xs'}
             onClick={() => onExportWorkflow('json')}
           >
-            <MyIcon name={'configmap'} w={'1rem'} mr={2} />
-            <Box fontSize={'mini'}>{t('common:export_to_json')}</Box>
+            <MyIcon name={'configmap'} w={'1rem'} mr={2} flexShrink={0} />
+            <Box flex={1} minW={0} fontSize={'mini'}>
+              {t('common:export_to_json')}
+            </Box>
           </Flex>
 
-          <Divider />
+          <Divider my={1} />
 
           <Flex
+            w={'100%'}
             py={'0.38rem'}
             px={1}
             alignItems={'center'}

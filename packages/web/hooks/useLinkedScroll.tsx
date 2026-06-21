@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { type LinkedListResponse, type LinkedPaginationProps } from '@fastgpt/global/openapi/api';
 import { Box, type BoxProps } from '@chakra-ui/react';
 import { useTranslation } from 'next-i18next';
-import { useScroll, useMemoizedFn, useDebounceEffect, useLatest } from 'ahooks';
+import { useScroll, useDebounceEffect } from 'ahooks';
 import MyBox from '../components/common/MyBox';
 import { useRequest } from './useRequest';
 
@@ -40,43 +40,49 @@ export function useLinkedScroll<
   const containerRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<string, HTMLElement | null>>(new Map());
   const isInit = useRef(false);
+  const paramsVersionRef = useRef(0);
 
   const scrollToItem = useCallback(
-    async (id?: string) => {
-      if (!id) {
-        id = defaultScroll === 'top' ? dataList[0]?.id : dataList[dataList.length - 1]?.id;
+    (id?: string) => {
+      const targetId =
+        id || (defaultScroll === 'top' ? dataList[0]?.id : dataList[dataList.length - 1]?.id);
+
+      if (!targetId) {
+        return;
       }
 
-      const itemIndex = dataList.findIndex((item) => item.id === id);
+      const itemIndex = dataList.findIndex((item) => item.id === targetId);
       if (itemIndex === -1) {
         return;
       }
 
-      const element = itemRefs.current.get(id);
-      if (!element || !containerRef.current) {
-        requestAnimationFrame(() => scrollToItem(id));
-        return;
-      }
+      const tryScroll = () => {
+        const element = itemRefs.current.get(targetId);
+        if (!element || !containerRef.current) {
+          requestAnimationFrame(tryScroll);
+          return;
+        }
 
-      const elementRect = element.getBoundingClientRect();
-      const containerRect = containerRef.current.getBoundingClientRect();
+        const elementRect = element.getBoundingClientRect();
+        const containerRect = containerRef.current.getBoundingClientRect();
 
-      const scrollTop = containerRef.current.scrollTop + elementRect.top - containerRect.top;
+        const scrollTop = containerRef.current.scrollTop + elementRect.top - containerRect.top;
 
-      containerRef.current.scrollTo({
-        top: scrollTop
-      });
+        containerRef.current.scrollTo({
+          top: scrollTop
+        });
+      };
+
+      tryScroll();
     },
     [dataList, defaultScroll]
   );
 
-  const { runAsync: callApi, loading: isLoading } = useRequest(api);
+  const { runAsync: callApi, loading: isLoading } = useRequest(api, { errorToast: '' });
 
-  let scrollSign = useRef(false);
+  const scrollSign = useRef(false);
   const { runAsync: loadInitData } = useRequest(
     async ({ scrollWhenFinish, refresh } = { scrollWhenFinish: true, refresh: false }) => {
-      if (isLoading) return;
-
       // 已经被加载的数据，直接滚动到该位置
       const item = dataList.find((item) => item.id === currentData?.id);
       if (item && !refresh) {
@@ -84,12 +90,14 @@ export function useLinkedScroll<
         return;
       }
 
+      const paramsVersion = paramsVersionRef.current;
       const response = await callApi({
         initialId: currentData?.id,
         anchor: currentData?.anchor,
         pageSize,
         ...params
       } as TParams);
+      if (paramsVersion !== paramsVersionRef.current) return;
 
       setHasMorePrev(response.hasMorePrev);
       setHasMoreNext(response.hasMoreNext);
@@ -113,6 +121,15 @@ export function useLinkedScroll<
   );
   useEffect(() => {
     if (!isInit.current) return;
+    paramsVersionRef.current += 1;
+    anchorRef.current = {
+      top: null,
+      bottom: null
+    };
+    itemRefs.current.clear();
+    setHasMorePrev(true);
+    setHasMoreNext(true);
+    setDataList([]);
     loadInitData({ refresh: true, scrollWhenFinish: true });
   }, [params]);
   useEffect(() => {
@@ -126,6 +143,7 @@ export function useLinkedScroll<
     async (scrollRef = containerRef) => {
       if (!anchorRef.current.top || !hasMorePrev || isLoading) return;
 
+      const paramsVersion = paramsVersionRef.current;
       const prevScrollTop = scrollRef?.current?.scrollTop || 0;
       const prevScrollHeight = scrollRef?.current?.scrollHeight || 0;
 
@@ -136,6 +154,7 @@ export function useLinkedScroll<
         ...params
       } as TParams);
 
+      if (paramsVersion !== paramsVersionRef.current) return;
       if (!response) return;
 
       setHasMorePrev(response.hasMorePrev);
@@ -165,6 +184,7 @@ export function useLinkedScroll<
     async (scrollRef = containerRef) => {
       if (!anchorRef.current.bottom || !hasMoreNext || isLoading) return;
 
+      const paramsVersion = paramsVersionRef.current;
       const prevScrollTop = scrollRef?.current?.scrollTop || 0;
 
       const response = await callApi({
@@ -174,6 +194,7 @@ export function useLinkedScroll<
         ...params
       } as TParams);
 
+      if (paramsVersion !== paramsVersionRef.current) return;
       if (!response) return;
 
       setHasMoreNext(response.hasMoreNext);

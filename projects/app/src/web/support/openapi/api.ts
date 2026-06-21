@@ -1,26 +1,43 @@
 import { GET, POST, DELETE, PUT } from '@/web/common/api/request';
-import type { EditApiKeyProps, GetApiKeyProps } from '@/global/support/openapi/api';
-import type { OpenApiSchema } from '@fastgpt/global/support/openapi/type';
+import type {
+  CreateApiKeyBodyType,
+  CreateApiKeyResponseType,
+  CopyApiKeyBodyType,
+  CopyApiKeyResponseType,
+  DeleteApiKeyQueryType,
+  DeleteApiKeyResponseType,
+  GetApiKeyListQueryType,
+  GetApiKeyListResponseType,
+  UpdateApiKeyBodyType,
+  UpdateApiKeyResponseType
+} from '@fastgpt/global/openapi/support/openapi/api';
 
 /**
  * crete a api key
  */
-export const createAOpenApiKey = (data: EditApiKeyProps) =>
-  POST<string>('/support/openapi/create', data);
+export const createAOpenApiKey = (data: CreateApiKeyBodyType) =>
+  POST<CreateApiKeyResponseType>('/support/openapi/create', data);
 
 /**
  * update a api key
  */
-export const putOpenApiKey = (data: EditApiKeyProps & { _id: string }) =>
-  PUT<string>('/support/openapi/update', data);
+export const putOpenApiKey = (data: UpdateApiKeyBodyType) =>
+  PUT<UpdateApiKeyResponseType>('/support/openapi/update', data);
 
 /**
  * get api keys
  */
-export const getOpenApiKeys = (params?: GetApiKeyProps) =>
-  GET<OpenApiSchema[]>('/support/openapi/list', params);
+export const getOpenApiKeys = (params?: GetApiKeyListQueryType) =>
+  GET<GetApiKeyListResponseType>('/support/openapi/list', params);
+
+/**
+ * copy api key and record audit
+ */
+export const copyOpenApiKey = (data: CopyApiKeyBodyType) =>
+  POST<CopyApiKeyResponseType>('/support/openapi/copy', data);
 
 /**
  * delete api by id
  */
-export const delOpenApiById = (id: string) => DELETE(`/support/openapi/delete`, { id });
+export const delOpenApiById = (id: DeleteApiKeyQueryType['id']) =>
+  DELETE<DeleteApiKeyResponseType>(`/support/openapi/delete`, { id });

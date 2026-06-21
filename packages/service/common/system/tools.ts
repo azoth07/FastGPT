@@ -1,6 +1,7 @@
 import { type FastGPTConfigFileType } from '@fastgpt/global/common/system/types';
 import { isIPv6 } from 'net';
 import { getLogger, LogCategories } from '../logger';
+import { serviceEnv } from '../../env';
 
 const logger = getLogger(LogCategories.ERROR);
 
@@ -19,8 +20,16 @@ export const initFastGPTConfig = (config?: FastGPTConfigFileType) => {
     !!config.systemEnv.customPdfParse?.textinAppId ||
     !!config.systemEnv.customPdfParse?.doc2xKey;
   config.feConfigs.customPdfParsePrice = config.systemEnv.customPdfParse?.price || 0;
-  config.feConfigs.uploadFileMaxSize = Number(process.env.UPLOAD_FILE_MAX_SIZE || 1000);
-  config.feConfigs.uploadFileMaxAmount = Number(process.env.UPLOAD_FILE_MAX_AMOUNT || 1000);
+  config.feConfigs.uploadFileMaxSize = serviceEnv.UPLOAD_FILE_MAX_SIZE;
+  config.feConfigs.uploadFileMaxAmount = serviceEnv.UPLOAD_FILE_MAX_AMOUNT;
+  config.feConfigs.limit = {
+    ...config.feConfigs.limit,
+    agentSandboxMaxEditDebug: serviceEnv.AGENT_SANDBOX_MAX_EDIT_DEBUG,
+    agentSandboxArchiveMaxBytes: serviceEnv.AGENT_SANDBOX_ARCHIVE_MAX_SIZE * 1024 * 1024,
+    skillSandboxMaxBytes: serviceEnv.AGENT_SANDBOX_SKILL_MAX_SIZE * 1024 * 1024,
+    agentSandboxMaxFileBytes: serviceEnv.AGENT_SANDBOX_MAX_FILE_SIZE * 1024 * 1024,
+    maxFolderDepth: serviceEnv.MAX_FOLDER_DEPTH
+  };
 
   global.feConfigs = config.feConfigs;
   global.systemEnv = config.systemEnv;

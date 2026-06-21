@@ -14,9 +14,12 @@ import { text2Chunks } from '../../worker/function';
 import { retryFn } from '@fastgpt/global/common/system/utils';
 import { getFileMaxSize } from '../../common/file/utils';
 import { UserError } from '@fastgpt/global/common/error/utils';
-import { getS3DatasetSource, S3DatasetSource } from '../../common/s3/sources/dataset';
+import { getAxiosHeaderValue } from '@fastgpt/global/common/axios/utils';
+import { getS3DatasetSource } from '../../common/s3/sources/dataset';
 import { getFileS3Key, isS3ObjectKey } from '../../common/s3/utils';
+import { isAuthorizedDatasetFileS3Key } from '../../common/s3/sources/dataset/key';
 import { getLogger, LogCategories } from '../../common/logger';
+import { DatasetErrEnum } from '@fastgpt/global/common/error/code/dataset';
 
 const logger = getLogger(LogCategories.MODULE.DATASET.FILE);
 
@@ -44,7 +47,9 @@ export const readFileRawTextByUrl = async ({
   // Check file size
   try {
     const headResponse = await axios.head(url, { timeout: 10000 });
-    const contentLength = parseInt(headResponse.headers['content-length'] || '0');
+    const contentLength = parseInt(
+      getAxiosHeaderValue(headResponse.headers['content-length']) || '0'
+    );
 
     if (contentLength > 0 && contentLength > maxFileSize) {
       return Promise.reject(
@@ -188,6 +193,10 @@ export const readDatasetSourceRawText = async ({
   if (type === DatasetSourceReadTypeEnum.fileLocal) {
     if (!datasetId || !isS3ObjectKey(sourceId, 'dataset')) {
       return Promise.reject('datasetId is required for S3 files');
+    }
+
+    if (!isAuthorizedDatasetFileS3Key({ key: sourceId, datasetId })) {
+      return Promise.reject(DatasetErrEnum.unAuthDatasetFile);
     }
 
     const { filename, rawText } = await getS3DatasetSource().getDatasetFileRawText({

@@ -34,9 +34,32 @@ const ChatCompletionCreateParamsSchema = z.object({
   })
 });
 
+export const ChatCompletionAuthProxySchema = z
+  .object({
+    username: nullishToUndefined(z.string().trim().min(1).max(128).optional()).meta({
+      example: 'user@example.com',
+      description: 'API Key 代理调用的团队成员用户名'
+    }),
+    tmbId: nullishToUndefined(ObjectIdSchema.optional()).meta({
+      description: 'API Key 代理调用的团队成员 ID'
+    })
+  })
+  .strict()
+  .refine(({ username, tmbId }) => !!username || !!tmbId, {
+    message: 'authProxy.username or authProxy.tmbId is required'
+  })
+  .meta({
+    description:
+      'API Key 代理调用身份。仅开启 authProxy 的团队级 API Key 可用，username 与 tmbId 同时传入时必须指向同一团队成员'
+  });
+export type ChatCompletionAuthProxy = z.infer<typeof ChatCompletionAuthProxySchema>;
+
 export const CompletionsPropsSchema = OutLinkChatAuthSchema.extend(WebCompletionsSchema.shape)
   .extend(ChatCompletionCreateParamsSchema.shape)
   .extend({
+    authProxy: nullishToUndefined(ChatCompletionAuthProxySchema.optional()).meta({
+      description: 'API Key 代理调用身份'
+    }),
     variables: nullishToUndefined(z.record(z.string(), z.any()).default({})).meta({
       description: '全局变量或插件输入'
     }),
@@ -91,6 +114,7 @@ const ChatCompletionUsageSchema = z.object({
 
 export const CompletionsResponseSchema = z.object({
   id: z.string().meta({ description: '对话 ID（chatId）' }),
+  title: z.string().optional().meta({ description: '未命名会话标题生成成功时返回的对话标题' }),
   model: z.literal('').meta({ description: '模型名称，v1 接口固定为空字符串' }),
   usage: ChatCompletionUsageSchema.meta({
     description: 'Token 用量。v1 接口为占位值，需要时请从 responseData 计算'

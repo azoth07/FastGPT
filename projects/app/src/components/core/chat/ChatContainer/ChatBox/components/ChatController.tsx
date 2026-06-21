@@ -5,7 +5,7 @@ import MyTooltip from '@fastgpt/web/components/common/MyTooltip';
 import React, { useMemo } from 'react';
 import { useTranslation } from 'next-i18next';
 import MyIcon from '@fastgpt/web/components/common/Icon';
-import { formatChatValue2InputType } from '../utils';
+import { formatChatValue2InputType } from '../utils/chatValue';
 import { ChatRoleEnum } from '@fastgpt/global/core/chat/constants';
 import { ChatBoxContext } from '../Provider';
 import { useContextSelector } from 'use-context-selector';
@@ -26,6 +26,7 @@ export type ChatControllerProps = {
   onToggleFeedbackReadStatus?: () => void;
   showFeedbackContent?: boolean;
   onToggleFeedbackContent?: () => void;
+  variant?: 'panel' | 'footer';
 };
 
 const controlIconStyle = {
@@ -41,6 +42,14 @@ const controlContainerStyle = {
   display: 'flex'
 };
 
+const footerIconStyle = {
+  w: '16px',
+  cursor: 'pointer',
+  p: '4px',
+  color: 'myGray.400',
+  _hover: { color: 'primary.600' }
+};
+
 const ChatController = ({
   chat,
   showVoiceIcon,
@@ -51,7 +60,8 @@ const ChatController = ({
   onAddUserLike,
   onToggleFeedbackReadStatus,
   showFeedbackContent,
-  onToggleFeedbackContent
+  onToggleFeedbackContent,
+  variant = 'panel'
 }: ChatControllerProps & FlexProps) => {
   const { t } = useTranslation();
   const { copyData } = useCopyData();
@@ -71,6 +81,27 @@ const ChatController = ({
   const chatText = useMemo(() => formatChatValue2InputType(chat.value).text || '', [chat.value]);
 
   const isLogMode = chatType === 'log';
+  const isFooter = variant === 'footer';
+  const renderTooltip = (label: string, children: React.ReactNode) => (
+    <MyTooltip label={label}>{children}</MyTooltip>
+  );
+  const iconStyle = isFooter ? footerIconStyle : controlIconStyle;
+  const activeFeedbackStyle = isFooter
+    ? {
+        color: 'primary.600'
+      }
+    : {
+        color: 'white',
+        bg: 'green.500'
+      };
+  const activeBadFeedbackStyle = isFooter
+    ? {
+        color: 'primary.600'
+      }
+    : {
+        color: 'white',
+        bg: 'yellow.500'
+      };
 
   const {
     runAsync: requestOnToggleFeedbackReadStatus,
@@ -84,17 +115,16 @@ const ChatController = ({
 
   return (
     <>
-      <Flex alignItems={'center'} gap={2}>
+      <Flex alignItems={'center'} gap={isFooter ? '4px' : 2}>
         <Flex
-          {...controlContainerStyle}
-          borderRadius={'sm'}
-          border={'base'}
+          {...(isFooter ? {} : controlContainerStyle)}
+          className={isFooter ? undefined : controlContainerStyle.className}
+          borderRadius={isFooter ? undefined : 'sm'}
+          border={isFooter ? undefined : 'base'}
           alignItems={'center'}
+          gap={isFooter ? '4px' : undefined}
+          color={'myGray.400'}
           sx={{
-            '& > :first-child svg': {
-              borderTopLeftRadius: 'sm',
-              borderBottomLeftRadius: 'sm'
-            },
             '& > :last-child svg': {
               borderRight: 'none',
               borderTopRightRadius: 'sm',
@@ -102,34 +132,37 @@ const ChatController = ({
             }
           }}
         >
-          <MyTooltip label={t('common:Copy')}>
+          {renderTooltip(
+            t('common:Copy'),
             <MyIcon
-              {...controlIconStyle}
+              {...iconStyle}
               name={'copy'}
+              borderLeftRadius={isFooter ? undefined : 'sm'}
               _hover={{ color: 'primary.600' }}
               onClick={() => copyData(chatText)}
             />
-          </MyTooltip>
+          )}
           {!!onDelete && !isChatting && chatType !== 'log' && (
             <>
-              {onRetry && (
-                <MyTooltip label={t('common:core.chat.retry')}>
+              {onRetry &&
+                renderTooltip(
+                  t('common:core.chat.retry'),
                   <MyIcon
-                    {...controlIconStyle}
+                    {...iconStyle}
                     name={'common/retryLight'}
-                    _hover={{ color: 'green.500' }}
+                    _hover={{ color: isFooter ? 'primary.600' : 'green.500' }}
                     onClick={onRetry}
                   />
-                </MyTooltip>
-              )}
-              <MyTooltip label={t('common:Delete')}>
+                )}
+              {renderTooltip(
+                t('common:Delete'),
                 <MyIcon
-                  {...controlIconStyle}
+                  {...iconStyle}
                   name={'delete'}
-                  _hover={{ color: 'red.600' }}
+                  _hover={{ color: isFooter ? 'primary.600' : 'red.600' }}
                   onClick={onDelete}
                 />
-              </MyTooltip>
+              )}
             </>
           )}
           {showVoiceIcon &&
@@ -139,151 +172,162 @@ const ChatController = ({
               if (isPlayingChat && audioPlaying) {
                 return (
                   <Flex alignItems={'center'}>
-                    <MyTooltip label={t('common:core.chat.tts.Stop Speech')}>
+                    {renderTooltip(
+                      t('common:core.chat.tts.Stop Speech'),
                       <MyIcon
-                        {...controlIconStyle}
-                        borderRight={'none'}
+                        {...iconStyle}
+                        borderRight={isFooter ? undefined : 'none'}
                         name={'core/chat/stopSpeech'}
-                        color={'#E74694'}
+                        color={isFooter ? 'primary.600' : '#E74694'}
                         onClick={cancelAudio}
                       />
-                    </MyTooltip>
-                    <MyImage src="/icon/speaking.gif" w={'23px'} alt={''} borderRight={'base'} />
+                    )}
+                    {!isFooter && (
+                      <MyImage src="/icon/speaking.gif" w={'23px'} alt={''} borderRight={'base'} />
+                    )}
                   </Flex>
                 );
               }
               if (isPlayingChat && audioLoading) {
-                return (
-                  <MyTooltip label={t('common:Loading')}>
-                    <MyIcon {...controlIconStyle} name={'common/loading'} />
-                  </MyTooltip>
+                return renderTooltip(
+                  t('common:Loading'),
+                  <MyIcon {...iconStyle} name={'common/loading'} />
                 );
               }
-              return (
-                <MyTooltip label={t('common:core.app.TTS start')}>
-                  <MyIcon
-                    {...controlIconStyle}
-                    name={'common/voiceLight'}
-                    _hover={{ color: '#E74694' }}
-                    onClick={async () => {
-                      setAudioPlayingChatId(chat.dataId);
-                      const response = await playAudioByText({
-                        buffer: chat.ttsBuffer,
-                        text: chatText
-                      });
+              return renderTooltip(
+                t('common:core.app.TTS start'),
+                <MyIcon
+                  {...iconStyle}
+                  name={'core/chat/soundWave'}
+                  color="currentColor"
+                  sx={{
+                    '& path': {
+                      fill: 'currentColor'
+                    }
+                  }}
+                  _hover={{ color: isFooter ? 'primary.600' : '#E74694' }}
+                  onClick={async () => {
+                    setAudioPlayingChatId(chat.dataId);
+                    const response = await playAudioByText({
+                      buffer: chat.ttsBuffer,
+                      text: chatText
+                    });
 
-                      if (!setChatRecords || !response.buffer) return;
-                      setChatRecords((state) =>
-                        state.map((item) =>
-                          item.dataId === chat.dataId
-                            ? {
-                                ...item,
-                                ttsBuffer: response.buffer
-                              }
-                            : item
-                        )
-                      );
-                    }}
-                  />
-                </MyTooltip>
+                    if (!setChatRecords || !response.buffer) return;
+                    setChatRecords((state) =>
+                      state.map((item) =>
+                        item.dataId === chat.dataId
+                          ? {
+                              ...item,
+                              ttsBuffer: response.buffer
+                            }
+                          : item
+                      )
+                    );
+                  }}
+                />
               );
             })()}
-          {!!onMark && (
-            <MyTooltip label={t('common:core.chat.Mark')}>
+          {!!onMark &&
+            renderTooltip(
+              t('common:core.chat.Mark'),
               <MyIcon
-                {...controlIconStyle}
+                {...iconStyle}
                 name={'core/app/markLight'}
-                _hover={{ color: '#67c13b' }}
+                _hover={{ color: isFooter ? 'primary.600' : '#67c13b' }}
                 onClick={onMark}
               />
-            </MyTooltip>
-          )}
+            )}
           {chat.obj === ChatRoleEnum.AI && (
             <>
               {/* 日志模式下，始终展示赞/踩 */}
               {isLogMode ? (
                 <>
                   {!!chat.userGoodFeedback && (
-                    <Box position={'relative'}>
-                      <MyIcon
-                        {...controlIconStyle}
-                        color={'green.500'}
-                        name={'core/chat/feedback/goodLight'}
-                        cursor={'not-allowed'}
-                      />
-                      {!chat.isFeedbackRead && (
-                        <Box
-                          position={'absolute'}
-                          top={'-2px'}
-                          right={'-2px'}
-                          w={'8px'}
-                          h={'8px'}
-                          bg={'red.500'}
-                          borderRadius={'full'}
-                          border={'1px solid white'}
+                    <MyTooltip label={t('chat:feedback_helpful')}>
+                      <Box position={'relative'}>
+                        <MyIcon
+                          {...iconStyle}
+                          color={'green.500'}
+                          name={'core/chat/feedback/goodLight'}
+                          cursor={'not-allowed'}
                         />
-                      )}
-                    </Box>
+                        {!chat.isFeedbackRead && (
+                          <Box
+                            position={'absolute'}
+                            top={'-2px'}
+                            right={'-2px'}
+                            w={'8px'}
+                            h={'8px'}
+                            bg={'red.500'}
+                            borderRadius={'full'}
+                            border={'1px solid white'}
+                          />
+                        )}
+                      </Box>
+                    </MyTooltip>
                   )}
 
                   {!!chat.userBadFeedback && (
-                    <Box position={'relative'}>
-                      <MyIcon
-                        {...controlIconStyle}
-                        color={'yellow.500'}
-                        name={'core/chat/feedback/badLight'}
-                        cursor={'not-allowed'}
-                      />
-                      {!chat.isFeedbackRead && (
-                        <Box
-                          position={'absolute'}
-                          top={'-2px'}
-                          right={'-2px'}
-                          w={'8px'}
-                          h={'8px'}
-                          bg={'red.500'}
-                          borderRadius={'full'}
-                          border={'1px solid white'}
+                    <MyTooltip label={t('chat:feedback_unhelpful')}>
+                      <Box position={'relative'}>
+                        <MyIcon
+                          {...iconStyle}
+                          color={'yellow.500'}
+                          name={'core/chat/feedback/badLight'}
+                          cursor={'not-allowed'}
                         />
-                      )}
-                    </Box>
+                        {!chat.isFeedbackRead && (
+                          <Box
+                            position={'absolute'}
+                            top={'-2px'}
+                            right={'-2px'}
+                            w={'8px'}
+                            h={'8px'}
+                            bg={'red.500'}
+                            borderRadius={'full'}
+                            border={'1px solid white'}
+                          />
+                        )}
+                      </Box>
+                    </MyTooltip>
                   )}
                 </>
               ) : (
                 <>
                   {!!onAddUserLike && (
-                    <MyIcon
-                      {...controlIconStyle}
-                      {...(!!chat.userGoodFeedback
-                        ? {
-                            color: 'white',
-                            bg: 'green.500'
-                          }
-                        : {
-                            _hover: { color: 'green.600' }
-                          })}
-                      borderRight={!onAddUserDislike ? 'none' : 'base'}
-                      borderRightRadius={!onAddUserDislike ? 'sm' : 'none'}
-                      name={'core/chat/feedback/goodLight'}
-                      onClick={onAddUserLike}
-                    />
+                    <MyTooltip label={t('chat:feedback_helpful')}>
+                      <MyIcon
+                        {...iconStyle}
+                        {...(!!chat.userGoodFeedback
+                          ? activeFeedbackStyle
+                          : {
+                              _hover: { color: 'primary.600' }
+                            })}
+                        borderRight={isFooter ? undefined : !onAddUserDislike ? 'none' : 'base'}
+                        borderRightRadius={
+                          isFooter ? undefined : !onAddUserDislike ? 'sm' : 'none'
+                        }
+                        name={'core/chat/feedback/goodLight'}
+                        onClick={onAddUserLike}
+                      />
+                    </MyTooltip>
                   )}
                   {!!onAddUserDislike && (
-                    <MyIcon
-                      {...controlIconStyle}
-                      {...(!!chat.userBadFeedback
-                        ? {
-                            color: 'white',
-                            bg: 'yellow.500'
-                          }
-                        : {
-                            _hover: { color: 'yellow.500' }
-                          })}
-                      borderRight={'none'}
-                      borderRightRadius={'sm'}
-                      name={'core/chat/feedback/badLight'}
-                      onClick={onAddUserDislike}
-                    />
+                    <MyTooltip label={t('chat:feedback_unhelpful')}>
+                      <MyIcon
+                        {...iconStyle}
+                        {...(!!chat.userBadFeedback
+                          ? activeBadFeedbackStyle
+                          : {
+                              _hover: { color: 'primary.600' }
+                            })}
+                        borderRight={isFooter ? undefined : 'none'}
+                        borderRightRadius={isFooter ? undefined : 'sm'}
+                        name={'core/chat/feedback/badLight'}
+                        onClick={onAddUserDislike}
+                      />
+                    </MyTooltip>
                   )}
                 </>
               )}

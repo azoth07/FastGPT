@@ -7,6 +7,16 @@ import { ChatItemMiniSchema } from '../../../../core/chat/type';
 import { AppTTSConfigTypeSchema } from '../../../../core/app/type';
 import { GetChatTypeEnum } from '../../../../core/chat/constants';
 
+const QueryStringArraySchema = z
+  .union([z.string(), z.array(z.string())])
+  .optional()
+  .transform((val) => {
+    if (!val) return undefined;
+    const values = Array.isArray(val) ? val : val.split(',');
+
+    return values.map((item) => item.trim()).filter(Boolean);
+  });
+
 /* ============================================================================
  * API: 获取对话响应详细数据
  * Route: GET /api/core/chat/record/getResData
@@ -35,6 +45,10 @@ export const DeleteChatRecordBodySchema = OutLinkChatAuthSchema.extend({
     example: 'content123',
     description: '要删除的消息 ID'
   }),
+  contentIds: QueryStringArraySchema.meta({
+    example: ['content123', 'content456'],
+    description: '要删除的消息 ID 列表'
+  }),
   delFile: z.coerce.boolean().optional().meta({
     example: false,
     description: '是否同时删除关联文件'
@@ -42,7 +56,7 @@ export const DeleteChatRecordBodySchema = OutLinkChatAuthSchema.extend({
 });
 export type DeleteChatRecordBodyType = z.infer<typeof DeleteChatRecordBodySchema>;
 
-export const DeleteChatRecordResponseSchema = z.object({});
+export const DeleteChatRecordResponseSchema = z.undefined().meta({ description: '删除成功' });
 export type DeleteChatRecordResponseType = z.infer<typeof DeleteChatRecordResponseSchema>;
 
 /* ============================================================================

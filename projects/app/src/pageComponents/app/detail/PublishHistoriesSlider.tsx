@@ -103,7 +103,7 @@ const MyEdit = <T extends SimpleAppSnapshotType | WorkflowSnapshotsType>({
             onClick={async () => {
               const initialSnapshot = past[past.length - 1];
 
-              onSwitchTmpVersion(initialSnapshot, t(`app:version_initial_copy`));
+              onSwitchTmpVersion(initialSnapshot, t('app:version_initial_copy'));
               toast({
                 title: t('workflow:workflow.Switch_success'),
                 status: 'success'
@@ -217,15 +217,19 @@ const TeamCloud = ({
 
   const { runAsync: onUpdateVersion, loading: isEditing } = useRequest(
     async (item: VersionListItemType, name: string) => {
+      const versionName = name.trim();
+      if (!versionName) {
+        setEditIndex(undefined);
+        return;
+      }
+
       await updateAppVersion({
         appId: item.appId,
-        versionName: name,
+        versionName,
         versionId: item._id
       });
       setData((state) =>
-        state.map((version) =>
-          version._id === item._id ? { ...version, versionName: name } : version
-        )
+        state.map((version) => (version._id === item._id ? { ...version, versionName } : version))
       );
       setEditIndex(undefined);
     }

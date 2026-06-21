@@ -36,7 +36,6 @@ type ActionProps = Props & {
 /* request openai chat */
 export const dispatchClassifyQuestion = async (props: Props): Promise<CQResponse> => {
   const {
-    externalProvider,
     runningAppInfo,
     node: { nodeId, name },
     histories,
@@ -56,7 +55,7 @@ export const dispatchClassifyQuestion = async (props: Props): Promise<CQResponse
     memoryKey
   ] as ClassifyQuestionAgentItemType;
 
-  const { arg, inputTokens, outputTokens } = await completions({
+  const { arg, inputTokens, outputTokens, usedUserOpenAIKey } = await completions({
     ...props,
     lastMemory,
     histories: chatHistories,
@@ -73,7 +72,7 @@ export const dispatchClassifyQuestion = async (props: Props): Promise<CQResponse
   props.usagePush([
     {
       moduleName: name,
-      totalPoints: externalProvider.openaiAccount?.key ? 0 : totalPoints,
+      totalPoints: usedUserOpenAIKey ? 0 : totalPoints,
       model: modelName,
       inputTokens: inputTokens,
       outputTokens: outputTokens
@@ -91,7 +90,7 @@ export const dispatchClassifyQuestion = async (props: Props): Promise<CQResponse
       [memoryKey]: result
     },
     [DispatchNodeResponseKeyEnum.nodeResponse]: {
-      totalPoints: externalProvider.openaiAccount?.key ? 0 : totalPoints,
+      totalPoints: usedUserOpenAIKey ? 0 : totalPoints,
       model: modelName,
       query: userChatInput,
       inputTokens: inputTokens,
@@ -142,12 +141,11 @@ const completions = async ({
 
   const {
     answerText: answer,
-    usage: { inputTokens, outputTokens }
+    usage: { inputTokens, outputTokens, usedUserOpenAIKey }
   } = await createLLMResponse({
     body: {
       model: cqModel.model,
-      temperature: 0.01,
-      messages: chats2GPTMessages({ messages, reserveId: false }),
+      messages: chats2GPTMessages({ messages, reserveId: false, reserveReason: false }),
       stream: true
     },
     userKey: externalProvider.openaiAccount
@@ -167,6 +165,7 @@ const completions = async ({
   return {
     inputTokens,
     outputTokens,
+    usedUserOpenAIKey,
     arg: { type: id }
   };
 };

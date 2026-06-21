@@ -14,11 +14,10 @@ import { type AppFileSelectConfigType } from '@fastgpt/global/core/app/type/conf
 import { useSystemStore } from '@/web/common/system/useSystemStore';
 import { useUserStore } from '@/web/support/user/useUserStore';
 import { type OutLinkChatAuthProps } from '@fastgpt/global/support/permission/chat';
-import { getPresignedChatFileGetUrl, getUploadChatFilePresignedUrl } from '@/web/common/file/api';
+import { getUploadChatFilePresignedUrl } from '@/web/common/file/api';
 import { getUploadFileType } from '@fastgpt/global/core/app/constants';
 import { putFileToS3 } from '@fastgpt/web/common/file/utils';
-import { WorkflowRuntimeContext } from '../../context/workflowRuntimeContext';
-import { useContextSelector } from 'use-context-selector';
+import { getUploadChatFileType } from '../utils/file';
 
 type UseFileUploadOptions = {
   fileSelectConfig: AppFileSelectConfigType;
@@ -35,10 +34,6 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
   const { t } = useTranslation();
   const { feConfigs } = useSystemStore();
   const { teamPlanStatus } = useUserStore();
-  const runtimeFileSelectConfig = useContextSelector(
-    WorkflowRuntimeContext,
-    (v) => v.runtimeFileSelectConfig
-  );
 
   const {
     update: updateFiles,
@@ -136,14 +131,15 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
         filterFilesByMaxSize.map(
           (file) =>
             new Promise<UserInputFileItemType>((resolve, reject) => {
-              if (file.type.includes('image')) {
+              const chatFileType = getUploadChatFileType(file);
+              if (chatFileType === ChatFileTypeEnum.image) {
                 const reader = new FileReader();
                 reader.readAsDataURL(file);
                 reader.onload = () => {
                   const item: UserInputFileItemType = {
                     id: getNanoid(6),
                     rawFile: file,
-                    type: ChatFileTypeEnum.image,
+                    type: chatFileType,
                     name: file.name,
                     icon: reader.result as string,
                     status: 0
@@ -157,7 +153,7 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
                 resolve({
                   id: getNanoid(6),
                   rawFile: file,
-                  type: ChatFileTypeEnum.file,
+                  type: chatFileType,
                   name: file.name,
                   icon: getFileIcon(file.name),
                   status: 0
@@ -180,7 +176,7 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
     if (filterFiles.length === 0) return;
 
     replaceFiles(fileList.map((item) => ({ ...item, status: 1 })));
-    let errorFileIndex: number[] = [];
+    const errorFileIndex: number[] = [];
 
     await Promise.allSettled(
       filterFiles.map(async (file) => {
@@ -192,11 +188,11 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
           const fileIndex = fileList.findIndex((item) => item.id === file.id)!;
 
           // Get Upload Post Presigned URL
-          const { url, key, headers, maxSize } = await getUploadChatFilePresignedUrl({
+          const { url, key, headers, maxSize, previewUrl } = await getUploadChatFilePresignedUrl({
             filename: copyFile.rawFile.name,
             appId,
             chatId,
-            fileSelectConfig: runtimeFileSelectConfig,
+            fileSelectConfig,
             outLinkAuthData
           });
 
@@ -213,12 +209,6 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
             },
             t,
             maxSize
-          });
-
-          const previewUrl = await getPresignedChatFileGetUrl({
-            key: key,
-            appId,
-            outLinkAuthData
           });
 
           // Update file url and key
@@ -242,24 +232,19 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
     appId,
     chatId,
     fileList,
+    fileSelectConfig,
     outLinkAuthData,
     removeFiles,
     replaceFiles,
-    runtimeFileSelectConfig,
     t,
     toast,
     updateFiles
   ]);
 
   const sortFileList = useMemo(() => {
-    // Sort: Document, image
+    // Sort: Document/audio/video, image
     const sortResult = clone(fileList).sort((a, b) => {
-      if (a.type === ChatFileTypeEnum.image && b.type === ChatFileTypeEnum.file) {
-        return 1;
-      } else if (a.type === ChatFileTypeEnum.file && b.type === ChatFileTypeEnum.image) {
-        return -1;
-      }
-      return 0;
+      return Number(a.type === ChatFileTypeEnum.image) - Number(b.type === ChatFileTypeEnum.image);
     });
     return sortResult;
   }, [fileList]);

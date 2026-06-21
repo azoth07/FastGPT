@@ -1,7 +1,693 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
-import { WorkflowQueue } from '@fastgpt/service/core/workflow/dispatch/index';
+import { runWorkflow, WorkflowQueue } from '@fastgpt/service/core/workflow/dispatch/index';
+import { getWorkflowNodeRunParams } from '@fastgpt/service/core/workflow/dispatch/utils/runtime';
+import { createClientAbortTracker } from '@fastgpt/service/core/workflow/dispatch/utils/clientAbort';
 import { createNode, createEdge } from '../utils';
+import {
+  NodeInputKeyEnum,
+  NodeOutputKeyEnum,
+  VARIABLE_NODE_ID,
+  WorkflowIOValueTypeEnum
+} from '@fastgpt/global/core/workflow/constants';
+import {
+  FlowNodeInputTypeEnum,
+  FlowNodeOutputTypeEnum
+} from '@fastgpt/global/core/workflow/node/constant';
+import type { WorkflowVariableStateLike } from '@fastgpt/global/core/workflow/runtime/type';
+import { DispatchNodeResponseKeyEnum } from '@fastgpt/global/core/workflow/runtime/constants';
+import { callbackMap } from '@fastgpt/service/core/workflow/dispatch/constants';
+
+const waitWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+};
+
+const createWorkflowVariableState = (
+  variables: Record<string, unknown> = {}
+): WorkflowVariableStateLike => ({
+  get: (key) => variables[key],
+  set: async (key, value) => {
+    variables[key] = value;
+    return value;
+  },
+  getStoreValue: (key) => variables[key],
+  getFileStoreValueByRuntimeUrl: () => undefined,
+  toRuntimeRecord: () => ({ ...variables }),
+  toStoreRecord: () => ({ ...variables }),
+  clone: () => createWorkflowVariableState({ ...variables })
+});
+
+describe('createClientAbortTracker', () => {
+  const mockRes = (overrides: Record<string, any> = {}) => {
+    const res = new EventEmitter() as any;
+    Object.assign(res, {
+      closed: false,
+      destroyed: false,
+      errored: null,
+      writableAborted: false,
+      writableEnded: false,
+      writableFinished: false,
+      ...overrides
+    });
+    return res;
+  };
+
+  const mockReq = () => {
+    const req = new EventEmitter() as any;
+    req.aborted = false;
+    req.socket = new EventEmitter() as any;
+    req.socket.destroyed = false;
+    return req;
+  };
+
+  const mockSocketError = (code: string) => Object.assign(new Error(code), { code });
+
+  it('响应正常结束后 close，不应判定为客户端 abort', () => {
+    const req = mockReq();
+    const res = mockRes({ writableEnded: true, writableFinished: true });
+    const tracker = createClientAbortTracker({ req, res });
+
+    res.closed = true;
+    res.emit('close');
+
+    expect(tracker.isClientAborted()).toBe(false);
+    tracker.cleanup();
+  });
+
+  it('响应未正常结束且无服务端错误时 close，应作为客户端 abort fallback', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    res.emit('close');
+
+    expect(tracker.isClientAborted()).toBe(true);
+    tracker.cleanup();
+  });
+
+  it('响应未结束且连接已断开时 close，应作为客户端 abort fallback', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    req.socket.destroyed = true;
+    res.emit('close');
+
+    expect(tracker.isClientAborted()).toBe(true);
+    tracker.cleanup();
+  });
+
+  it('响应 writableAborted 但没有 close，不应判定为用户主动 abort', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    res.writableAborted = true;
+
+    expect(tracker.isClientAborted()).toBe(false);
+    tracker.cleanup();
+  });
+
+  it('socket 单独关闭不应判定为当前请求 abort', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    req.socket.emit('close');
+
+    expect(tracker.isClientAborted()).toBe(false);
+    tracker.cleanup();
+  });
+
+  it('请求 aborted 时应判定为客户端 abort', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    req.emit('aborted');
+
+    expect(tracker.isClientAborted()).toBe(true);
+    tracker.cleanup();
+  });
+
+  it('请求 aborted 后响应再 close，仍应保持用户主动 abort 状态', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    req.emit('aborted');
+    res.destroyed = true;
+    res.emit('close');
+
+    expect(tracker.isClientAborted()).toBe(true);
+    tracker.cleanup();
+  });
+
+  it('响应 destroyed 后再观察到请求 aborted，仍应判定为用户主动 abort', () => {
+    const req = mockReq();
+    const res = mockRes({ destroyed: true });
+    const tracker = createClientAbortTracker({ req, res });
+
+    req.emit('aborted');
+
+    expect(tracker.isClientAborted()).toBe(true);
+    tracker.cleanup();
+  });
+
+  it('socket error 后触发请求 aborted，不应判定为用户主动 abort', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    req.socket.emit('error', new Error('server socket error'));
+    req.emit('aborted');
+
+    expect(tracker.isClientAborted()).toBe(false);
+    tracker.cleanup();
+  });
+
+  it('客户端 reset 类 socket error 后触发请求 aborted，应判定为用户主动 abort', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    req.socket.emit('error', mockSocketError('ECONNRESET'));
+    req.emit('aborted');
+
+    expect(tracker.isClientAborted()).toBe(true);
+    tracker.cleanup();
+  });
+
+  it('客户端 reset 类 socket error 后响应 close，应作为客户端 abort fallback', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    req.socket.emit('error', mockSocketError('EPIPE'));
+    res.emit('close');
+
+    expect(tracker.isClientAborted()).toBe(true);
+    tracker.cleanup();
+  });
+
+  it('响应 close 后再触发服务端 socket error，应回滚客户端 abort fallback', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    res.emit('close');
+    req.socket.emit('error', new Error('server socket error'));
+
+    expect(tracker.isClientAborted()).toBe(false);
+    tracker.cleanup();
+  });
+
+  it('响应错误触发请求 aborted，不应判定为用户主动 abort', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    res.emit('error', new Error('server response error'));
+    req.emit('aborted');
+
+    expect(tracker.isClientAborted()).toBe(false);
+    tracker.cleanup();
+  });
+
+  it('响应 close 后再触发响应 error，应回滚客户端 abort fallback', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    res.emit('close');
+    res.emit('error', new Error('server response error'));
+
+    expect(tracker.isClientAborted()).toBe(false);
+    tracker.cleanup();
+  });
+
+  it('响应错误后 close，不应判定为用户主动 abort', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    res.emit('error', new Error('server response error'));
+    res.emit('close');
+
+    expect(tracker.isClientAborted()).toBe(false);
+    tracker.cleanup();
+  });
+
+  it('响应 finish 后 close，不应受 closed 状态误判', () => {
+    const req = mockReq();
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    res.emit('finish');
+    res.closed = true;
+    res.emit('close');
+
+    expect(tracker.isClientAborted()).toBe(false);
+    tracker.cleanup();
+  });
+
+  it('创建 tracker 前只有 closed，不应通过快照判定为客户端 abort', () => {
+    const req = mockReq();
+    const res = mockRes({ closed: true });
+    const tracker = createClientAbortTracker({ req, res });
+
+    expect(tracker.isClientAborted()).toBe(false);
+    tracker.cleanup();
+  });
+
+  it('创建 tracker 前连接已经断开，不应通过快照判定为用户主动 abort', () => {
+    const req = mockReq();
+    req.socket.destroyed = true;
+    const res = mockRes({ closed: true });
+    const tracker = createClientAbortTracker({ req, res });
+
+    expect(tracker.isClientAborted()).toBe(false);
+    tracker.cleanup();
+  });
+
+  it('创建 tracker 前请求已 aborted，应通过快照判定为用户主动 abort', () => {
+    const req = mockReq();
+    req.aborted = true;
+    const res = mockRes();
+    const tracker = createClientAbortTracker({ req, res });
+
+    expect(tracker.isClientAborted()).toBe(true);
+    tracker.cleanup();
+  });
+
+  it('fetch 使用 AbortController 中断 SSE 后，应让 checkIsStopping 变为 true', async () => {
+    let resolveServerAbort!: (value: boolean) => void;
+    const serverAbort = new Promise<boolean>((resolve) => {
+      resolveServerAbort = resolve;
+    });
+
+    const server = createServer((req, res) => {
+      const tracker = createClientAbortTracker({ req, res: res as any });
+      const checkIsStopping = () => tracker.isClientAborted();
+
+      res.writeHead(200, {
+        Connection: 'keep-alive',
+        'Content-Type': 'text/event-stream;charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform'
+      });
+      res.write('data: first\n\n');
+
+      res.on('close', () => {
+        const aborted = checkIsStopping();
+        tracker.cleanup();
+        resolveServerAbort(aborted);
+      });
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    const controller = new AbortController();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/sse`, {
+        signal: controller.signal
+      });
+      reader = response.body?.getReader();
+      expect(reader).toBeDefined();
+
+      const firstChunk = await reader!.read();
+      expect(firstChunk.done).toBe(false);
+
+      controller.abort();
+      await reader!.read().catch(() => undefined);
+
+      expect(await waitWithTimeout(serverAbort, 3000, 'server abort signal')).toBe(true);
+    } finally {
+      await reader?.cancel().catch(() => undefined);
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it('服务端 socket 异常关闭长连接时，不应让 checkIsStopping 误判为 true', async () => {
+    let resolveServerAbort!: (value: boolean) => void;
+    const serverAbort = new Promise<boolean>((resolve) => {
+      resolveServerAbort = resolve;
+    });
+
+    const server = createServer((req, res) => {
+      const tracker = createClientAbortTracker({ req, res: res as any });
+      const checkIsStopping = () => tracker.isClientAborted();
+
+      res.writeHead(200, {
+        Connection: 'keep-alive',
+        'Content-Type': 'text/event-stream;charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform'
+      });
+      res.write('data: first\n\n');
+
+      const destroyTimer = setTimeout(() => {
+        req.socket.destroy(new Error('server socket unstable close'));
+      }, 10);
+
+      res.on('close', () => {
+        clearTimeout(destroyTimer);
+        const aborted = checkIsStopping();
+        tracker.cleanup();
+        resolveServerAbort(aborted);
+      });
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/sse`);
+      reader = response.body?.getReader();
+      expect(reader).toBeDefined();
+
+      const firstChunk = await reader!.read();
+      expect(firstChunk.done).toBe(false);
+      await reader!.read().catch(() => undefined);
+
+      expect(await waitWithTimeout(serverAbort, 3000, 'server abort signal')).toBe(false);
+    } finally {
+      await reader?.cancel().catch(() => undefined);
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+});
+
+describe('getWorkflowNodeRunParams', () => {
+  const createVariableState = (variables: Record<string, unknown> = {}) => {
+    let toRuntimeRecordCount = 0;
+    const state: WorkflowVariableStateLike = {
+      get: (key) => variables[key],
+      set: async (key, value) => {
+        variables[key] = value;
+        return value;
+      },
+      getStoreValue: (key) => variables[key],
+      getFileStoreValueByRuntimeUrl: () => undefined,
+      toRuntimeRecord: () => {
+        toRuntimeRecordCount += 1;
+        return { ...variables };
+      },
+      toStoreRecord: () => ({ ...variables }),
+      clone: () => createVariableState({ ...variables }).state
+    };
+
+    return {
+      state,
+      getToRuntimeRecordCount: () => toRuntimeRecordCount
+    };
+  };
+
+  it('静态 input 不应构造 runtimeVariables', () => {
+    const variableState = createVariableState({ name: 'Ada' });
+    const node = createNode('node1', FlowNodeTypeEnum.textEditor);
+    node.inputs = [
+      {
+        key: NodeInputKeyEnum.textareaInput,
+        label: '',
+        renderTypeList: [FlowNodeInputTypeEnum.textarea],
+        value: 'plain text',
+        valueType: WorkflowIOValueTypeEnum.string
+      }
+    ];
+
+    const params = getWorkflowNodeRunParams({
+      node,
+      runtimeNodesMap: new Map(),
+      variableState: variableState.state
+    });
+
+    expect(params[NodeInputKeyEnum.textareaInput]).toBe('plain text');
+    expect(variableState.getToRuntimeRecordCount()).toBe(0);
+  });
+
+  it('普通变量模板按需构造 runtimeVariables 并完成替换', () => {
+    const variableState = createVariableState({ name: 'Ada' });
+    const node = createNode('node1', FlowNodeTypeEnum.textEditor);
+    node.inputs = [
+      {
+        key: NodeInputKeyEnum.textareaInput,
+        label: '',
+        renderTypeList: [FlowNodeInputTypeEnum.textarea],
+        value: 'Hello {{name}}',
+        valueType: WorkflowIOValueTypeEnum.string
+      }
+    ];
+
+    const params = getWorkflowNodeRunParams({
+      node,
+      runtimeNodesMap: new Map(),
+      variableState: variableState.state
+    });
+
+    expect(params[NodeInputKeyEnum.textareaInput]).toBe('Hello Ada');
+    expect(variableState.getToRuntimeRecordCount()).toBe(1);
+  });
+
+  it('节点输出模板按需构造 runtimeVariables 并完成替换', () => {
+    const variableState = createVariableState({
+      unused: {
+        toJSON() {
+          throw new Error('unused variable should not be stringified');
+        }
+      }
+    });
+    const node = createNode('target', FlowNodeTypeEnum.textEditor);
+    node.inputs = [
+      {
+        key: NodeInputKeyEnum.textareaInput,
+        label: '',
+        renderTypeList: [FlowNodeInputTypeEnum.textarea],
+        value: 'Result: {{$source.output$}}',
+        valueType: WorkflowIOValueTypeEnum.string
+      }
+    ];
+    const sourceNode = createNode('source', FlowNodeTypeEnum.textEditor);
+    sourceNode.outputs = [
+      {
+        id: 'output',
+        key: 'output',
+        type: FlowNodeOutputTypeEnum.static,
+        value: 'done',
+        valueType: WorkflowIOValueTypeEnum.string
+      }
+    ];
+
+    const params = getWorkflowNodeRunParams({
+      node,
+      runtimeNodesMap: new Map([['source', sourceNode]]),
+      variableState: variableState.state
+    });
+
+    expect(params[NodeInputKeyEnum.textareaInput]).toBe('Result: done');
+    expect(variableState.getToRuntimeRecordCount()).toBe(1);
+  });
+
+  it('纯引用 input 直接解析原始对象', () => {
+    const refValue = { nested: true };
+    const variableState = createVariableState({ payload: refValue });
+    const node = createNode('node1', FlowNodeTypeEnum.textEditor);
+    node.inputs = [
+      {
+        key: 'payload',
+        label: '',
+        renderTypeList: [FlowNodeInputTypeEnum.reference],
+        value: [VARIABLE_NODE_ID, 'payload'],
+        valueType: WorkflowIOValueTypeEnum.object
+      }
+    ];
+
+    const params = getWorkflowNodeRunParams({
+      node,
+      runtimeNodesMap: new Map(),
+      variableState: variableState.state
+    });
+
+    expect(params.payload).toBe(refValue);
+    expect(variableState.getToRuntimeRecordCount()).toBe(1);
+  });
+
+  it('dynamic input 保持顶层和动态参数对象同步写入', () => {
+    const variableState = createVariableState({ name: 'Ada' });
+    const node = createNode('node1', FlowNodeTypeEnum.textEditor);
+    node.inputs = [
+      {
+        key: NodeInputKeyEnum.addInputParam,
+        label: '',
+        renderTypeList: [FlowNodeInputTypeEnum.addInputParam],
+        value: undefined
+      },
+      {
+        key: 'dynamicName',
+        label: '',
+        renderTypeList: [FlowNodeInputTypeEnum.input],
+        value: '{{name}}',
+        valueType: WorkflowIOValueTypeEnum.string,
+        canEdit: true
+      }
+    ];
+
+    const params = getWorkflowNodeRunParams({
+      node,
+      runtimeNodesMap: new Map(),
+      variableState: variableState.state
+    });
+
+    expect(params[NodeInputKeyEnum.addInputParam]).toEqual({ dynamicName: 'Ada' });
+    expect(params.dynamicName).toBe('Ada');
+  });
+});
+
+describe('runWorkflow catchError', () => {
+  it('捕获 throw 异常后，下游节点应能引用错误输出', async () => {
+    const originalTextEditorDispatch = callbackMap[FlowNodeTypeEnum.textEditor];
+    const errorText = 'upstream failed';
+    const appId = '67e0d5535c02d1d5cdede721';
+    const teamId = '654a4107c32f3bf5f998452f';
+    const tmbId = '65ab7007462ada7dbb899948';
+
+    callbackMap[FlowNodeTypeEnum.textEditor] = vi
+      .fn()
+      .mockRejectedValueOnce(new Error(errorText))
+      .mockImplementationOnce(async ({ params }) => {
+        return {
+          data: {
+            [NodeOutputKeyEnum.text]: params[NodeInputKeyEnum.textareaInput]
+          },
+          [DispatchNodeResponseKeyEnum.nodeResponse]: {
+            textOutput: params[NodeInputKeyEnum.textareaInput]
+          }
+        };
+      });
+
+    const sourceNode = createNode('source', FlowNodeTypeEnum.textEditor);
+    sourceNode.isEntry = true;
+    sourceNode.catchError = true;
+    sourceNode.outputs = [
+      {
+        id: NodeOutputKeyEnum.errorText,
+        key: NodeOutputKeyEnum.errorText,
+        type: FlowNodeOutputTypeEnum.error,
+        label: '',
+        valueType: WorkflowIOValueTypeEnum.string
+      }
+    ];
+
+    const targetNode = createNode('target', FlowNodeTypeEnum.textEditor);
+    targetNode.inputs = [
+      {
+        key: NodeInputKeyEnum.textareaInput,
+        label: '',
+        renderTypeList: [FlowNodeInputTypeEnum.textarea],
+        value: `caught: {{$source.${NodeOutputKeyEnum.errorText}$}}`,
+        valueType: WorkflowIOValueTypeEnum.string
+      }
+    ];
+    targetNode.outputs = [
+      {
+        id: NodeOutputKeyEnum.text,
+        key: NodeOutputKeyEnum.text,
+        type: FlowNodeOutputTypeEnum.static,
+        label: '',
+        valueType: WorkflowIOValueTypeEnum.string
+      }
+    ];
+
+    try {
+      const result = await runWorkflow({
+        apiVersion: 'v2',
+        mode: 'chat',
+        runningAppInfo: {
+          id: appId,
+          name: 'catch error test',
+          teamId,
+          tmbId
+        },
+        runningUserInfo: {
+          teamId,
+          tmbId,
+          teamName: 'team',
+          memberName: 'member',
+          contact: '',
+          username: 'user'
+        },
+        uid: 'user-catch-error-test',
+        lang: 'zh-CN',
+        histories: [],
+        query: [],
+        variables: {},
+        chatConfig: {},
+        runtimeNodes: [sourceNode, targetNode],
+        runtimeEdges: [
+          {
+            source: 'source',
+            target: 'target',
+            sourceHandle: 'source-source_catch-right',
+            targetHandle: 'target-target-left',
+            status: 'waiting'
+          }
+        ],
+        variableState: createWorkflowVariableState(),
+        externalProvider: {},
+        workflowDispatchDeep: 0,
+        maxRunTimes: 10,
+        stream: false,
+        responseDetail: true,
+        responseAllData: true,
+        checkIsStopping: () => false
+      } as any);
+
+      expect(callbackMap[FlowNodeTypeEnum.textEditor]).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(callbackMap[FlowNodeTypeEnum.textEditor]).mock.calls[1][0].params).toEqual(
+        expect.objectContaining({
+          [NodeInputKeyEnum.textareaInput]: `caught: ${errorText}`
+        })
+      );
+      expect(
+        result.debugResponse.memoryNodes
+          .find((node) => node.nodeId === 'source')
+          ?.outputs.find((output) => output.key === NodeOutputKeyEnum.errorText)?.value
+      ).toBe(errorText);
+      expect(
+        result.debugResponse.memoryNodes
+          .find((node) => node.nodeId === 'target')
+          ?.outputs.find((output) => output.key === NodeOutputKeyEnum.text)?.value
+      ).toBe(`caught: ${errorText}`);
+    } finally {
+      callbackMap[FlowNodeTypeEnum.textEditor] = originalTextEditorDispatch;
+    }
+  });
+});
 
 describe('WorkflowQueue', () => {
   describe('WorkflowQueue utils', () => {
@@ -188,7 +874,7 @@ describe('WorkflowQueue', () => {
         const group1 = [createEdge('A', 'D', 'waiting')];
         const group2 = [createEdge('B', 'D', 'skipped'), createEdge('C', 'D', 'skipped')];
         const nodeEdgeGroupsMap = new Map([['D', [group1, group2]]]);
-        console.log(nodeEdgeGroupsMap);
+
         const result = WorkflowQueue.getNodeRunStatus({ node, nodeEdgeGroupsMap });
 
         expect(result).toBe('wait');

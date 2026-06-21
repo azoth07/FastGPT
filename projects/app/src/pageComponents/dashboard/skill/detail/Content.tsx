@@ -1,50 +1,51 @@
 import React from 'react';
-import { Flex, Box } from '@chakra-ui/react';
-import { useTranslation } from 'next-i18next';
+import { Box } from '@chakra-ui/react';
 import { useContextSelector } from 'use-context-selector';
-import { SkillDetailContext, TabEnum } from './context';
-import BuildingAnimation from './config/BuildingAnimation';
-import SandboxTerminal from './config/SandboxTerminal';
-import SandboxIframe from './config/SandboxIframe';
+import { SkillDetailContext } from './context';
+import SandboxEditor from '@/pageComponents/chat/SandboxEditor/Editor';
 import SandboxError from './config/SandboxError';
-import SkillPreview from './preview/SkillPreview';
-
-const SkillBuilding = () => {
-  const { t } = useTranslation();
-
-  return (
-    <Flex h={'100%'} alignItems={'center'} justifyContent={'center'} flexDirection={'column'}>
-      <BuildingAnimation />
-      <Box mt={'20px'} color={'myGray.500'} fontSize={'sm'}>
-        {t('skill:generating')}
-      </Box>
-    </Flex>
-  );
-};
+import { RightHeader } from '@/pageComponents/dashboard/skill/detail/Header';
 
 const Content = () => {
-  const { currentTab, sandboxState } = useContextSelector(SkillDetailContext, (v) => ({
-    currentTab: v.currentTab,
-    sandboxState: v.sandboxState
-  }));
+  const { sandboxState, skillId, isSkillReady, handleSandboxError } = useContextSelector(
+    SkillDetailContext,
+    (v) => ({
+      sandboxState: v.sandboxState,
+      skillId: v.skillId,
+      isSkillReady: v.isSkillReady,
+      handleSandboxError: v.handleSandboxError
+    })
+  );
+  const isSandboxReady = sandboxState === 'ready';
+  const canOperateSandbox = isSkillReady && isSandboxReady;
 
   return (
     <Box
       flex={1}
-      bg={'white'}
-      borderRadius={'8px'}
-      border={'1px solid #EBEDF0'}
+      h={'100%'}
+      display={'flex'}
+      flexDirection={'column'}
       overflow={'hidden'}
+      pt={'16px'}
+      pb={'16px'}
+      pr={'16px'}
+      pl={0}
     >
-      <Box h={'100%'} display={currentTab === TabEnum.config ? 'block' : 'none'}>
-        {sandboxState === 'idle' && <SkillBuilding />}
-        {sandboxState === 'loading' && <SandboxTerminal />}
-        {sandboxState === 'ready' && <SandboxIframe />}
-        {sandboxState === 'failed' && <SandboxError />}
-      </Box>
-      <Box h={'100%'} display={currentTab === TabEnum.preview ? 'block' : 'none'}>
-        <SkillPreview />
-      </Box>
+      {sandboxState === 'failed' ? (
+        <SandboxError />
+      ) : (
+        <SandboxEditor
+          appId={skillId}
+          chatId={'edit-debug'}
+          showFileOps={true}
+          showDownload={false}
+          defaultViewMode={'source'}
+          isPreparing={!isSandboxReady}
+          showTerminal={true}
+          onError={(err) => handleSandboxError(err.message)}
+          headerRight={canOperateSandbox ? <RightHeader /> : undefined}
+        />
+      )}
     </Box>
   );
 };

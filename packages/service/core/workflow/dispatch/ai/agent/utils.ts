@@ -4,58 +4,57 @@ import type { DispatchSubAppResponse, GetSubAppInfoFnType, SubAppRuntimeType } f
 import { getAgentRuntimeTools } from './sub/tool/utils';
 import type { ChatCompletionTool } from '@fastgpt/global/core/ai/llm/type';
 import { readFileTool, ReadFileToolSchema } from './sub/file/utils';
-import { PlanAgentParamsSchema, PlanAgentTool } from './sub/plan/constants';
 import { datasetSearchTool } from './sub/dataset/utils';
-import { SANDBOX_TOOLS, sandboxToolMap } from '@fastgpt/global/core/ai/sandbox/constants';
+import { SANDBOX_TOOLS, sandboxToolMap } from '@fastgpt/global/core/ai/sandbox/tools';
 import type { ChatNodeUsageType } from '@fastgpt/global/support/wallet/bill/type';
 import { SubAppIds } from '@fastgpt/global/core/workflow/node/agent/constants';
 import { dispatchFileRead } from './sub/file';
 import type { DispatchAgentModuleProps } from '.';
 import { dispatchAgentDatasetSearch } from './sub/dataset';
 import { dispatchSandboxTool } from './sub/sandbox';
-import type { CapabilityToolCallHandlerType } from './capability/type';
 import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
+import { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
 import { parseJsonArgs } from '../../../../ai/utils';
-import type { DispatchPlanAgentResponse } from './sub/plan';
-import { dispatchPlanAgent } from './sub/plan';
-import { getLogger, LogCategories } from '../../../../../common/logger';
 import { getErrText } from '@fastgpt/global/common/error/utils';
 import { dispatchTool } from './sub/tool';
 import type { WorkflowResponseItemType } from '../../type';
 import { dispatchApp, dispatchPlugin } from './sub/app';
-import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
-import type { AIChatItemValueItemType } from '@fastgpt/global/core/chat/type';
+import type { SandboxClient } from '../../../../ai/sandbox/service/runtime';
+import { SystemToolRepo } from '../../../../app/tool/systemTool/systemTool.repo';
+import type { WorkflowNodeResponseWriter } from '../../../../chat/nodeResponseStorage';
+import type { AppFormEditFormType } from '@fastgpt/global/core/app/formEdit/type';
+import { DatasetSearchModeEnum } from '@fastgpt/global/core/dataset/constants';
 
+/**
+ * 收集 Agent 节点可用的系统工具和用户选择的子应用工具。
+ * completionTools/subAppsMap 面向 runtime；promptToolReferenceInfoMap 只用于解析 prompt 中的
+ * {{@toolId@}} 展示名，不参与工具展开和执行。
+ */
 export const getSubapps = async ({
   tmbId,
   tools,
   lang,
-  getPlanTool,
   hasDataset,
   hasFiles,
-  useAgentSandbox,
-  extraTools
+  useAgentSandbox
 }: {
   tmbId: string;
   tools: SkillToolType[];
   lang?: localeType;
-  getPlanTool?: Boolean;
   hasDataset?: boolean;
   hasFiles: boolean;
   useAgentSandbox?: boolean;
-  extraTools?: ChatCompletionTool[];
 }): Promise<{
   completionTools: ChatCompletionTool[];
   subAppsMap: Map<string, SubAppRuntimeType>;
+  promptToolReferenceInfoMap: Map<string, string>;
 }> => {
   const completionTools: ChatCompletionTool[] = [];
+  const subAppsMap = new Map<string, SubAppRuntimeType>();
+  const promptToolReferenceInfoMap = new Map<string, string>();
 
   // system tools
   {
-    /* Plan */
-    if (getPlanTool) {
-      completionTools.push(PlanAgentTool);
-    }
     /* File */
     if (hasFiles) {
       completionTools.push(readFileTool);
@@ -67,24 +66,21 @@ export const getSubapps = async ({
     }
 
     /* Sandbox Shell */
-    if (useAgentSandbox && global.feConfigs?.show_agent_sandbox) {
+    if (useAgentSandbox) {
       completionTools.push(...SANDBOX_TOOLS);
-    }
-
-    /* Capability extra tools (e.g. sandbox skills) */
-    if (extraTools && extraTools.length > 0) {
-      completionTools.push(...extraTools);
     }
   }
 
-  /* User tools */
-  const subAppsMap = new Map<string, SubAppRuntimeType>();
   const formatTools = await getAgentRuntimeTools({
     tools,
     tmbId,
     lang
   });
+
   formatTools.forEach((tool) => {
+    if (tool.promptReference) {
+      promptToolReferenceInfoMap.set(tool.promptReference.id, tool.promptReference.name);
+    }
     completionTools.push(tool.requestSchema);
     subAppsMap.set(tool.id, {
       type: tool.type,
@@ -99,7 +95,8 @@ export const getSubapps = async ({
 
   return {
     completionTools,
-    subAppsMap
+    subAppsMap,
+    promptToolReferenceInfoMap
   };
 };
 
@@ -110,8 +107,10 @@ export type ToolDispatchContext = Pick<
   | 'runningUserInfo'
   | 'runningAppInfo'
   | 'chatId'
+  | 'responseChatItemId'
+  | 'usageId'
   | 'uid'
-  | 'variables'
+  | 'variableState'
   | 'externalProvider'
   | 'lang'
   | 'requestOrigin'
@@ -123,47 +122,119 @@ export type ToolDispatchContext = Pick<
   | 'params'
   | 'stream'
 > & {
+  nodeResponseWriter?: WorkflowNodeResponseWriter;
+  nodeResponseParentId?: string;
   systemPrompt?: string;
   getSubAppInfo: GetSubAppInfoFnType;
   getSubApp: (id: string) => SubAppRuntimeType | undefined;
   completionTools: ChatCompletionTool[];
+  fileUrlMap?: Record<string, string>;
   filesMap: Record<string, string>;
-  capabilityToolCallHandler?: CapabilityToolCallHandlerType;
+  sandboxClient?: SandboxClient;
   streamResponseFn?: (args: WorkflowResponseItemType) => void | undefined;
 };
+
+/**
+ * 将工具参数中完整匹配的 Agent 文件 id 替换成真实 URL。
+ *
+ * LLM 有时会把文件清单里的 `<id>` 填到用户工具参数中；这些 id 只对 FastGPT
+ * 内置 read_files 有意义，普通工具更需要可访问链接。这里只替换完整字符串，
+ * 不处理长文本里的局部命中，避免误改业务字段。
+ */
+export const replaceAgentFileIdsWithUrls = <T>(value: T, fileUrlMap: Record<string, string>): T => {
+  if (!value || Object.keys(fileUrlMap).length === 0) return value;
+
+  const replaceValue = (input: unknown): unknown => {
+    if (typeof input === 'string') {
+      return fileUrlMap[input] || input;
+    }
+
+    if (Array.isArray(input)) {
+      return input.map((item) => replaceValue(item));
+    }
+
+    if (input && typeof input === 'object') {
+      return Object.fromEntries(
+        Object.entries(input).map(([key, item]) => [key, replaceValue(item)])
+      );
+    }
+
+    return input;
+  };
+
+  return replaceValue(value) as T;
+};
+
+/**
+ * 统一 Agent 的知识库配置来源。
+ *
+ * ChatAgent 保存的是 agent_datasetParams；Workflow Agent 节点模板保存的是
+ * datasets/similarity/authTmbId 等独立输入。runtime 内部收敛成 datasetParams，
+ * 保证上下文提示、工具暴露和真实检索使用同一组知识库权限配置。
+ */
+export const getAgentDatasetParams = (
+  params: DispatchAgentModuleProps['params']
+): AppFormEditFormType['dataset'] | undefined => {
+  const datasetParams = params[NodeInputKeyEnum.datasetParams];
+  if (datasetParams) return datasetParams;
+
+  const datasets = params[NodeInputKeyEnum.datasetSelectList];
+  if (!Array.isArray(datasets) || datasets.length === 0) return;
+
+  return {
+    datasets,
+    similarity: params[NodeInputKeyEnum.datasetSimilarity],
+    limit: params[NodeInputKeyEnum.datasetMaxTokens],
+    searchMode: params[NodeInputKeyEnum.datasetSearchMode] || DatasetSearchModeEnum.embedding,
+    embeddingWeight: params[NodeInputKeyEnum.datasetSearchEmbeddingWeight],
+    usingReRank: params[NodeInputKeyEnum.datasetSearchUsingReRank],
+    rerankModel: params[NodeInputKeyEnum.datasetSearchRerankModel],
+    rerankWeight: params[NodeInputKeyEnum.datasetSearchRerankWeight],
+    datasetSearchUsingExtensionQuery: params[NodeInputKeyEnum.datasetSearchUsingExtensionQuery],
+    datasetSearchExtensionModel: params[NodeInputKeyEnum.datasetSearchExtensionModel],
+    datasetSearchExtensionBg: params[NodeInputKeyEnum.datasetSearchExtensionBg],
+    [NodeInputKeyEnum.authTmbId]: params[NodeInputKeyEnum.authTmbId]
+  };
+};
+
+/**
+ * 创建 workflow 工具执行器。
+ * 该执行器屏蔽工具来源差异，将沙盒、文件读取、知识库搜索和用户子应用统一成 agentLoop 可消费的工具结果。
+ */
 export const getExecuteTool = ({
-  systemPrompt,
   getSubAppInfo,
   getSubApp,
-  completionTools,
+  fileUrlMap = {},
   filesMap,
-  capabilityToolCallHandler,
+  sandboxClient,
   checkIsStopping,
   chatConfig,
   runningUserInfo,
   runningAppInfo,
   chatId,
+  responseChatItemId,
+  usageId,
   uid,
-  variables,
+  variableState,
   externalProvider,
-  stream,
   streamResponseFn,
-  params: {
-    model,
-    // Dataset search configuration
-    agent_datasetParams: datasetParams
-  },
+  params,
   lang,
   requestOrigin,
   mode,
   timezone,
   retainDatasetCite,
   maxRunTimes,
-  workflowDispatchDeep
+  workflowDispatchDeep,
+  nodeResponseWriter
 }: ToolDispatchContext) => {
+  const { model } = params;
+  const datasetParams = getAgentDatasetParams(params);
+
+  /**
+   * 执行单次工具调用，并补齐节点响应的 id、运行时间和计费信息。
+   */
   return async ({ callId, toolId, args }: { callId: string; toolId: string; args: string }) => {
-    let planResult: DispatchPlanAgentResponse | undefined;
-    const capabilityAssistantResponses: AIChatItemValueItemType[] = [];
     const startTime = Date.now();
 
     const {
@@ -185,7 +256,9 @@ export const getExecuteTool = ({
             appId: runningAppInfo.id,
             userId: uid,
             chatId,
-            lang
+            sandboxId: runningAppInfo.sandboxId,
+            lang,
+            sandboxClient
           });
 
           return {
@@ -195,27 +268,27 @@ export const getExecuteTool = ({
           };
         }
 
-        if (toolId === SubAppIds.fileRead) {
-          const toolParams = ReadFileToolSchema.safeParse(parseJsonArgs(args));
+        if (toolId === SubAppIds.readFiles) {
+          const rawArgs = parseJsonArgs(args);
+          const toolParams = ReadFileToolSchema.safeParse(rawArgs);
           if (!toolParams.success) {
             return {
               response: toolParams.error.message,
               usages: []
             };
           }
-          const params = toolParams.data;
+          const ids = toolParams.data.ids;
 
-          const files = params.file_indexes.map((index) => ({
-            index,
-            url: filesMap[index]
+          const files = ids.map((id) => ({
+            id,
+            url: filesMap[id]
           }));
           const result = await dispatchFileRead({
             files,
             teamId: runningUserInfo.teamId,
             tmbId: runningUserInfo.tmbId,
             customPdfParse: chatConfig?.fileSelectConfig?.customPdfParse,
-            model,
-            userKey: externalProvider.openaiAccount
+            usageId
           });
 
           return {
@@ -230,7 +303,8 @@ export const getExecuteTool = ({
             datasetParams,
             teamId: runningUserInfo.teamId,
             tmbId: runningUserInfo.tmbId,
-            llmModel: model
+            llmModel: model,
+            userKey: externalProvider.openaiAccount
           });
 
           return {
@@ -239,63 +313,6 @@ export const getExecuteTool = ({
             nodeResponse: result.nodeResponse
           };
         }
-        if (toolId === SubAppIds.plan) {
-          try {
-            const toolArgs = await PlanAgentParamsSchema.safeParseAsync(parseJsonArgs(args));
-
-            if (!toolArgs.success) {
-              return {
-                response: 'Tool arguments is not valid'
-              };
-            }
-
-            // plan: 1,3 场景
-            planResult = await dispatchPlanAgent({
-              checkIsStopping,
-              completionTools,
-              getSubAppInfo,
-              systemPrompt,
-              model,
-              stream,
-              mode: 'initial',
-              ...toolArgs.data,
-              planId: callId
-            });
-
-            return {
-              response: '',
-              stop: true
-            };
-          } catch (error) {
-            getLogger(LogCategories.MODULE.AI.AGENT).error('dispatchPlanAgent error', { error });
-            return {
-              response: `Plan error: ${getErrText(error)}`,
-              stop: false
-            };
-          }
-        }
-
-        // TODO: 所有skill工具，合并成一个 function，不要依赖 capabilityToolCallHandler
-        // Capability tools (e.g. sandbox skills)
-        const capResult = await capabilityToolCallHandler?.(toolId, args ?? '', callId);
-        if (capResult != null) {
-          if (capResult.assistantResponses?.length) {
-            capabilityAssistantResponses.push(...capResult.assistantResponses);
-          }
-          const subInfo = getSubAppInfo(toolId);
-          return {
-            response: capResult.response,
-            usages: capResult.usages,
-            nodeResponse: {
-              moduleType: FlowNodeTypeEnum.tool,
-              moduleName: subInfo.name,
-              moduleLogo: subInfo.avatar,
-              toolInput: parseJsonArgs(args),
-              toolRes: capResult.response
-            }
-          };
-        }
-
         // User Sub App
         const tool = getSubApp(toolId);
         if (!tool) {
@@ -312,10 +329,13 @@ export const getExecuteTool = ({
             response: 'Params is not object'
           };
         }
-        const requestParams = {
-          ...tool.params,
-          ...toolCallParams
-        };
+        const requestParams = replaceAgentFileIdsWithUrls(
+          {
+            ...tool.params,
+            ...toolCallParams
+          },
+          fileUrlMap
+        );
 
         if (tool.type === 'tool') {
           const { response, usages, nodeResponse } = await dispatchTool({
@@ -330,7 +350,7 @@ export const getExecuteTool = ({
             runningAppInfo,
             chatId,
             uid,
-            variables,
+            variableState,
             workflowStreamResponse: streamResponseFn
           });
 
@@ -356,12 +376,17 @@ export const getExecuteTool = ({
             mode,
             timezone,
             externalProvider,
+            chatId,
+            responseChatItemId,
+            uid,
             runningAppInfo,
             runningUserInfo,
             retainDatasetCite,
             maxRunTimes,
             workflowDispatchDeep,
-            variables
+            nodeResponseWriter,
+            nodeResponseParentId: callId,
+            variableState
           });
 
           return {
@@ -369,12 +394,28 @@ export const getExecuteTool = ({
             usages,
             nodeResponse
           };
-        } else if (tool.type === 'toolWorkflow') {
+        } else if (tool.type === 'toolWorkflow' || tool.type === 'commercialTool') {
+          const id = await (async () => {
+            if (tool.type === 'toolWorkflow') {
+              return tool.id;
+            } else {
+              const systemToolRepo = SystemToolRepo.getInstance();
+              const trueId = (
+                await systemToolRepo.getSystemToolDetail({
+                  pluginId: `commercial-${tool.id}`
+                })
+              ).associatedPluginId;
+              if (!trueId) {
+                throw new Error('No associated plugin found');
+              }
+              return trueId;
+            }
+          })();
           const { response, usages, nodeResponse } = await dispatchPlugin({
             app: {
               name: tool.name,
               avatar: tool.avatar,
-              id: tool.id
+              id
             },
             userChatInput: '',
             customAppVariables: requestParams,
@@ -384,12 +425,17 @@ export const getExecuteTool = ({
             mode,
             timezone,
             externalProvider,
+            chatId,
+            responseChatItemId,
+            uid,
             runningAppInfo,
             runningUserInfo,
             retainDatasetCite,
             maxRunTimes,
             workflowDispatchDeep,
-            variables
+            nodeResponseWriter,
+            nodeResponseParentId: callId,
+            variableState
           });
 
           return {
@@ -409,23 +455,33 @@ export const getExecuteTool = ({
       }
     })();
 
-    const formatNodeResponse = nodeResponse
-      ? {
-          ...nodeResponse,
-          nodeId: callId,
-          id: callId,
-          runningTime: +((Date.now() - startTime) / 1000).toFixed(2),
-          totalPoints: usages?.reduce((sum, item) => sum + item.totalPoints, 0)
-        }
-      : undefined;
+    const formatNodeResponse = (() => {
+      if (!nodeResponse) return undefined;
+
+      const subInfo = getSubAppInfo(toolId);
+      const childResponseCount =
+        nodeResponse.childResponseCount ??
+        (nodeResponse.childrenResponses?.length
+          ? nodeResponse.childrenResponses.length
+          : undefined);
+      return {
+        ...nodeResponse,
+        moduleType: nodeResponse.moduleType || FlowNodeTypeEnum.tool,
+        moduleName: nodeResponse.moduleName || subInfo.name || toolId,
+        moduleLogo: nodeResponse.moduleLogo || subInfo.avatar,
+        nodeId: callId,
+        id: callId,
+        runningTime: +((Date.now() - startTime) / 1000).toFixed(2),
+        totalPoints: usages?.reduce((sum, item) => sum + item.totalPoints, 0),
+        ...(childResponseCount !== undefined ? { childResponseCount } : {})
+      };
+    })();
 
     return {
       response,
       usages,
       stop,
-      nodeResponse: formatNodeResponse,
-      planResult,
-      capabilityAssistantResponses
+      nodeResponse: formatNodeResponse
     };
   };
 };

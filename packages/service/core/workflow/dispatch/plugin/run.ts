@@ -17,7 +17,7 @@ import { type DispatchNodeResultType } from '@fastgpt/global/core/workflow/runti
 import { authWorkflowToolByTmbId } from '../../../../support/permission/app/auth';
 import { ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
 import { computedAppToolUsage } from '../../../app/tool/runtime/utils';
-import { filterSystemVariables, getNodeErrResponse } from '../utils';
+import { getNodeErrResponse } from '../utils';
 import { serverGetWorkflowToolRunUserQuery } from '../../../app/tool/workflowTool/utils';
 import {
   type NodeInputKeyEnum,
@@ -30,12 +30,17 @@ import type { AppToolRuntimeType } from '@fastgpt/global/core/app/tool/type';
 import { anyValueDecrypt } from '../../../../common/secret/utils';
 import { getAppVersionById } from '../../../app/version/controller';
 import { parseI18nString } from '@fastgpt/global/common/i18n/utils';
-import { getSystemToolByIdAndVersionId } from '../../../app/tool/controller';
+import { WorkflowVariableState } from '../utils/variables';
+import { SystemToolRepo } from '../../../app/tool/systemTool/systemTool.repo';
+import type { WorkflowNodeResponseWriter } from '../../../chat/nodeResponseStorage';
+import { getRuntimeNodeResponseSummary } from '../utils';
 
 type RunPluginProps = ModuleDispatchProps<{
   [NodeInputKeyEnum.forbidStream]?: boolean;
   [key: string]: any;
-}>;
+}> & {
+  nodeResponseWriter?: WorkflowNodeResponseWriter;
+};
 type RunPluginResponse = DispatchNodeResultType<
   {
     [key: string]: any;
@@ -45,6 +50,12 @@ type RunPluginResponse = DispatchNodeResultType<
   }
 >;
 
+/**
+ * 工作流插件处理函数
+ * 1. 系统工具 systemTool- 转发到 dispatchRunTool （为了兼容旧的数据）
+ * 2. personal （自己的插件）
+ * 3. commercial （系统级别的工作流插件）
+ */
 export const dispatchRunPlugin = async (props: RunPluginProps): Promise<RunPluginResponse> => {
   const {
     node: { pluginId, version },
@@ -79,7 +90,7 @@ export const dispatchRunPlugin = async (props: RunPluginProps): Promise<RunPlugi
       return getNodeErrResponse({ error: 'pluginId can not find' });
     }
 
-    /*
+    /**
       1. Team app (personal): 走 team 权限校验
       2. Admin selected system tool (commercial): 系统级工具，不做用户态权限校验
     */
@@ -116,11 +127,15 @@ export const dispatchRunPlugin = async (props: RunPluginProps): Promise<RunPlugi
         hasTokenFee: false
       };
     } else {
+      const systemToolRepo = SystemToolRepo.getInstance();
       // commercial: 通过系统工具加载（内部会解析 associatedPluginId 对应的 app 版本）
-      const systemTool = await getSystemToolByIdAndVersionId(pluginId, version);
+      const systemTool = await systemToolRepo.getSystemToolWorkflowRuntime({
+        pluginId,
+        version
+      });
 
       workflowTool = {
-        id: systemTool.id,
+        id: pluginId,
         teamId: systemTool.teamId,
         tmbId: systemTool.tmbId,
         name: parseI18nString(systemTool.name, props.lang),
@@ -128,9 +143,10 @@ export const dispatchRunPlugin = async (props: RunPluginProps): Promise<RunPlugi
         showStatus: true,
         currentCost: systemTool.currentCost ?? 0,
         systemKeyCost: systemTool.systemKeyCost ?? 0,
-        nodes: systemTool.workflow.nodes,
-        edges: systemTool.workflow.edges,
-        hasTokenFee: !!systemTool.hasTokenFee
+        nodes: systemTool.nodes,
+        edges: systemTool.edges,
+        hasTokenFee: !!systemTool.hasTokenFee,
+        associatedPluginId: systemTool.associatedPluginId
       };
     }
 
@@ -176,20 +192,38 @@ export const dispatchRunPlugin = async (props: RunPluginProps): Promise<RunPlugi
     });
 
     const { externalProvider } = await getUserChatInfo(runningAppInfo.tmbId);
-    const runtimeVariables = {
-      ...filterSystemVariables(props.variables),
-      appId: String(workflowTool.id),
-      ...(externalProvider ? externalProvider.externalWorkflowVariables : {})
+    const childRunningAppInfo = {
+      id: String(workflowTool.id),
+      name: workflowTool.name,
+      teamId: workflowTool.teamId || runningAppInfo.teamId,
+      tmbId: workflowTool.tmbId || runningAppInfo.tmbId,
+      isChildApp: true
     };
+    const childVariableState = await WorkflowVariableState.create({
+      timezone: props.timezone,
+      runningAppInfo: childRunningAppInfo,
+      uid: props.uid,
+      chatId: props.chatId,
+      responseChatItemId: props.responseChatItemId,
+      histories: props.histories,
+      variablesConfig: [],
+      inputVariables: {},
+      externalVariables: externalProvider?.externalWorkflowVariables,
+      sourceVariableState: props.variableState
+    });
+    const runtimeVariables = childVariableState.toRuntimeRecord();
+    const shouldStoreChildNodeResponses = !workflowTool.associatedPluginId;
     const {
-      flowResponses,
       flowUsages,
       assistantResponses,
       runTimes,
       system_memories,
+      runtimeNodeResponseSummary,
       [DispatchNodeResponseKeyEnum.customFeedbacks]: customFeedbacks
     } = await runWorkflow({
       ...props,
+      // 系统级 workflow tool 只保留工具节点自身的响应，不展开保存其内部 workflow 详情。
+      ...(shouldStoreChildNodeResponses ? {} : { nodeResponseWriter: undefined }),
       // Rewrite stream mode
       ...(system_forbid_stream
         ? {
@@ -205,7 +239,7 @@ export const dispatchRunPlugin = async (props: RunPluginProps): Promise<RunPlugi
         tmbId: workflowTool.tmbId || runningAppInfo.tmbId,
         isChildApp: true
       },
-      variables: runtimeVariables,
+      variableState: childVariableState,
       query: serverGetWorkflowToolRunUserQuery({
         pluginInputs: getWorkflowToolInputsFromStoreNodes(workflowTool.nodes),
         variables: runtimeVariables,
@@ -215,12 +249,15 @@ export const dispatchRunPlugin = async (props: RunPluginProps): Promise<RunPlugi
       runtimeNodes,
       runtimeEdges: storeEdges2RuntimeEdges(workflowTool.edges)
     });
-    const output = flowResponses.find((item) => item.moduleType === FlowNodeTypeEnum.pluginOutput);
+    const runtimeSummary = getRuntimeNodeResponseSummary({
+      runtimeNodeResponseSummary
+    });
+    const pluginOutput = runtimeSummary.pluginOutput;
 
     const usagePoints = await computedAppToolUsage({
       plugin: workflowTool,
       childrenUsage: flowUsages,
-      error: !!output?.pluginOutput?.error
+      error: !!pluginOutput?.error
     });
     // Child run not push usage
     props.usagePush([
@@ -229,9 +266,10 @@ export const dispatchRunPlugin = async (props: RunPluginProps): Promise<RunPlugi
         totalPoints: usagePoints
       }
     ]);
+    const childResponseCount = runtimeSummary.childResponseCount;
 
     return {
-      data: output ? output.pluginOutput : {},
+      data: pluginOutput || {},
       // 嵌套运行时，如果 childApp stream=false，实际上不会有任何内容输出给用户，所以不需要存储
       assistantResponses: system_forbid_stream ? [] : assistantResponses,
       system_memories,
@@ -241,16 +279,14 @@ export const dispatchRunPlugin = async (props: RunPluginProps): Promise<RunPlugi
         moduleLogo: workflowTool.avatar,
         totalPoints: usagePoints,
         toolInput: data,
-        pluginOutput: output?.pluginOutput,
-        pluginDetail: toolData?.permission?.hasWritePer // Not system workflowTool
-          ? flowResponses
-          : undefined
+        pluginOutput,
+        childResponseCount
       },
-      [DispatchNodeResponseKeyEnum.toolResponses]: output?.pluginOutput
-        ? Object.keys(output.pluginOutput)
+      [DispatchNodeResponseKeyEnum.toolResponse]: pluginOutput
+        ? Object.keys(pluginOutput)
             .filter((key) => outputFilterMap[key])
             .reduce<Record<string, any>>((acc, key) => {
-              acc[key] = output.pluginOutput![key];
+              acc[key] = pluginOutput[key];
               return acc;
             }, {})
         : undefined,

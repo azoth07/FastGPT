@@ -1,10 +1,11 @@
 import React, { forwardRef } from 'react';
-import { Flex, Box, type BoxProps, HStack } from '@chakra-ui/react';
+import { Box, type BoxProps, HStack } from '@chakra-ui/react';
 import MyIcon from '../Icon';
 
 type Props<T = string> = Omit<BoxProps, 'onChange'> & {
   list: {
     icon?: string;
+    iconSize?: string;
     label: string | React.ReactNode;
     value: T;
   }[];
@@ -13,6 +14,9 @@ type Props<T = string> = Omit<BoxProps, 'onChange'> & {
   iconSize?: string;
   labelSize?: string;
   iconGap?: number;
+  itemHeight?: string;
+  outerPadding?: string;
+  outerHeight?: string;
 };
 
 const FillRowTabs = (
@@ -25,6 +29,9 @@ const FillRowTabs = (
     iconSize = '18px',
     labelSize = 'sm',
     iconGap = 2,
+    itemHeight,
+    outerPadding,
+    outerHeight,
     ...props
   }: Props,
   ref: React.Ref<HTMLDivElement>
@@ -35,9 +42,17 @@ const FillRowTabs = (
       display={'inline-flex'}
       px={'3px'}
       py={'3px'}
+      {...(outerPadding ? { p: outerPadding } : {})}
       borderRadius={'sm'}
       borderWidth={'1px'}
       borderColor={'myGray.200'}
+      {...(outerHeight
+        ? {
+            h: outerHeight,
+            borderWidth: 0,
+            boxShadow: 'inset 0 0 0 1px var(--chakra-colors-myGray-200)'
+          }
+        : {})}
       bg={'myGray.50'}
       gap={'4px'}
       fontSize={'sm'}
@@ -54,6 +69,7 @@ const FillRowTabs = (
           borderRadius={'xs'}
           px={px}
           py={py}
+          {...(itemHeight ? { h: itemHeight } : {})}
           userSelect={'none'}
           whiteSpace={'noWrap'}
           gap={iconGap}
@@ -71,8 +87,16 @@ const FillRowTabs = (
                 onClick: () => onChange(item.value)
               })}
         >
-          {item.icon && <MyIcon name={item.icon as any} w={iconSize} />}
-          <Box fontSize={labelSize}>{item.label}</Box>
+          {item.icon && (
+            <MyIcon
+              name={item.icon as any}
+              w={item.iconSize || iconSize}
+              h={item.iconSize || iconSize}
+            />
+          )}
+          {item.label !== undefined && item.label !== '' && (
+            <Box fontSize={labelSize}>{item.label}</Box>
+          )}
         </HStack>
       ))}
     </Box>

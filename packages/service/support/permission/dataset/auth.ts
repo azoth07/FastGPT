@@ -19,7 +19,7 @@ import { MongoDatasetData } from '../../../core/dataset/data/schema';
 import { type AuthModeType, type AuthResponseType } from '../type';
 import { DatasetTypeEnum } from '@fastgpt/global/core/dataset/constants';
 import { type ParentIdType } from '@fastgpt/global/common/parentFolder/type';
-import { i18nT } from '../../../../web/i18n/utils';
+import { i18nT } from '@fastgpt/global/common/i18n/utils';
 import { parseHeaderCert } from '../auth/common';
 import { sumPer } from '@fastgpt/global/support/permission/utils';
 import { getS3DatasetSource } from '../../../common/s3/sources/dataset';
@@ -138,7 +138,6 @@ export const authDataset = async ({
 export async function authDatasetCollection({
   collectionId,
   per = NullPermissionVal,
-  isRoot = false,
   ...props
 }: AuthModeType & {
   collectionId: string;
@@ -161,6 +160,11 @@ export async function authDatasetCollection({
     per,
     isRoot: isRootFromHeader
   });
+
+  // collection 与 dataset 必须属于同一团队；否则说明对象归属已经损坏，不能继续按 datasetId 授权。
+  if (String(collection.teamId) !== String(dataset.teamId)) {
+    return Promise.reject(DatasetErrEnum.unAuthDataset);
+  }
 
   return {
     userId,

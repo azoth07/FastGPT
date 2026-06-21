@@ -1,6 +1,9 @@
-import React from 'react';
-import { type SearchDataResponseItemType } from '@fastgpt/global/core/dataset/type';
-import { type GetQuoteProps } from '@/web/core/chat/context/chatItemContext';
+import React, { useEffect, useState } from 'react';
+import { type SearchDataResponseQuoteListItemType } from '@fastgpt/global/core/dataset/type';
+import {
+  type GetCollectionQuoteDataProps,
+  type GetQuoteProps
+} from '@/web/core/chat/context/chatItemContext';
 import CollectionQuoteReader from './CollectionQuoteReader';
 import QuoteReader from './QuoteReader';
 
@@ -9,14 +12,46 @@ const ChatQuoteList = ({
   metadata,
   onClose
 }: {
-  rawSearch: SearchDataResponseItemType[];
+  rawSearch: SearchDataResponseQuoteListItemType[];
   metadata: GetQuoteProps;
   onClose: () => void;
 }) => {
-  if ('collectionId' in metadata) {
-    return <CollectionQuoteReader rawSearch={rawSearch} metadata={metadata} onClose={onClose} />;
-  } else if ('collectionIdList' in metadata) {
-    return <QuoteReader rawSearch={rawSearch} metadata={metadata} onClose={onClose} />;
+  const [activeMetadata, setActiveMetadata] = useState<GetQuoteProps>(metadata);
+  const [canBackToQuoteList, setCanBackToQuoteList] = useState(false);
+
+  useEffect(() => {
+    setActiveMetadata(metadata);
+    setCanBackToQuoteList(false);
+  }, [metadata]);
+
+  if ('collectionId' in activeMetadata) {
+    return (
+      <CollectionQuoteReader
+        rawSearch={rawSearch}
+        metadata={activeMetadata}
+        onClose={onClose}
+        onBack={
+          canBackToQuoteList
+            ? () => {
+                setActiveMetadata(metadata);
+                setCanBackToQuoteList(false);
+              }
+            : undefined
+        }
+      />
+    );
+  } else if ('collectionIdList' in activeMetadata) {
+    return (
+      <QuoteReader
+        rawSearch={rawSearch}
+        metadata={activeMetadata}
+        onClose={onClose}
+        onOpenCollectionQuote={(nextMetadata: GetCollectionQuoteDataProps) => {
+          setActiveMetadata(nextMetadata);
+          setCanBackToQuoteList(true);
+        }}
+      />
+    );
   }
 
   return null;
