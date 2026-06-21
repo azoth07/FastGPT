@@ -138,11 +138,9 @@ const defaultFeConfigs: FastGPTFeConfigsType = {
   },
   scripts: [],
   favicon: '/favicon.ico',
-
   chineseRedirectUrl: appEnv.CHINESE_IP_REDIRECT_URL,
   uploadFileMaxSize: serviceEnv.UPLOAD_FILE_MAX_SIZE,
   uploadFileMaxAmount: serviceEnv.UPLOAD_FILE_MAX_AMOUNT
-
 };
 
 export async function initSystemConfig() {
