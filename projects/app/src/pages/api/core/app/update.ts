@@ -221,6 +221,15 @@ async function handler(req: ApiRequestProps<UpdateAppBodyType, UpdateAppQueryTyp
 
 export default NextAPI(handler);
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '20mb'
+    },
+    responseLimit: '20mb'
+  }
+};
+
 const logAppMove = ({
   tmbId,
   teamId,
